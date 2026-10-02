@@ -59,6 +59,51 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     s
 }
 
+fn download(video_id: &str, out_dir: &str) -> anyhow::Result<String> {
+    let template = format!("{out_dir}/%(id)s.%(ext)s");
+    let status = Command::new("yt-dlp")
+        .args([
+            "-f",
+            "ba[ext=m4a]/ba",
+            "-x",
+            "--audio-format",
+            "m4a",
+            "-o",
+            &template,
+            &format!("https://youtube.com/watch?v={video_id}"),
+        ])
+        .status()?;
+    anyhow::ensure!(status.success(), "yt-dlp failed");
+    Ok(format!("{out_dir}/{video_id}.m4a"))
+}
+
+use lofty::picture::{MimeType, Picture, PictureType};
+use lofty::prelude::*;
+use lofty::probe::Probe;
+
+fn tag_file(path: &str, t: &DzTrack, cover: &[u8]) -> anyhow::Result<()> {
+    let mut f = Probe::open(path)?.read()?;
+    let tag = match f.primary_tag_mut() {
+        Some(tag) => tag,
+        None => {
+            let ty = f.primary_tag_type();
+            f.insert_tag(lofty::tag::Tag::new(ty));
+            f.primary_tag_mut().unwrap()
+        }
+    };
+    tag.set_title(t.title.clone());
+    tag.set_artist(t.artist.name.clone());
+    tag.set_album(t.album.title.clone());
+    tag.push_picture(Picture::new_unchecked(
+        PictureType::CoverFront,
+        Some(MimeType::Jpeg),
+        None,
+        cover.to_vec(),
+    ));
+    tag.save_to_path(path, Default::default())?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let q = std::env::args().nth(1).expect("usage: cli <query>");
@@ -89,5 +134,28 @@ async fn main() -> anyhow::Result<()> {
         best.id,
         score(best, t)
     );
+
+    std::fs::create_dir_all("music")?;
+    let path = download(&best.id, "music")?;
+
+    let cover = reqwest::get(&t.album.cover_big).await?.bytes().await?;
+    let db = rusqlite::Connection::open("library.db")?;
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tracks (
+        id INTEGER PRIMARY KEY, title TEXT, artist TEXT, album TEXT,
+        duration INTEGER, video_id TEXT UNIQUE, path TEXT)",
+    )?;
+    db.execute(
+        "INSERT OR REPLACE INTO tracks (title, artist, album, duration, video_id, path)
+                VALUES (?1,?2,?3,?4,?5,?6)",
+        (
+            &t.title,
+            &t.artist.name,
+            &t.album.title,
+            t.duration,
+            &best.id,
+            &path,
+        ),
+    )?;
     Ok(())
 }
