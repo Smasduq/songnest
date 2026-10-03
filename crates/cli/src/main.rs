@@ -67,9 +67,22 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     s
 }
 
+/// Extra yt-dlp args from `SONGNEST_COOKIES` (default `cookies.txt`).
+/// Empty when the file doesn't exist: YouTube works until it 429s us.
+fn cookie_args() -> Vec<String> {
+    let path =
+        std::env::var("SONGNEST_COOKIES").unwrap_or_else(|_| "cookies.txt".to_string());
+    if std::path::Path::new(&path).exists() {
+        vec!["--cookies".to_string(), path]
+    } else {
+        Vec::new()
+    }
+}
+
 fn download(video_id: &str, out_dir: &str) -> anyhow::Result<String> {
     let template = format!("{out_dir}/%(id)s.%(ext)s");
     let status = Command::new("yt-dlp")
+        .args(cookie_args())
         .args([
             "-f",
             "ba[ext=m4a]/ba",
@@ -279,6 +292,7 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
 /// Returns None when the video has no Deezer match (e.g. non-music videos).
 async fn deezer_cover_for_youtube(http: &reqwest::Client, video_id: &str) -> Option<String> {
     let out = tokio::process::Command::new("yt-dlp")
+        .args(cookie_args())
         .args([
             "--get-title",
             "--no-playlist",
@@ -387,6 +401,7 @@ async fn dplayer(
     };
     // 2. same YouTube matching as the download flow, but stream only
     let out = match tokio::process::Command::new("yt-dlp")
+        .args(cookie_args())
         .args([
             "-J",
             "--flat-playlist",
@@ -488,6 +503,7 @@ async fn resolve_url(s: &AppState, id: &str) -> anyhow::Result<String> {
     }
 
     let out = tokio::process::Command::new("yt-dlp")
+        .args(cookie_args())
         .args([
             "-f",
             "ba[ext=m4a]/ba",
@@ -567,6 +583,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let out = Command::new("yt-dlp")
+        .args(cookie_args())
         .args([
             "-J",
             "--flat-playlist",
