@@ -140,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
 
     let cover = reqwest::get(&t.album.cover_big).await?.bytes().await?;
     let db = rusqlite::Connection::open("library.db")?;
+
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracks (
         id INTEGER PRIMARY KEY, title TEXT, artist TEXT, album TEXT,
@@ -157,5 +158,41 @@ async fn main() -> anyhow::Result<()> {
             &path,
         ),
     )?;
+
+    use axum::{
+        Router,
+        body::Body,
+        extract::{Path, State},
+        http::Request,
+        response::IntoResponse,
+        routing::get,
+    };
+    use std::sync::{Arc, Mutex};
+    use tower::ServiceExt;
+    use tower_http::services::ServeFile;
+
+    type Db = Arc<Mutex<rusqlite::Connection>>;
+
+    async fn track(
+        State(db): State<Db>,
+        Path(id): Path<i64>,
+        req: Request<Body>,
+    ) -> impl IntoResponse {
+        let path: String = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or_default();
+        ServeFile::new(path).oneshot(req).await.unwrap()
+    }
+
+    async fn serve() -> anyhow::Result<()> {
+        let db: Db = Arc::new(Mutex::new(rusqlite::Connection::open("library.db")?));
+        let app = Router::new().route("/track/:id", get(track)).with_state(db);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:8787").await?;
+        axum::serve(listener, app).await?;
+        Ok(())
+    }
+
     Ok(())
 }
