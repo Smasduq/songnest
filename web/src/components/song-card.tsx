@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { motion, useMotionValue, useTransform } from "framer-motion";
 
 import { formatTime, type Song } from "@/lib/api";
 import { Check, Download, Heart, ListPlus, MoreHorizontal } from "lucide-react";
@@ -36,6 +37,10 @@ export function SongCard({
   const [pos, setPos] = useState({ top: 0, right: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // swipe-right distance drives the queue action reveal
+  const x = useMotionValue(0);
+  const actionOpacity = useTransform(x, [0, 90], [0, 1]);
+  const actionScale = useTransform(x, [0, 90], [0.6, 1]);
 
   // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
@@ -75,13 +80,30 @@ export function SongCard({
   }
 
   return (
-    <div
-      className={`group relative flex items-center gap-3 overflow-hidden rounded-2xl border p-3 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 sm:gap-4 sm:rounded-3xl sm:p-4 ${
-        active
-          ? "border-foreground/40 bg-foreground/[0.08]"
-          : "border-border/40 bg-background/60 hover:border-border/60"
-      }`}
-    ><button
+    <div className="relative">
+      {/* revealed while swiping right — Spotify style */}
+      <motion.div
+        style={{ opacity: actionOpacity, scale: actionScale }}
+        className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"
+      >
+        <ListPlus className="h-5 w-5" />
+        <span className="text-xs font-semibold">Queue</span>
+      </motion.div>
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.15}
+        dragDirectionLock
+        style={{ x }}
+        onDragEnd={(_, info) => {
+          if (info.offset.x > 90) onAddToQueue();
+        }}
+        className={`relative flex cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+          active
+            ? "border-foreground/40 bg-foreground/[0.08]"
+            : "border-border/40 bg-background/60"
+        }`}
+      ><button
         type="button"
         onClick={onPlay}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
@@ -169,6 +191,7 @@ export function SongCard({
             document.body
           )}
       </div>
+      </motion.div>
     </div>
   );
 }
