@@ -171,6 +171,18 @@ export interface DownloadJob {
   error: string;
 }
 
+export interface Health {
+  yt_dlp: string;
+  queue_depth: number;
+  cooldown_secs: number;
+}
+
+export async function fetchHealth(): Promise<Health> {
+  const r = await fetch(`${API}/api/health`);
+  if (!r.ok) throw new Error(`health: ${r.status}`);
+  return (await r.json()) as Health;
+}
+
 /** Wait until the queued job for dz finishes (or fails). */
 export async function waitForDownload(
   dz: number,

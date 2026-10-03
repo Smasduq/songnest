@@ -69,7 +69,7 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <footer className="flex h-24 flex-shrink-0 items-center gap-4 rounded-3xl border border-border/40 bg-background/70 px-5 backdrop-blur-2xl">
+    <footer className="flex h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5">
       <audio
         ref={audioRef}
         src={track?.streamUrl ?? ""}
@@ -85,13 +85,13 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
         onEnded={onEnded}
       />
 
-      <div className="flex w-64 min-w-0 items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:w-64 sm:flex-none">
         {track !== undefined ? (
           <>
             <img
               src={track.coverUrl}
               alt=""
-              className="h-14 w-14 flex-shrink-0 rounded-xl border border-border/40 object-cover"
+              className="h-11 w-11 flex-shrink-0 rounded-xl border border-border/40 object-cover sm:h-14 sm:w-14"
             />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-foreground/90">
@@ -112,7 +112,7 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full text-foreground/60 hover:text-foreground"
+            className="hidden h-8 w-8 rounded-full text-foreground/60 hover:text-foreground sm:inline-flex"
           >
             <Shuffle className="h-4 w-4" />
           </Button>
@@ -145,7 +145,7 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 rounded-full text-foreground/60 hover:text-foreground"
+            className="hidden h-8 w-8 rounded-full text-foreground/60 hover:text-foreground sm:inline-flex"
           >
             <Repeat className="h-4 w-4" />
           </Button>

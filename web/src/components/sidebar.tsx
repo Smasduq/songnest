@@ -1,4 +1,4 @@
-import { Disc3, Heart, Home, Library, Search } from "lucide-react";
+import { Heart, Home, Library, Search } from "lucide-react";
 
 export type Page = "home" | "library" | "liked";
 
@@ -26,14 +26,6 @@ export function Sidebar({
 }: Props) {
   return (
     <aside className="flex h-full w-60 flex-shrink-0 flex-col gap-1 overflow-y-auto rounded-3xl border border-border/40 bg-background/60 p-3 backdrop-blur-xl">
-      <div className="flex items-center gap-2.5 px-3 pb-4 pt-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background">
-          <Disc3 className="h-5 w-5" />
-        </span>
-        <span className="text-base font-semibold tracking-tight text-foreground">
-          songnest
-        </span>
-      </div>
       <button type="button" onClick={() => onNavigate("home")} className={linkCls(page === "home")}>
         <Home className="h-4 w-4" />
         Home

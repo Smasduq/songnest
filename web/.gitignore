@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 src-tauri/target/
 src-tauri/icons/source.png
+bin/
+src-tauri/gen/

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { formatTime, type Song } from "@/lib/api";
 import { Check, Download, Heart, ListPlus, MoreHorizontal } from "lucide-react";
@@ -32,15 +33,40 @@ export function SongCard({
   onPlay,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
     if (!open) return;
+    function place() {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r === undefined) return;
+      setPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+    }
+    place();
     function close(e: MouseEvent) {
-      if (!menuRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t))
+        setOpen(false);
+    }
+    function dismiss() {
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
     }
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [open ]);
 
   function pick(fn: () => void) {
@@ -50,7 +76,7 @@ export function SongCard({
 
   return (
     <div
-      className={`group relative flex items-center gap-4 rounded-3xl border p-4 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 ${
+      className={`group relative flex items-center gap-3 overflow-hidden rounded-2xl border p-3 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 sm:gap-4 sm:rounded-3xl sm:p-4 ${
         active
           ? "border-foreground/40 bg-foreground/[0.08]"
           : "border-border/40 bg-background/60 hover:border-border/60"
@@ -58,7 +84,7 @@ export function SongCard({
     ><button
         type="button"
         onClick={onPlay}
-        className="relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-2xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent"
+        className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
         {song.coverUrl !== "" && (
           <img
@@ -85,17 +111,23 @@ export function SongCard({
         </p>
       </button>
       {liked && <Heart className="h-4 w-4 flex-shrink-0 fill-foreground text-foreground" />}
-      <div ref={menuRef} className="relative flex-shrink-0">
+      <div className="relative flex-shrink-0">
         <button
+          ref={btnRef}
           type="button"
           aria-label="More actions"
           onClick={() => setOpen((o) => !o)}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-border/40 bg-background/60 text-foreground/70 backdrop-blur hover:text-foreground"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/40 bg-background/60 text-foreground/70 backdrop-blur hover:text-foreground sm:h-9 sm:w-9"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
-        {open && (
-          <div className="absolute right-0 top-11 z-30 w-48 overflow-hidden rounded-2xl border border-border/50 bg-background/95 p-1.5 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl">
+        {open &&
+          createPortal(
+            <div
+              ref={menuRef}
+              style={{ top: pos.top, right: pos.right }}
+              className="fixed z-[100] w-48 overflow-hidden rounded-2xl border border-border/50 bg-background/95 p-1.5 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
+            >
             <button
               type="button"
               onClick={() => pick(onToggleLike)}
@@ -133,8 +165,9 @@ export function SongCard({
               <ListPlus className="h-4 w-4" />
               Add to queue
             </button>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
       </div>
     </div>
   );

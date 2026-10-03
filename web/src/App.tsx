@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Heart, Home, Library } from "lucide-react";
+
 import { NowPlaying } from "@/components/now-playing";
 import { Sidebar, type Page } from "@/components/sidebar";
+import { Header, useTheme } from "@/components/header";
 import { PlayerBar } from "@/components/player-bar";
 import { SongCard, type DlState } from "@/components/song-card";
 import {
   dzOf,
   enqueueDownload,
+  fetchHealth,
   fetchLibrary,
   fetchLikedRows,
   fetchLikes,
@@ -16,6 +20,7 @@ import {
   searchSongs,
   setLiked,
   waitForDownload,
+  type Health,
   type LikedRow,
   type SearchHit,
   type Song,
@@ -48,6 +53,8 @@ export default function App() {
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
   const [pendingSelect, setPendingSelect] = useState<string | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
+  const { theme, setTheme } = useTheme();
 
   const playList = [...queue, ...tracks];
   const safeIndex = Math.min(activeIndex, Math.max(0, playList.length - 1));
@@ -78,6 +85,9 @@ export default function App() {
       .then(setSuggestions)
       .catch(() => setSuggestions([]));
     refreshLikes();
+    fetchHealth()
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, [refreshLibrary, refreshLikes]);
 
   // select a song once it appears in the play list (avoids stale closures)
@@ -254,7 +264,8 @@ export default function App() {
   );
 
   return (
-    <div className="flex h-screen flex-col gap-3 bg-background p-3">
+    <div className="flex h-[100dvh] flex-col gap-3 bg-background p-3">
+      <Header theme={theme} onPickTheme={setTheme} server={health} />
       <div className="flex min-h-0 flex-1 gap-3">
         <div className="hidden md:block">
           <Sidebar
@@ -268,20 +279,20 @@ export default function App() {
           />
         </div>
 
-        <main className="min-w-0 flex-1 space-y-6 overflow-y-auto rounded-3xl border border-border/40 bg-background/40 p-6 backdrop-blur-xl">
+        <main className="min-w-0 flex-1 space-y-6 overflow-y-auto rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6">
           <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              runSearch();
-            }}
-          >
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  runSearch();
+                }}
+              >
             <input
               id="songnest-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search Deezer — artist title"
-              className="h-11 flex-1 rounded-full border border-border/60 bg-background/60 px-5 text-sm text-foreground backdrop-blur placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/30"
+              className="h-11 min-w-0 flex-1 rounded-full border border-border/60 bg-background/60 px-5 text-sm text-foreground backdrop-blur placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/30"
             />
             <button
               type="submit"
@@ -421,6 +432,32 @@ export default function App() {
         onPrev={() => step(-1)}
         onEnded={() => step(1)}
       />
+
+      <nav className="flex flex-shrink-0 items-center justify-around rounded-3xl border border-border/40 bg-background/60 px-4 py-2 backdrop-blur-xl md:hidden">
+        {(
+          [
+            { id: "home", label: "Home", icon: Home },
+            { id: "library", label: "Library", icon: Library },
+            { id: "liked", label: "Liked", icon: Heart },
+          ] as const
+        ).map((item) => {
+          const Icon = item.icon;
+          const on = page === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setPage(item.id)}
+              className={`flex flex-col items-center gap-1 rounded-2xl px-5 py-1.5 text-[11px] font-medium ${
+                on ? "text-foreground" : "text-foreground/50"
+              }`}
+            >
+              <Icon className="h-5 w-5" />
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
