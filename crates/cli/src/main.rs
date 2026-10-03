@@ -12,6 +12,8 @@ struct DzTrack {
     duration: u32,
     artist: DzArtist,
     album: DzAlbum,
+    #[serde(default)]
+    preview: String,
 }
 #[derive(Deserialize)]
 struct DzArtist {
@@ -458,8 +460,10 @@ async fn dplay(
     let Ok(t): Result<DzTrack, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    // same YouTube matching as the download flow, but stream only
-    let out = match tokio::process::Command::new("yt-dlp")
+    // same YouTube matching as the download flow, but stream only.
+    // No match (or YouTube unreachable) -> fall back to Deezer's own
+    // 30s preview so every Deezer track still plays something.
+    let vid: Option<String> = match tokio::process::Command::new("yt-dlp")
         .args(cookie_args())
         .args([
             "-J",
@@ -469,31 +473,36 @@ async fn dplay(
         .output()
         .await
     {
-        Ok(o) => o,
-        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
+        Ok(o) if o.status.success() => serde_json::from_slice::<YtList>(&o.stdout)
+            .ok()
+            .and_then(|list| {
+                list.entries
+                    .iter()
+                    .max_by_key(|e| score(e, &t))
+                    .map(|e| e.id.clone())
+            }),
+        _ => None,
     };
-    if !out.status.success() {
-        return StatusCode::BAD_GATEWAY.into_response();
+    let (audio_src, note) = match vid {
+        Some(v) => (
+            format!("/stream/{v}"),
+            "Deezer match, not downloaded".to_string(),
+        ),
+        None => (
+            t.preview.clone(),
+            "30-second preview — full track not found on YouTube".to_string(),
+        ),
+    };
+    if audio_src.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
     }
-    let list: YtList = match serde_json::from_slice(&out.stdout) {
-        Ok(l) => l,
-        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
-    };
-    let Some(best) = list.entries.iter().max_by_key(|e| score(e, &t)) else {
-        // yt-dlp exits 0 with entries:[] when YouTube throttles search
-        return (
-            StatusCode::BAD_GATEWAY,
-            "YouTube search returned no candidates (throttled?) — retry later or add cookies.txt (see README)",
-        )
-            .into_response();
-    };
     axum::response::Html(format!(
         r#"\
 <h1>{artist} - {title}</h1>
-<p>{album} (Deezer match, not downloaded)</p>
+<p>{album} ({note})</p>
 <img src="{cover}" width="300">
 <br><br>
-<audio controls preload="metadata" src="/stream/{vid}" style="width:300px"></audio>
+<audio controls preload="metadata" src="{audio_src}" style="width:300px"></audio>
 <br>
 <button onclick="document.querySelector('audio').currentTime=0">seek 0%</button>
 <button onclick="let a=document.querySelector('audio');a.currentTime=(a.duration||10)*0.5">seek 50%</button>
@@ -508,7 +517,8 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
         title = esc(&t.title),
         album = esc(&t.album.title),
         cover = esc(&t.album.cover_big),
-        vid = esc(&best.id),
+        audio_src = esc(&audio_src),
+        note = esc(&note),
     ))
     .into_response()
 }
