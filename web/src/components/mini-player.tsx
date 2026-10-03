@@ -17,7 +17,14 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 24 }}
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
-      className="flex flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 py-2 pl-2 pr-3 backdrop-blur-2xl md:hidden"
+      drag="x"
+      dragConstraints={{ left: 0, right: 0 }}
+      dragElastic={0.25}
+      onDragEnd={(_, info) => {
+        if (info.offset.x < -80) st.next(true);
+        else if (info.offset.x > 80) st.prev();
+      }}
+      className="flex flex-shrink-0 cursor-grab items-center gap-3 rounded-3xl border border-border/40 bg-background/70 py-2 pl-2 pr-3 backdrop-blur-2xl active:cursor-grabbing md:hidden"
     >
       <button
         type="button"
