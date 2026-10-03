@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
 import { formatTime, type Song } from "@/lib/api";
@@ -6,6 +7,7 @@ import {
   Pause,
   Play,
   Repeat,
+  Repeat1,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -13,14 +15,25 @@ import {
   VolumeX,
 } from "lucide-react";
 
+export type RepeatMode = "off" | "all" | "one";
+
 interface Props {
   track: Song | undefined;
+  repeat: RepeatMode;
+  onCycleRepeat: () => void;
   onNext: () => void;
   onPrev: () => void;
   onEnded: () => void;
 }
 
-export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
+export function PlayerBar({
+  track,
+  repeat,
+  onCycleRepeat,
+  onNext,
+  onPrev,
+  onEnded,
+}: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -66,6 +79,51 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
     if (audio) audio.muted = next;
   }
 
+  function seekBy(seconds: number) {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+    audio.currentTime = Math.min(
+      Math.max(0, audio.currentTime + seconds),
+      audio.duration
+    );
+  }
+
+  // PC shortcuts (ignored while typing): Space play/pause, ←/→ seek 5s,
+  // N/P next/previous, M mute. "/" focuses search (handled in App).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      if (el !== null && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"))
+        return;
+      switch (e.key) {
+        case " ":
+          e.preventDefault();
+          toggle();
+          break;
+        case "ArrowRight":
+          seekBy(5);
+          break;
+        case "ArrowLeft":
+          seekBy(-5);
+          break;
+        case "n":
+        case "N":
+          onNext();
+          break;
+        case "p":
+        case "P":
+          onPrev();
+          break;
+        case "m":
+        case "M":
+          toggleMute();
+          break;
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -82,10 +140,30 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
           setCurrentTime(0);
           e.currentTarget.play().catch(() => {});
         }}
-        onEnded={onEnded}
+        onEnded={() => {
+          // repeat-one replays here (needs the element); off/all defer to App
+          if (repeat === "one") {
+            const audio = audioRef.current;
+            if (audio) {
+              audio.currentTime = 0;
+              audio.play().catch(() => {});
+              return;
+            }
+          }
+          onEnded();
+        }}
       />
 
-      <div className="flex min-w-0 flex-1 items-center gap-3 sm:w-64 sm:flex-none">
+      <motion.div
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.25}
+        onDragEnd={(_, info) => {
+          if (info.offset.x < -80) onNext();
+          else if (info.offset.x > 80) onPrev();
+        }}
+        className="flex min-w-0 flex-1 cursor-grab items-center gap-3 active:cursor-grabbing sm:w-64 sm:flex-none"
+      >
         {track !== undefined ? (
           <>
             <img
@@ -105,7 +183,7 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
         ) : (
           <p className="text-sm text-foreground/40">Nothing playing</p>
         )}
-      </div>
+      </motion.div>
 
       <div className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
         <div className="flex items-center gap-3">
@@ -145,9 +223,19 @@ export function PlayerBar({ track, onNext, onPrev, onEnded }: Props) {
           <Button
             variant="ghost"
             size="icon"
-            className="hidden h-8 w-8 rounded-full text-foreground/60 hover:text-foreground sm:inline-flex"
+            onClick={onCycleRepeat}
+            title={`Repeat: ${repeat}`}
+            className={`hidden h-8 w-8 rounded-full hover:text-foreground sm:inline-flex ${
+              repeat === "off"
+                ? "text-foreground/60"
+                : "text-foreground"
+            }`}
           >
-            <Repeat className="h-4 w-4" />
+            {repeat === "one" ? (
+              <Repeat1 className="h-4 w-4" />
+            ) : (
+              <Repeat className="h-4 w-4" />
+            )}
           </Button>
         </div>
         <div className="flex w-full max-w-xl items-center gap-2">

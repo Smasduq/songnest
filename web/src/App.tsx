@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
 import { Heart, Home, Library } from "lucide-react";
 
 import { NowPlaying } from "@/components/now-playing";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
-import { PlayerBar } from "@/components/player-bar";
+import { PlayerBar, type RepeatMode } from "@/components/player-bar";
 import { SongCard, type DlState } from "@/components/song-card";
 import {
   dzOf,
@@ -38,6 +40,22 @@ function hitToSong(h: SearchHit): Song {
   };
 }
 
+/** Fade/slide wrapper so lists animate in and out (mobile feel). */
+function Anim({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <motion.div
+      key={id}
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [tracks, setTracks] = useState<Song[]>([]);
@@ -54,6 +72,7 @@ export default function App() {
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
   const [pendingSelect, setPendingSelect] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [repeat, setRepeat] = useState<RepeatMode>("off");
   const { theme, setTheme } = useTheme();
 
   const playList = [...queue, ...tracks];
@@ -89,6 +108,22 @@ export default function App() {
       .then(setHealth)
       .catch(() => setHealth(null));
   }, [refreshLibrary, refreshLikes]);
+
+  // "/" focuses search from anywhere (except while typing)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      if (
+        e.key === "/" &&
+        (el === null || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA"))
+      ) {
+        e.preventDefault();
+        document.getElementById("songnest-search")?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   // select a song once it appears in the play list (avoids stale closures)
   useEffect(() => {
@@ -308,9 +343,15 @@ export default function App() {
                 Results
               </h2>
               <div className="grid gap-3 2xl:grid-cols-2">
-                {hits.map((h) =>
-                  cardFor(hitToSong(h), h.dz, `hit-dz:${h.dz}`, () => playHit(h))
-                )}
+                <AnimatePresence initial={false}>
+                  {hits.map((h) => (
+                    <Anim key={`hit-dz:${h.dz}`} id={`hit-dz:${h.dz}`}>
+                      {cardFor(hitToSong(h), h.dz, `hit-dz:${h.dz}`, () =>
+                        playHit(h)
+                      )}
+                    </Anim>
+                  ))}
+                </AnimatePresence>
               </div>
             </section>
           )}
@@ -328,11 +369,15 @@ export default function App() {
                 </p>
               ) : (
                 <div className="grid gap-3 2xl:grid-cols-2">
-                  {suggestions.map((h) =>
-                    cardFor(hitToSong(h), h.dz, `sug-dz:${h.dz}`, () =>
-                      playHit(h)
-                    )
-                  )}
+                  <AnimatePresence initial={false}>
+                    {suggestions.map((h) => (
+                      <Anim key={`sug-dz:${h.dz}`} id={`sug-dz:${h.dz}`}>
+                        {cardFor(hitToSong(h), h.dz, `sug-dz:${h.dz}`, () =>
+                          playHit(h)
+                        )}
+                      </Anim>
+                    ))}
+                  </AnimatePresence>
                 </div>
               )}
             </section>
@@ -352,9 +397,19 @@ export default function App() {
                 </p>
               ) : (
                 <div className="grid gap-3 2xl:grid-cols-2">
-                  {tracks.map((t) =>
-                    cardFor(t, null, `lib-${t.id}`, () => playSong(t), t.id === activeTrack?.id)
-                  )}
+                  <AnimatePresence initial={false}>
+                    {tracks.map((t) => (
+                      <Anim key={`lib-${t.id}`} id={`lib-${t.id}`}>
+                        {cardFor(
+                          t,
+                          null,
+                          `lib-${t.id}`,
+                          () => playSong(t),
+                          t.id === activeTrack?.id
+                        )}
+                      </Anim>
+                    ))}
+                  </AnimatePresence>
                 </div>
               )}
               {loadError !== null && (
@@ -376,15 +431,19 @@ export default function App() {
                 </p>
               ) : (
                 <div className="grid gap-3 2xl:grid-cols-2">
-                  {likedSongs.map((t) =>
-                    cardFor(
-                      t,
-                      dzOf(t),
-                      `liked-${t.id}`,
-                      () => playSong(t),
-                      t.id === activeTrack?.id
-                    )
-                  )}
+                  <AnimatePresence initial={false}>
+                    {likedSongs.map((t) => (
+                      <Anim key={`liked-${t.id}`} id={`liked-${t.id}`}>
+                        {cardFor(
+                          t,
+                          dzOf(t),
+                          `liked-${t.id}`,
+                          () => playSong(t),
+                          t.id === activeTrack?.id
+                        )}
+                      </Anim>
+                    ))}
+                  </AnimatePresence>
                 </div>
               )}
             </section>
@@ -423,14 +482,23 @@ export default function App() {
             const idx = queue.findIndex((t) => t.id === id);
             if (idx >= 0) setActiveIndex(idx);
           }}
+          onNext={() => step(1)}
+          onPrev={() => step(-1)}
         />
       </div>
 
       <PlayerBar
         track={activeTrack}
+        repeat={repeat}
+        onCycleRepeat={() =>
+          setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))
+        }
         onNext={() => step(1)}
         onPrev={() => step(-1)}
-        onEnded={() => step(1)}
+        onEnded={() => {
+          // repeat-one is replayed inside the player; off stops at the end
+          if (repeat === "all" || safeIndex < playList.length - 1) step(1);
+        }}
       />
 
       <nav className="flex flex-shrink-0 items-center justify-around rounded-3xl border border-border/40 bg-background/60 px-4 py-2 backdrop-blur-xl md:hidden">
