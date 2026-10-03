@@ -106,7 +106,12 @@ fn tag_file(path: &str, t: &DzTrack, cover: &[u8]) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let q = std::env::args().nth(1).expect("usage: cli <query>");
+    let arg = std::env::args().nth(1).expect("usage: cli <query> | serve");
+    if arg == "serve" {
+        return serve().await;
+    }
+    let q = arg;
+
     let res: DzSearch = reqwest::Client::new()
         .get("https://api.deezer.com/search")
         .query(&[("q", &q)])
@@ -139,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
     let path = download(&best.id, "music")?;
 
     let cover = reqwest::get(&t.album.cover_big).await?.bytes().await?;
+    tag_file(&path, t, &cover)?;
     let db = rusqlite::Connection::open("library.db")?;
 
     db.execute_batch(
@@ -146,9 +152,13 @@ async fn main() -> anyhow::Result<()> {
         id INTEGER PRIMARY KEY, title TEXT, artist TEXT, album TEXT,
         duration INTEGER, video_id TEXT UNIQUE, path TEXT)",
     )?;
+
     db.execute(
-        "INSERT OR REPLACE INTO tracks (title, artist, album, duration, video_id, path)
-                VALUES (?1,?2,?3,?4,?5,?6)",
+        "INSERT INTO tracks (title, artist, album, duration, video_id, path)
+         VALUES (?1,?2,?3,?4,?5,?6)
+         ON CONFLICT(video_id) DO UPDATE SET
+           title=excluded.title, artist=excluded.artist, album=excluded.album,
+           duration=excluded.duration, path=excluded.path",
         (
             &t.title,
             &t.artist.name,
