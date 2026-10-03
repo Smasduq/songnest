@@ -5,6 +5,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Heart, Home, Library } from "lucide-react";
 
 import { NowPlaying } from "@/components/now-playing";
+import { NowPlayingSheet } from "@/components/now-playing-sheet";
+import { MiniPlayer } from "@/components/mini-player";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { PlayerBar } from "@/components/player-bar";
@@ -68,6 +70,7 @@ export default function App() {
   const [likes, setLikes] = useState<Set<string>>(new Set());
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const { theme, setTheme } = useTheme();
 
@@ -441,6 +444,8 @@ export default function App() {
 
       <PlayerBar />
 
+      <MiniPlayer onOpen={() => setSheetOpen(true)} />
+
       <nav className="flex flex-shrink-0 items-center justify-around rounded-3xl border border-border/40 bg-background/60 px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:hidden">
         {(
           [
@@ -466,6 +471,10 @@ export default function App() {
           );
         })}
       </nav>
+
+      <AnimatePresence>
+        {sheetOpen && <NowPlayingSheet onClose={() => setSheetOpen(false)} />}
+      </AnimatePresence>
     </div>
   );
 }

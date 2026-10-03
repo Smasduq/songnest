@@ -307,3 +307,9 @@ export function useCurrentTrack(): Song | undefined {
   const all = [...queue, ...library];
   return index < all.length ? all[index] : undefined;
 }
+
+// Dev-only escape hatch for headless/browser-console tests.
+if (import.meta.env.DEV) {
+  (window as unknown as { __player: typeof usePlayer }).__player =
+    usePlayer;
+}

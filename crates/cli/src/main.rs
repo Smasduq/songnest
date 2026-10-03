@@ -1277,7 +1277,7 @@ use axum::response::Response;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-async fn resolve_url(s: &AppState, id: &str) -> anyhow::Result<String> {
+async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<String> {
     let cached = |s: &AppState| {
         s.urls
             .lock()
@@ -1286,8 +1286,10 @@ async fn resolve_url(s: &AppState, id: &str) -> anyhow::Result<String> {
             .filter(|(_, at)| at.elapsed() < Duration::from_secs(3600))
             .map(|(u, _)| u.clone())
     };
-    if let Some(u) = cached(s) {
-        return Ok(u);
+    if !fresh {
+        if let Some(u) = cached(s) {
+            return Ok(u);
+        }
     }
     // cooling down: don't burn calls, fail fast (stream() -> 502)
     if cooled_down(s).is_some() {
@@ -1332,16 +1334,32 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
             .unwrap()
             .map(Body::new);
     }
-    let Ok(url) = resolve_url(&s, &id).await else {
+    let Ok(url) = resolve_url(&s, &id, false).await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
+    let range = req.headers().get(header::RANGE).cloned();
     let mut rb = s.http.get(&url);
-    if let Some(r) = req.headers().get(header::RANGE) {
+    if let Some(r) = &range {
         rb = rb.header(header::RANGE, r);
     }
-    let Ok(up) = rb.send().await else {
-        return StatusCode::BAD_GATEWAY.into_response();
+    let mut up = match rb.send().await {
+        Ok(up) => up,
+        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
     };
+    // YouTube 403s dead/flagged media URLs: drop the cached URL, resolve
+    // once more, retry once. (Per-URL issue — not a global cooldown.)
+    if up.status() == StatusCode::FORBIDDEN {
+        s.urls.lock().unwrap().remove(&id);
+        if let Ok(fresh_url) = resolve_url(&s, &id, true).await {
+            let mut rb2 = s.http.get(&fresh_url);
+            if let Some(r) = &range {
+                rb2 = rb2.header(header::RANGE, r);
+            }
+            if let Ok(retry) = rb2.send().await {
+                up = retry;
+            }
+        }
+    }
 
     let mut out = Response::builder().status(up.status());
     for h in [

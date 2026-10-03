@@ -76,7 +76,7 @@ export function PlayerBar() {
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <footer className="flex h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5">
+    <footer className="hidden h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5 md:flex">
       <motion.div
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
