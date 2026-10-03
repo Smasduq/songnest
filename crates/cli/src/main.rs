@@ -166,7 +166,69 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
     )?;
     // best-effort migration for existing DBs; fails if column already exists
     let _ = db.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", []);
+    // Deezer track -> YouTube video match, searched once then reused
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS yt_match (
+        deezer_id INTEGER PRIMARY KEY, video_id TEXT NOT NULL,
+        score INTEGER NOT NULL, matched_at INTEGER NOT NULL)",
+    )?;
     Ok(())
+}
+
+/// Cached Deezer->YouTube match. `fresh=true` skips the cache.
+fn get_match(db: &Db, deezer_id: u64) -> Option<(String, i32)> {
+    db.lock()
+        .unwrap()
+        .query_row(
+            "SELECT video_id, score FROM yt_match WHERE deezer_id = ?1",
+            [deezer_id as i64],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok()
+}
+
+fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
+    let _ = db.lock().unwrap().execute(
+        "INSERT INTO yt_match (deezer_id, video_id, score, matched_at)
+         VALUES (?1, ?2, ?3, strftime('%s','now'))
+         ON CONFLICT(deezer_id) DO UPDATE SET
+           video_id = excluded.video_id, score = excluded.score,
+           matched_at = excluded.matched_at",
+        rusqlite::params![deezer_id as i64, video_id, score],
+    );
+}
+
+/// Run `ytsearch5` for a Deezer track and return the best video id + score.
+/// Returns None when YouTube yields nothing (throttled or truly absent).
+async fn youtube_match(
+    db: &Db,
+    t: &DzTrack,
+    fresh: bool,
+) -> Option<(String, i32)> {
+    if !fresh {
+        if let Some(hit) = get_match(db, t.id) {
+            return Some(hit);
+        }
+    }
+    let out = tokio::process::Command::new("yt-dlp")
+        .args(cookie_args())
+        .args([
+            "-J",
+            "--flat-playlist",
+            &format!("ytsearch5:{} {}", t.artist.name, t.title),
+        ])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let list: YtList = serde_json::from_slice(&out.stdout).ok()?;
+    let best = list.entries.iter().max_by_key(|e| score(e, t))?;
+    let id = best.id.clone();
+    let sc = score(best, t);
+    put_match(db, t.id, &id, sc);
+    Some((id, sc))
 }
 
 async fn track(
@@ -460,29 +522,12 @@ async fn dplay(
     let Ok(t): Result<DzTrack, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    // same YouTube matching as the download flow, but stream only.
+    // Cached match first (`?fresh=1` forces a new YouTube search).
     // No match (or YouTube unreachable) -> fall back to Deezer's own
     // 30s preview so every Deezer track still plays something.
-    let vid: Option<String> = match tokio::process::Command::new("yt-dlp")
-        .args(cookie_args())
-        .args([
-            "-J",
-            "--flat-playlist",
-            &format!("ytsearch5:{} {}", t.artist.name, t.title),
-        ])
-        .output()
-        .await
-    {
-        Ok(o) if o.status.success() => serde_json::from_slice::<YtList>(&o.stdout)
-            .ok()
-            .and_then(|list| {
-                list.entries
-                    .iter()
-                    .max_by_key(|e| score(e, &t))
-                    .map(|e| e.id.clone())
-            }),
-        _ => None,
-    };
+    let fresh = q.get("fresh").map(|v| v == "1").unwrap_or(false);
+    let vid: Option<String> =
+        youtube_match(&s.db, &t, fresh).await.map(|(v, _)| v);
     let (audio_src, note) = match vid {
         Some(v) => (
             format!("/stream/{v}"),
@@ -663,34 +708,27 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let out = Command::new("yt-dlp")
-        .args(cookie_args())
-        .args([
-            "-J",
-            "--flat-playlist",
-            &format!("ytsearch5:{} {}", t.artist.name, t.title),
-        ])
-        .output()?;
-    let list: YtList = serde_json::from_slice(&out.stdout)?;
-    let Some(best) = list.entries.iter().max_by_key(|e| score(e, t)) else {
+    let conn = rusqlite::Connection::open("library.db")?;
+    ensure_schema(&conn)?;
+    let db: Db = Arc::new(Mutex::new(conn));
+
+    // cached Deezer->YouTube match: each song is searched once
+    let Some((best_id, best_score)) = youtube_match(&db, t, false).await
+    else {
         // yt-dlp exits 0 with entries:[] when YouTube throttles search
-        anyhow::bail!("YouTube search returned no candidates (throttled?) — retry later or add cookies.txt");
+        anyhow::bail!(
+            "YouTube search returned no candidates (throttled?) — retry later or add cookies.txt"
+        );
     };
-    println!(
-        "best: https://youtube.com/watch?v={} (score {})",
-        best.id,
-        score(best, t)
-    );
+    println!("best: https://youtube.com/watch?v={best_id} (score {best_score})");
 
     std::fs::create_dir_all("music")?;
-    let path = download(&best.id, "music")?;
+    let path = download(&best_id, "music")?;
 
     let cover = reqwest::get(&t.album.cover_big).await?.bytes().await?;
     tag_file(&path, t, &cover)?;
-    let db = rusqlite::Connection::open("library.db")?;
-    ensure_schema(&db)?;
 
-    db.execute(
+    db.lock().unwrap().execute(
         "INSERT INTO tracks (title, artist, album, duration, video_id, path, cover_url)
          VALUES (?1,?2,?3,?4,?5,?6,?7)
          ON CONFLICT(video_id) DO UPDATE SET
@@ -701,7 +739,7 @@ async fn main() -> anyhow::Result<()> {
             &t.artist.name,
             &t.album.title,
             t.duration,
-            &best.id,
+            &best_id,
             &path,
             &t.album.cover_big,
         ),
