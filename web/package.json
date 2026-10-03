@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "desktop:sidecar": "cargo build --release -p songnest-cli && mkdir -p src-tauri/bin && cp ../target/release/songnest-cli src-tauri/bin/songnest-cli",
+    "desktop:build": "npm run desktop:sidecar && tauri build"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",

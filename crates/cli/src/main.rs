@@ -1359,8 +1359,24 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let arg = std::env::args().nth(1).expect("usage: cli <query> | serve");
+    let args: Vec<String> = std::env::args().collect();
+    let arg = args.get(1).expect("usage: cli <query> | serve [--data-dir DIR]");
     if arg == "serve" {
+        // desktop mode: keep library.db/music/cookies.txt in the app data dir
+        let dir = std::env::var("SONGNEST_DATA_DIR").ok().or_else(|| {
+            args.windows(2).find_map(|w| {
+                if w[0] == "--data-dir" {
+                    Some(w[1].clone())
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(dir) = dir {
+            std::fs::create_dir_all(&dir)?;
+            std::env::set_current_dir(&dir)?;
+            eprintln!("songnest data dir: {}", dir);
+        }
         return serve().await;
     }
     let q = arg;
