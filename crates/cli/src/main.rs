@@ -34,6 +34,14 @@ struct YtEntry {
     channel: Option<String>,
 }
 
+#[derive(Clone)]
+struct AppState {
+    db: Db,
+    http: reqwest::Client,
+    urls: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    resolve_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
 fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     let mut s = 0;
     if let Some(d) = e.duration {
@@ -129,13 +137,16 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn track(State(s): State<AppState>, Path(id): Path<i64>, req: Request<Body>) -> impl IntoResponse {
-    let path: String = s
-        .db
-        .lock()
-        .unwrap()
-        .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
-        .unwrap_or_default();
+async fn track(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    req: Request<Body>,
+) -> impl IntoResponse {
+    let path: String =
+        s.db.lock()
+            .unwrap()
+            .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or_default();
     ServeFile::new(path).oneshot(req).await.unwrap()
 }
 
@@ -147,6 +158,7 @@ async fn serve() -> anyhow::Result<()> {
         db,
         http: reqwest::Client::new(),
         urls: Arc::new(Mutex::new(HashMap::new())),
+        resolve_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
     let app = Router::new()
         .route("/", get(index))
@@ -174,12 +186,16 @@ async fn index(State(s): State<AppState>) -> impl IntoResponse {
         .db
         .lock()
         .unwrap()
-        .prepare("SELECT id, title, artist, video_id, COALESCE(cover_url,'') FROM tracks ORDER BY id")
+        .prepare(
+            "SELECT id, title, artist, video_id, COALESCE(cover_url,'') FROM tracks ORDER BY id",
+        )
         .map(|mut st| {
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
-                .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+            st.query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
         })
         .unwrap_or_default();
     let mut items = String::new();
@@ -299,17 +315,16 @@ async fn deezer_cover_for_youtube(http: &reqwest::Client, video_id: &str) -> Opt
 async fn stream_player(State(s): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     let vid = esc(&id);
     // 1. song metadata first: exact Deezer cover stored at download time
-    let db_cover: Option<String> = s
-        .db
-        .lock()
-        .unwrap()
-        .query_row(
-            "SELECT cover_url FROM tracks WHERE video_id = ?1",
-            [&id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
+    let db_cover: Option<String> =
+        s.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT cover_url FROM tracks WHERE video_id = ?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
     // 2. fallback: YouTube title -> Deezer search
     let cover = match db_cover.filter(|c| !c.is_empty()) {
         Some(c) => Some(c),
@@ -342,7 +357,10 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
 /// Deezer-first stream player: take the song's metadata from Deezer,
 /// use its cover_big, resolve the same track's YouTube audio, stream it.
 /// Nothing is downloaded or stored.
-async fn dplayer(State(s): State<AppState>, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
+async fn dplayer(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
     let query = q.get("q").cloned().unwrap_or_default();
     if query.trim().is_empty() {
         return axum::response::Html(
@@ -417,12 +435,11 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
 }
 
 async fn cover(State(s): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
-    let path: Option<String> = s
-        .db
-        .lock()
-        .unwrap()
-        .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
-        .ok();
+    let path: Option<String> =
+        s.db.lock()
+            .unwrap()
+            .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+            .ok();
     let Some(path) = path else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -453,19 +470,23 @@ use axum::response::Response;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-#[derive(Clone)]
-struct AppState {
-    db: Db,
-    http: reqwest::Client,
-    urls: Arc<Mutex<HashMap<String, (String, Instant)>>>,
-}
-
 async fn resolve_url(s: &AppState, id: &str) -> anyhow::Result<String> {
-    if let Some((u, at)) = s.urls.lock().unwrap().get(id) {
-        if at.elapsed() < Duration::from_secs(3600) {
-            return Ok(u.clone());
-        }
+    let cached = |s: &AppState| {
+        s.urls
+            .lock()
+            .unwrap()
+            .get(id)
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(3600))
+            .map(|(u, _)| u.clone())
+    };
+    if let Some(u) = cached(s) {
+        return Ok(u);
     }
+    let _guard = s.resolve_lock.lock().await; // one resolver at a time
+    if let Some(u) = cached(s) {
+        return Ok(u); // someone else may have finished while we waited
+    }
+
     let out = tokio::process::Command::new("yt-dlp")
         .args([
             "-f",
