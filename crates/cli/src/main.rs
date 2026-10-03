@@ -480,7 +480,12 @@ async fn dplay(
         Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
     };
     let Some(best) = list.entries.iter().max_by_key(|e| score(e, &t)) else {
-        return StatusCode::NOT_FOUND.into_response();
+        // yt-dlp exits 0 with entries:[] when YouTube throttles search
+        return (
+            StatusCode::BAD_GATEWAY,
+            "YouTube search returned no candidates (throttled?) — retry later or add cookies.txt (see README)",
+        )
+            .into_response();
     };
     axum::response::Html(format!(
         r#"\
@@ -657,7 +662,10 @@ async fn main() -> anyhow::Result<()> {
         ])
         .output()?;
     let list: YtList = serde_json::from_slice(&out.stdout)?;
-    let best = list.entries.iter().max_by_key(|e| score(e, t)).unwrap();
+    let Some(best) = list.entries.iter().max_by_key(|e| score(e, t)) else {
+        // yt-dlp exits 0 with entries:[] when YouTube throttles search
+        anyhow::bail!("YouTube search returned no candidates (throttled?) — retry later or add cookies.txt");
+    };
     println!(
         "best: https://youtube.com/watch?v={} (score {})",
         best.id,
