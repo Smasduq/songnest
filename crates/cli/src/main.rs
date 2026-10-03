@@ -7,6 +7,7 @@ struct DzSearch {
 }
 #[derive(Deserialize)]
 struct DzTrack {
+    id: u64,
     title: String,
     duration: u32,
     artist: DzArtist,
@@ -52,6 +53,22 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         .map_or(false, |c| c.ends_with("- Topic"))
     {
         s += 20;
+    }
+    // same-name guard: the artist must actually match, not just the title
+    let artist = t.artist.name.to_lowercase();
+    if !artist.is_empty() {
+        let chan = e.channel.as_deref().unwrap_or("").to_lowercase();
+        if chan.starts_with(&artist) {
+            s += 30;
+        } else if chan.contains(&artist) {
+            s += 15;
+        } else {
+            s -= 25;
+        }
+        let title = e.title.to_lowercase();
+        if title.contains(&artist) {
+            s += 10;
+        }
     }
     let title = e.title.to_lowercase();
     if title.contains("official audio") {
@@ -181,6 +198,7 @@ async fn serve() -> anyhow::Result<()> {
         .route("/player/:id", get(player))
         .route("/s/:id", get(stream_player))
         .route("/d", get(dplayer))
+        .route("/dplay", get(dplay))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8787").await?;
     axum::serve(listener, app).await?;
@@ -368,9 +386,8 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
     ))
 }
 
-/// Deezer-first stream player: take the song's metadata from Deezer,
-/// use its cover_big, resolve the same track's YouTube audio, stream it.
-/// Nothing is downloaded or stored.
+/// Deezer-first search: same-name songs need a human pick, so list the
+/// top candidates with their exact metadata instead of auto-playing #1.
 async fn dplayer(
     State(s): State<AppState>,
     Query(q): Query<HashMap<String, String>>,
@@ -383,7 +400,6 @@ async fn dplayer(
         )
         .into_response();
     }
-    // 1. song metadata + cover from Deezer
     let Ok(resp) = s
         .http
         .get("https://api.deezer.com/search")
@@ -396,10 +412,53 @@ async fn dplayer(
     let Ok(res): Result<DzSearch, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    let Some(t) = res.data.first() else {
+    if res.data.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
+    }
+    let mut items = String::new();
+    for t in res.data.iter().take(5) {
+        items.push_str(&format!(
+            "<li><img src=\"{cover}\" width=\"64\" height=\"64\" style=\"vertical-align:middle\"> \
+             <a href=\"/dplay?dz={id}\">{artist} - {title}</a> \
+             <small>{album} ({dur}s)</small></li>",
+            id = t.id,
+            cover = esc(&t.album.cover_big),
+            artist = esc(&t.artist.name),
+            title = esc(&t.title),
+            album = esc(&t.album.title),
+            dur = t.duration,
+        ));
+    }
+    axum::response::Html(format!(
+        "<h1>pick the song for \"{q}\"</h1><ul>{items}</ul><p><a href=\"/\">back</a></p>",
+        q = esc(&query),
+        items = items,
+    ))
+    .into_response()
+}
+
+/// Play one exact Deezer track: its metadata + cover, YouTube audio
+/// matched with artist-aware scoring. Nothing is downloaded or stored.
+async fn dplay(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let dzid: u64 = match q.get("dz").and_then(|v| v.parse().ok()) {
+        Some(id) => id,
+        None => return StatusCode::BAD_REQUEST.into_response(),
     };
-    // 2. same YouTube matching as the download flow, but stream only
+    let Ok(resp) = s
+        .http
+        .get(format!("https://api.deezer.com/track/{dzid}"))
+        .send()
+        .await
+    else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(t): Result<DzTrack, _> = resp.json().await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    // same YouTube matching as the download flow, but stream only
     let out = match tokio::process::Command::new("yt-dlp")
         .args(cookie_args())
         .args([
@@ -420,7 +479,7 @@ async fn dplayer(
         Ok(l) => l,
         Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
     };
-    let Some(best) = list.entries.iter().max_by_key(|e| score(e, t)) else {
+    let Some(best) = list.entries.iter().max_by_key(|e| score(e, &t)) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     axum::response::Html(format!(
@@ -581,6 +640,13 @@ async fn main() -> anyhow::Result<()> {
         "{} - {} [{}] ({}s)",
         t.artist.name, t.title, t.album.title, t.duration
     );
+    // same-name transparency: show what else Deezer found
+    for other in res.data.iter().skip(1).take(3) {
+        println!(
+            "  also: {} - {} [{}] ({}s)",
+            other.artist.name, other.title, other.album.title, other.duration
+        );
+    }
 
     let out = Command::new("yt-dlp")
         .args(cookie_args())
