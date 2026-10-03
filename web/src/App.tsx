@@ -7,8 +7,9 @@ import { Heart, Home, Library } from "lucide-react";
 import { NowPlaying } from "@/components/now-playing";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
-import { PlayerBar, type RepeatMode } from "@/components/player-bar";
+import { PlayerBar } from "@/components/player-bar";
 import { SongCard, type DlState } from "@/components/song-card";
+import { useCurrentTrack, usePlayer } from "@/player/store";
 import {
   dzOf,
   enqueueDownload,
@@ -58,9 +59,6 @@ function Anim({ id, children }: { id: string; children: ReactNode }) {
 
 export default function App() {
   const [page, setPage] = useState<Page>("home");
-  const [tracks, setTracks] = useState<Song[]>([]);
-  const [queue, setQueue] = useState<Song[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -70,22 +68,25 @@ export default function App() {
   const [likes, setLikes] = useState<Set<string>>(new Set());
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
-  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
-  const [repeat, setRepeat] = useState<RepeatMode>("off");
   const { theme, setTheme } = useTheme();
 
-  const playList = [...queue, ...tracks];
-  const safeIndex = Math.min(activeIndex, Math.max(0, playList.length - 1));
-  const activeTrack = playList[safeIndex];
+  // playback state lives in the zustand store (audio element is module-level)
+  const queue = usePlayer((s) => s.queue);
+  const library = usePlayer((s) => s.library);
+  const index = usePlayer((s) => s.index);
+  const activeTrack = useCurrentTrack();
+  // playback actions (stable refs from the store — safe to call anywhere)
+  const store = usePlayer;
 
   const refreshLibrary = useCallback(async () => {
     try {
-      setTracks(await fetchLibrary());
+      store.getState().setLibrary(await fetchLibrary());
       setLoadError(null);
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "library failed");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshLikes = useCallback(async () => {
@@ -125,16 +126,6 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // select a song once it appears in the play list (avoids stale closures)
-  useEffect(() => {
-    if (pendingSelect === null) return;
-    const idx = playList.findIndex((t) => t.id === pendingSelect);
-    if (idx >= 0) {
-      setActiveIndex(idx);
-      setPendingSelect(null);
-    }
-  }, [playList, pendingSelect]);
-
   const runSearch = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
@@ -148,72 +139,34 @@ export default function App() {
     }
   }, [query]);
 
-  function queueSong(song: Song) {
-    setQueue((prev) => {
-      if (prev.some((t) => t.id === song.id)) return prev;
-      return [...prev, song];
-    });
-    setPendingSelect(song.id);
-  }
-
   async function playHit(hit: SearchHit) {
-    try {
-      queueSong(await resolveTrack(hit.dz));
-      setHits([]);
-      setQuery("");
-    } catch {
-      // resolve failed (throttled?) — leave everything untouched
-    }
+    await store.getState().playDz(hit.dz);
+    setHits([]);
+    setQuery("");
   }
 
   function playSong(song: Song) {
     if (song.streamUrl !== "") {
-      const idx = playList.findIndex((t) => t.id === song.id);
-      if (idx >= 0) {
-        setActiveIndex(idx);
-        return;
-      }
+      store.getState().playTrack(song);
+      return;
     }
     const dz = dzOf(song);
     if (dz !== null) {
-      resolveTrack(dz).then(queueSong).catch(() => {});
+      void store.getState().playDz(dz);
     } else {
-      queueSong(song);
+      store.getState().playTrack(song);
     }
-  }
-
-  function step(delta: 1 | -1) {
-    if (playList.length === 0) return;
-    setActiveIndex(
-      (safeIndex + delta + playList.length) % playList.length
-    );
   }
 
   function addToQueue(song: Song) {
     const dz = dzOf(song);
     if (dz !== null && song.streamUrl === "") {
       resolveTrack(dz)
-        .then((full) =>
-          setQueue((prev) =>
-            prev.some((t) => t.id === full.id) ? prev : [...prev, full]
-          )
-        )
+        .then((full) => store.getState().enqueue(full))
         .catch(() => {});
     } else {
-      setQueue((prev) =>
-        prev.some((t) => t.id === song.id) ? prev : [...prev, song]
-      );
+      store.getState().enqueue(song);
     }
-  }
-
-  function removeFromQueue(id: string) {
-    setQueue((prev) => {
-      const idx = prev.findIndex((t) => t.id === id);
-      if (idx < 0) return prev;
-      const next = prev.filter((t) => t.id !== id);
-      if (idx < activeIndex) setActiveIndex((a) => Math.max(0, a - 1));
-      return next;
-    });
   }
 
   async function toggleLike(song: Song) {
@@ -286,7 +239,7 @@ export default function App() {
           streamUrl: "",
         }
       : (
-          tracks.find((t) => t.id === `db-${r.key.slice(3)}`) ?? {
+          library.find((t) => t.id === `db-${r.key.slice(3)}`) ?? {
             id: r.key,
             title: r.title,
             artist: r.artist,
@@ -309,19 +262,19 @@ export default function App() {
             onSearchFocus={() =>
               document.getElementById("songnest-search")?.focus()
             }
-            libraryCount={tracks.length}
+            libraryCount={library.length}
             likedCount={likes.size}
           />
         </div>
 
         <main className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6">
           <form
-                className="flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  runSearch();
-                }}
-              >
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSearch();
+            }}
+          >
             <input
               id="songnest-search"
               value={query}
@@ -390,7 +343,7 @@ export default function App() {
               </h2>
               {loading ? (
                 <p className="text-sm text-foreground/60">Loading library…</p>
-              ) : tracks.length === 0 ? (
+              ) : library.length === 0 ? (
                 <p className="text-sm text-foreground/60">
                   Nothing downloaded yet — pick a song below or search above,
                   then ⋯ → Download.
@@ -398,7 +351,7 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
-                    {tracks.map((t) => (
+                    {library.map((t) => (
                       <Anim key={`lib-${t.id}`} id={`lib-${t.id}`}>
                         {cardFor(
                           t,
@@ -469,37 +422,24 @@ export default function App() {
           onDownload={() => {
             if (activeTrack !== undefined) {
               const dz = dzOf(activeTrack);
-              if (dz !== null)
-                downloadSong(dz, `np-${activeTrack.id}`);
+              if (dz !== null) downloadSong(dz, `np-${activeTrack.id}`);
             }
           }}
           queue={queue}
           activeQueueId={
-            activeIndex < queue.length ? queue[activeIndex].id : null
+            index < queue.length ? queue[index].id : null
           }
-          onRemoveFromQueue={removeFromQueue}
+          onRemoveFromQueue={(id) => store.getState().removeFromQueue(id)}
           onPlayQueued={(id) => {
-            const idx = queue.findIndex((t) => t.id === id);
-            if (idx >= 0) setActiveIndex(idx);
+            const found = queue.find((t) => t.id === id);
+            if (found) store.getState().playTrack(found);
           }}
-          onNext={() => step(1)}
-          onPrev={() => step(-1)}
+          onNext={() => store.getState().next(true)}
+          onPrev={() => store.getState().prev()}
         />
       </div>
 
-      <PlayerBar
-        track={activeTrack}
-        repeat={repeat}
-        onCycleRepeat={() =>
-          setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))
-        }
-        onNext={() => step(1)}
-        onPrev={() => step(-1)}
-        onEnded={() => {
-          // repeat-one is replayed inside the player; off stops at the end
-          if (repeat === "all" || safeIndex < playList.length - 1) step(1);
-        }}
-      />
+      <PlayerBar />
 
       <nav className="flex flex-shrink-0 items-center justify-around rounded-3xl border border-border/40 bg-background/60 px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:hidden">
         {(
