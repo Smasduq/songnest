@@ -15,4 +15,4 @@ lofty = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
 axum = "0.7"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }

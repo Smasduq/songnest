@@ -170,11 +170,11 @@ use axum::{
     extract::{Path, Query, State},
     http::Request,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
-use tower_http::services::ServeFile;
+use tower_http::{cors::CorsLayer, services::ServeFile};
 
 type Db = Arc<Mutex<rusqlite::Connection>>;
 
@@ -200,6 +200,13 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
         video_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued',
         progress INTEGER NOT NULL DEFAULT 0, error TEXT,
         queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+    )?;
+    // liked songs: key is "dz:<id>" or "db:<id>"
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS liked (
+        key TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL,
+        album TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '',
+        liked_at INTEGER NOT NULL)",
     )?;
     Ok(())
 }
@@ -597,6 +604,241 @@ async fn queue_page(State(s): State<AppState>) -> impl IntoResponse {
     axum::response::Html(format!("<h1>download queue</h1><ul>{items}</ul><p><a href=\"/\">back</a></p>"))
 }
 
+/// Suggested songs: Deezer global chart, top 10.
+async fn api_suggest(State(s): State<AppState>) -> impl IntoResponse {
+    #[derive(Deserialize)]
+    struct Chart {
+        tracks: DzSearch,
+    }
+    let Ok(resp) = s.http.get("https://api.deezer.com/chart").send().await
+    else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(chart): Result<Chart, _> = resp.json().await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    Json(
+        chart
+            .tracks
+            .data
+            .iter()
+            .take(10)
+            .map(|t| {
+                serde_json::json!({
+                    "dz": t.id,
+                    "title": t.title,
+                    "artist": t.artist.name,
+                    "album": t.album.title,
+                    "duration": t.duration,
+                    "cover": t.album.cover_big,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct LikeBody {
+    key: String,
+    title: String,
+    artist: String,
+    #[serde(default)]
+    album: String,
+    #[serde(default)]
+    cover: String,
+}
+
+async fn api_likes(State(s): State<AppState>) -> impl IntoResponse {
+    let rows: Vec<serde_json::Value> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT key, title, artist, album, cover FROM liked ORDER BY liked_at DESC")
+        .map(|mut st| {
+            st.query_map([], |r| {
+                Ok(serde_json::json!({
+                    "key": r.get::<_, String>(0)?,
+                    "title": r.get::<_, String>(1)?,
+                    "artist": r.get::<_, String>(2)?,
+                    "album": r.get::<_, String>(3)?,
+                    "cover": r.get::<_, String>(4)?,
+                }))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        })
+        .unwrap_or_default();
+    Json(rows)
+}
+
+async fn api_like(
+    State(s): State<AppState>,
+    Json(b): Json<LikeBody>,
+) -> impl IntoResponse {
+    if b.key.trim().is_empty() || b.title.trim().is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    s.db
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO liked (key, title, artist, album, cover, liked_at)
+             VALUES (?1,?2,?3,?4,?5,strftime('%s','now'))
+             ON CONFLICT(key) DO UPDATE SET
+               title=excluded.title, artist=excluded.artist,
+               album=excluded.album, cover=excluded.cover",
+            rusqlite::params![b.key, b.title, b.artist, b.album, b.cover],
+        )
+        .ok();
+    Json(serde_json::json!({"liked": true})).into_response()
+}
+
+async fn api_unlike(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    match q.get("key") {
+        Some(k) => {
+            s.db
+                .lock()
+                .unwrap()
+                .execute("DELETE FROM liked WHERE key = ?1", [k])
+                .ok();
+            Json(serde_json::json!({"liked": false})).into_response()
+        }
+        None => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+/// JSON API for the React frontend.
+async fn api_library(State(s): State<AppState>) -> impl IntoResponse {
+    let rows: Vec<serde_json::Value> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT id, title, artist, album, duration, video_id, COALESCE(cover_url,''), COALESCE(deezer_id,0) FROM tracks ORDER BY id")
+        .map(|mut st| {
+            st.query_map([], |r| {
+                let id: i64 = r.get(0)?;
+                Ok(serde_json::json!({
+                    "id": id,
+                    "title": r.get::<_, String>(1)?,
+                    "artist": r.get::<_, String>(2)?,
+                    "album": r.get::<_, String>(3)?,
+                    "duration": r.get::<_, i64>(4)?,
+                    "video_id": r.get::<_, String>(5)?,
+                    "cover": r.get::<_, String>(6)?,
+                    "deezer_id": r.get::<_, i64>(7)?,
+                    "stream": format!("/track/{id}"),
+                    "cover_url": format!("/cover/{id}"),
+                }))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        })
+        .unwrap_or_default();
+    Json(rows)
+}
+
+async fn api_search(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let query = q.get("q").cloned().unwrap_or_default();
+    if query.trim().is_empty() {
+        return Json(Vec::<serde_json::Value>::new()).into_response();
+    }
+    let Ok(resp) = s
+        .http
+        .get("https://api.deezer.com/search")
+        .query(&[("q", &query)])
+        .send()
+        .await
+    else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(res): Result<DzSearch, _> = resp.json().await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    Json(
+        res.data
+            .iter()
+            .take(5)
+            .map(|t| {
+                serde_json::json!({
+                    "dz": t.id,
+                    "title": t.title,
+                    "artist": t.artist.name,
+                    "album": t.album.title,
+                    "duration": t.duration,
+                    "cover": t.album.cover_big,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+/// Resolve one exact Deezer track to playable audio (cached match first).
+async fn api_resolve(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let dzid: u64 = match q.get("dz").and_then(|v| v.parse().ok()) {
+        Some(id) => id,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let cooling = cooled_down(&s);
+    if cooling.is_some() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "YouTube cooling down — retry shortly",
+        )
+            .into_response();
+    }
+    let Ok(resp) = s
+        .http
+        .get(format!("https://api.deezer.com/track/{dzid}"))
+        .send()
+        .await
+    else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(t): Result<DzTrack, _> = resp.json().await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let fresh = q.get("fresh").map(|v| v == "1").unwrap_or(false);
+    match youtube_match(&s.db, &t, fresh).await {
+        Some((video_id, _)) => Json(serde_json::json!({
+            "dz": t.id,
+            "title": t.title,
+            "artist": t.artist.name,
+            "album": t.album.title,
+            "duration": t.duration,
+            "cover": t.album.cover_big,
+            "video_id": video_id,
+            "stream": format!("/stream/{video_id}"),
+        }))
+        .into_response(),
+        None if !t.preview.is_empty() => Json(serde_json::json!({
+            "dz": t.id,
+            "title": t.title,
+            "artist": t.artist.name,
+            "album": t.album.title,
+            "duration": 30,
+            "cover": t.album.cover_big,
+            "video_id": "",
+            "stream": t.preview,
+            "preview": true,
+        }))
+        .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 async fn health(State(s): State<AppState>) -> impl IntoResponse {
     let ver = tokio::process::Command::new("yt-dlp")
         .arg("--version")
@@ -679,6 +921,13 @@ async fn serve() -> anyhow::Result<()> {
         .route("/api/enqueue", post(enqueue))
         .route("/api/downloads", get(downloads_list))
         .route("/api/health", get(health))
+        .route("/api/suggest", get(api_suggest))
+        .route("/api/likes", get(api_likes))
+        .route("/api/like", post(api_like).delete(api_unlike))
+        .route("/api/library", get(api_library))
+        .route("/api/search", get(api_search))
+        .route("/api/resolve", get(api_resolve))
+        .layer(CorsLayer::very_permissive())
         .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8787").await?;
     axum::serve(listener, app).await?;
