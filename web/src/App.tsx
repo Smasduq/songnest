@@ -342,7 +342,7 @@ export default function App() {
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Results
               </h2>
-              <div className="grid gap-3 2xl:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                 <AnimatePresence initial={false}>
                   {hits.map((h) => (
                     <Anim key={`hit-dz:${h.dz}`} id={`hit-dz:${h.dz}`}>
@@ -368,7 +368,7 @@ export default function App() {
                   No suggestions right now — is the server reachable?
                 </p>
               ) : (
-                <div className="grid gap-3 2xl:grid-cols-2">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
                     {suggestions.map((h) => (
                       <Anim key={`sug-dz:${h.dz}`} id={`sug-dz:${h.dz}`}>
@@ -396,7 +396,7 @@ export default function App() {
                   then ⋯ → Download.
                 </p>
               ) : (
-                <div className="grid gap-3 2xl:grid-cols-2">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
                     {tracks.map((t) => (
                       <Anim key={`lib-${t.id}`} id={`lib-${t.id}`}>
@@ -430,7 +430,7 @@ export default function App() {
                   Nothing liked yet — use ⋯ → Like on any song.
                 </p>
               ) : (
-                <div className="grid gap-3 2xl:grid-cols-2">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
                     {likedSongs.map((t) => (
                       <Anim key={`liked-${t.id}`} id={`liked-${t.id}`}>
