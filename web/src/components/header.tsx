@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-import { Check, Monitor, Moon, Settings, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Search, Settings, Sun, X } from "lucide-react";
 import type { Health } from "@/lib/api";
 
 export type Theme = "light" | "dark" | "system";
@@ -41,13 +42,48 @@ export function Header({
   theme,
   onPickTheme,
   server,
+  query,
+  onQueryChange,
+  onSubmitSearch,
+  onClearSearch,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
   server: Health | null;
+  query: string;
+  onQueryChange: (q: string) => void;
+  onSubmitSearch: () => void;
+  onClearSearch: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const slotRef = useRef<HTMLFormElement>(null);
+  const reduceMotion = useReducedMotion();
+  // pill widths in px, measured from the in-flow slot (never mutated)
+  const [pillW, setPillW] = useState({ rest: 0, expanded: 0 });
+
+  function measure(): { rest: number; expanded: number } {
+    const slot = slotRef.current?.clientWidth ?? 0;
+    // wordmark slot (68px) + header gap (12px) reclaimed on expand
+    return { rest: slot, expanded: slot + 68 + 12 };
+  }
+
+  function expand() {
+    setPillW(measure());
+    setFocused(true);
+  }
+
+  // initial widths so the pill renders at rest size before first focus
+  useEffect(() => {
+    setPillW(measure());
+    function onResize() {
+      setPillW((w) => (document.activeElement?.id === "songnest-search" ? w : measure()));
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -66,11 +102,84 @@ export function Header({
   }, [open ]);
 
   return (
-    <header className="relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/60 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
-      <span className="text-sm font-semibold tracking-tight text-foreground">
-        songnest
+    <header
+      id="app-header"
+      className="glass-bar relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 pt-[env(safe-area-inset-top)] max-md:fixed max-md:inset-x-3 max-md:top-3"
+    >
+      <span className="w-[68px] flex-shrink-0 overflow-hidden" aria-hidden={focused}>
+        <motion.span
+          className="block text-sm font-semibold tracking-tight text-foreground"
+          initial={false}
+          animate={focused ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { type: "spring", stiffness: 400, damping: 35 }
+          }
+          style={{ pointerEvents: focused ? "none" : "auto" }}
+        >
+          songnest
+        </motion.span>
       </span>
-      <div ref={menuRef} className="relative ml-auto">
+      <form
+        ref={slotRef}
+        className="relative h-10 min-w-0 flex-1 self-center md:mx-auto md:max-w-[480px]"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmitSearch();
+        }}
+      >
+        {/* out-of-flow pill: width animates here only, header never reflows */}
+        <div
+          style={{ contain: "layout paint", transform: "translateZ(0)" }}
+          className="absolute bottom-0 right-0 top-0"
+        >
+          <motion.div
+            initial={false}
+            animate={{ width: focused ? pillW.expanded : pillW.rest }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { type: "spring", stiffness: 400, damping: 35 }
+            }
+            className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none focus-within:ring-2 focus-within:ring-foreground/40"
+            style={{ zIndex: 10 }}
+          >
+            <input
+              id="songnest-search"
+              type="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              onFocus={() => expand()}
+              onBlur={() => setFocused(false)}
+              placeholder="Search artist or song"
+              aria-label="Search artist or song"
+              className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-foreground/40 focus:outline-none"
+            />
+            {query !== "" && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={onClearSearch}
+                className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-foreground/50 hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+            <button
+              type="submit"
+              aria-label="Search"
+              className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-foreground text-background hover:bg-foreground/90"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          </motion.div>
+        </div>
+      </form>
+      <div ref={menuRef} className="relative ml-auto flex-shrink-0">
         <button
           type="button"
           aria-label="Open settings"
@@ -84,8 +193,16 @@ export function Header({
         >
           <Settings className="h-4 w-4" />
         </button>
-        {open && (
-          <div className="absolute right-0 top-11 z-30 w-64 overflow-hidden rounded-3xl border border-border/50 bg-background/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl">
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              key="settings-menu"
+              initial={{ opacity: 0, scale: 0.96, y: -4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              className="absolute right-0 top-11 z-30 w-64 overflow-hidden rounded-3xl border border-border/50 bg-background/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
+            >
             <p className="px-2 pb-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
               Appearance
             </p>
@@ -141,8 +258,9 @@ export function Header({
                 </div>
               </dl>
             )}
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </header>
   );

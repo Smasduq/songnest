@@ -3,6 +3,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-border: var(--border);
@@ -21,6 +22,12 @@
 }
 
 :root {
+  --bg: var(--background);
+  --surface: var(--card);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --accent: var(--primary);
+  --separator: var(--border);
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -41,6 +48,12 @@
 }
 
 .dark {
+  --bg: var(--background);
+  --surface: var(--card);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --accent: var(--primary);
+  --separator: var(--border);
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
@@ -106,4 +119,45 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* mobile only: keep last items reachable above the fixed bottom stack */
+@media (max-width: 767px) {
+  main.scroller {
+    padding-bottom: calc(var(--bottom-bars-h, 0px) + 8px);
+  }
+}
+
+/* Frosted bars: translucent material, opaque fallback without backdrop-filter */
+.glass-bar {
+  background-color: var(--bg);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .glass-bar {
+    background-color: color-mix(in srgb, var(--bg) 70%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+  }
+}
+
+@layer base {
+  /* shared press feedback: transform + opacity only, ~120ms */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    transition:
+      transform 120ms ease,
+      opacity 120ms ease;
+  }
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: scale(0.97);
+    opacity: 0.85;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button:not(:disabled):active,
+    [role="button"]:not(:disabled):active {
+      transform: none;
+      opacity: 1;
+    }
+  }
 }

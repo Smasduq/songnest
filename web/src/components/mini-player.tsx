@@ -24,7 +24,7 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
         if (info.offset.x < -80) st.next(true);
         else if (info.offset.x > 80) st.prev();
       }}
-      className="flex flex-shrink-0 cursor-grab items-center gap-3 rounded-3xl border border-border/40 bg-background/70 py-2 pl-2 pr-3 backdrop-blur-2xl active:cursor-grabbing md:hidden"
+      className="flex flex-shrink-0 cursor-grab items-center gap-3 rounded-2xl py-1 pl-1 pr-2 active:cursor-grabbing"
     >
       <button
         type="button"

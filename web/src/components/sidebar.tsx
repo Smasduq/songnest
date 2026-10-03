@@ -1,11 +1,10 @@
 import { Heart, Home, Library, Search } from "lucide-react";
 
-export type Page = "home" | "library" | "liked";
+export type Page = "home" | "library" | "liked" | "search";
 
 interface Props {
   page: Page;
   onNavigate: (page: Page) => void;
-  onSearchFocus: () => void;
   libraryCount: number;
   likedCount: number;
 }
@@ -20,7 +19,6 @@ const linkCls = (on: boolean) =>
 export function Sidebar({
   page,
   onNavigate,
-  onSearchFocus,
   libraryCount,
   likedCount,
 }: Props) {
@@ -30,7 +28,7 @@ export function Sidebar({
         <Home className="h-4 w-4" />
         Home
       </button>
-      <button type="button" onClick={onSearchFocus} className={linkCls(false)}>
+      <button type="button" onClick={() => onNavigate("search")} className={linkCls(page === "search")}>
         <Search className="h-4 w-4" />
         Search
       </button>

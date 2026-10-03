@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-motion";
 
-import { Heart, Home, Library } from "lucide-react";
+import { Heart, Home, Library, Search } from "lucide-react";
 
 import { NowPlaying } from "@/components/now-playing";
 import { NowPlayingSheet } from "@/components/now-playing-sheet";
@@ -52,7 +52,7 @@ function Anim({ id, children }: { id: string; children: ReactNode }) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
+      transition={{ type: "spring", stiffness: 400, damping: 35 }}
     >
       {children}
     </motion.div>
@@ -73,6 +73,7 @@ export default function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const { theme, setTheme } = useTheme();
+  const reduceMotion = useReducedMotion();
 
   // playback state lives in the zustand store (audio element is module-level)
   const queue = usePlayer((s) => s.queue);
@@ -112,6 +113,34 @@ export default function App() {
       .then(setHealth)
       .catch(() => setHealth(null));
   }, [refreshLibrary, refreshLikes]);
+
+  // Publish fixed-bar heights for mobile scroll padding. No-ops on
+  // desktop (stack is display:none there, so both read 0px).
+  // Also registers the passive touchstart iOS Safari needs for :active.
+  useEffect(() => {
+    const root = document.documentElement;
+    function apply() {
+      const bottom = document.getElementById("bottom-stack");
+      const top = document.getElementById("app-header");
+      root.style.setProperty(
+        "--bottom-bars-h",
+        `${bottom?.offsetHeight ?? 0}px`
+      );
+      root.style.setProperty("--top-bar-h", `${top?.offsetHeight ?? 0}px`);
+    }
+    apply();
+    const ro = new ResizeObserver(apply);
+    const b = document.getElementById("bottom-stack");
+    const t = document.getElementById("app-header");
+    if (b) ro.observe(b);
+    if (t) ro.observe(t);
+    document.addEventListener("touchstart", () => {}, { passive: true });
+    return () => {
+      ro.disconnect();
+      root.style.setProperty("--bottom-bars-h", "0px");
+      root.style.setProperty("--top-bar-h", "0px");
+    };
+  }, []);
 
   // "/" focuses search from anywhere (except while typing)
   useEffect(() => {
@@ -255,49 +284,49 @@ export default function App() {
   );
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="flex h-dvh flex-col gap-3 overflow-hidden bg-background p-3">
-      <Header theme={theme} onPickTheme={setTheme} server={health} />
-      <div className="flex min-h-0 flex-1 gap-3">
+      <Header
+        theme={theme}
+        onPickTheme={setTheme}
+        server={health}
+        query={query}
+        onQueryChange={setQuery}
+        onSubmitSearch={() => {
+          runSearch();
+          setPage("search");
+          if (window.matchMedia("(pointer: coarse)").matches) {
+            (document.activeElement as HTMLElement | null)?.blur?.();
+          }
+        }}
+        onClearSearch={() => {
+          setQuery("");
+          setHits([]);
+        }}
+      />
+      <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)]">
         <div className="hidden md:block">
           <Sidebar
             page={page}
             onNavigate={setPage}
-            onSearchFocus={() =>
-              document.getElementById("songnest-search")?.focus()
-            }
             libraryCount={library.length}
             likedCount={likes.size}
           />
         </div>
 
         <main className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6">
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              runSearch();
-            }}
-          >
-            <input
-              id="songnest-search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search Deezer — artist title"
-              className="h-11 min-w-0 flex-1 rounded-full border border-border/60 bg-background/60 px-5 text-sm text-foreground backdrop-blur placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/30"
-            />
-            <button
-              type="submit"
-              className="h-11 rounded-full bg-foreground px-6 text-sm font-medium text-background hover:bg-foreground/90"
-            >
-              {searching ? "…" : "Search"}
-            </button>
-          </form>
-
-          {hits.length > 0 && (
+          {page === "search" && (
             <section className="space-y-3">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Results
               </h2>
+              {searching ? (
+                <p className="text-sm text-foreground/60">Searching…</p>
+              ) : hits.length === 0 ? (
+                <p className="text-sm text-foreground/60">
+                  Search for a song or artist.
+                </p>
+              ) : (
               <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                 <AnimatePresence initial={false}>
                   {hits.map((h) => (
@@ -309,9 +338,19 @@ export default function App() {
                   ))}
                 </AnimatePresence>
               </div>
+              )}
             </section>
           )}
 
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={page}
+              initial={{ opacity: 0, x: reduceMotion ? 0 : 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: reduceMotion ? 0 : -20, transition: { duration: 0.1 } }}
+              transition={{ duration: 0.18 }}
+              className="space-y-6"
+            >
           {page === "home" && (
             <section className="space-y-3">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
@@ -404,6 +443,8 @@ export default function App() {
               )}
             </section>
           )}
+            </motion.div>
+          </AnimatePresence>
         </main>
 
         <NowPlaying
@@ -444,12 +485,17 @@ export default function App() {
 
       <PlayerBar />
 
-      <MiniPlayer onOpen={() => setSheetOpen(true)} />
-
-      <nav className="flex flex-shrink-0 items-center justify-around rounded-3xl border border-border/40 bg-background/60 px-4 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:hidden">
+      <div
+        id="bottom-stack"
+        className="fixed inset-x-3 bottom-3 z-40 md:hidden"
+      >
+        <div className="glass-bar space-y-1 rounded-3xl border border-border/40 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <MiniPlayer onOpen={() => setSheetOpen(true)} />
+          <nav className="flex items-center justify-around">
         {(
           [
             { id: "home", label: "Home", icon: Home },
+            { id: "search", label: "Search", icon: Search },
             { id: "library", label: "Library", icon: Library },
             { id: "liked", label: "Liked", icon: Heart },
           ] as const
@@ -460,7 +506,14 @@ export default function App() {
             <button
               key={item.id}
               type="button"
-              onClick={() => setPage(item.id)}
+              onClick={() => {
+                setPage(item.id);
+                if (item.id === "search") {
+                  requestAnimationFrame(() =>
+                    document.getElementById("songnest-search")?.focus()
+                  );
+                }
+              }}
               className={`flex flex-col items-center gap-1 rounded-2xl px-5 py-1.5 text-[11px] font-medium ${
                 on ? "text-foreground" : "text-foreground/50"
               }`}
@@ -470,11 +523,14 @@ export default function App() {
             </button>
           );
         })}
-      </nav>
+          </nav>
+        </div>
+      </div>
 
       <AnimatePresence>
         {sheetOpen && <NowPlayingSheet onClose={() => setSheetOpen(false)} />}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }

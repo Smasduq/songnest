@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { motion, useMotionValue, useTransform } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 
 import { formatTime, type Song } from "@/lib/api";
 import { Check, Download, Heart, ListPlus, MoreHorizontal } from "lucide-react";
@@ -143,13 +143,19 @@ export function SongCard({
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
-        {open &&
-          createPortal(
-            <div
-              ref={menuRef}
-              style={{ top: pos.top, right: pos.right }}
-              className="fixed z-[100] w-48 overflow-hidden rounded-2xl border border-border/50 bg-background/95 p-1.5 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
-            >
+        {createPortal(
+          <AnimatePresence>
+            {open && (
+              <motion.div
+                key="song-menu"
+                ref={menuRef}
+                style={{ top: pos.top, right: pos.right }}
+                initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 400, damping: 35 }}
+                className="fixed z-[100] w-48 overflow-hidden rounded-2xl border border-border/50 bg-background/95 p-1.5 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
+              >
             <button
               type="button"
               onClick={() => pick(onToggleLike)}
@@ -187,9 +193,11 @@ export function SongCard({
               <ListPlus className="h-4 w-4" />
               Add to queue
             </button>
-            </div>,
-            document.body
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
       </div>
       </motion.div>
     </div>

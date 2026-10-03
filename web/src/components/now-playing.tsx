@@ -117,7 +117,7 @@ export function NowPlaying({
                   initial={{ opacity: 0, x: 24 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 24 }}
-                  transition={{ duration: 0.18 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 35 }}
                 className={`flex items-center gap-2 rounded-2xl border px-3 py-2 ${
                   t.id === activeQueueId
                     ? "border-foreground/40 bg-foreground/[0.08]"
