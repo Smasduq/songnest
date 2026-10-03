@@ -25,7 +25,7 @@ export function Sidebar({
   likedCount,
 }: Props) {
   return (
-    <aside className="flex h-full w-60 flex-shrink-0 flex-col gap-1 overflow-y-auto rounded-3xl border border-border/40 bg-background/60 p-3 backdrop-blur-xl">
+    <aside className="scroller flex h-full w-60 flex-shrink-0 flex-col gap-1 rounded-3xl border border-border/40 bg-background/60 p-3 backdrop-blur-xl">
       <button type="button" onClick={() => onNavigate("home")} className={linkCls(page === "home")}>
         <Home className="h-4 w-4" />
         Home

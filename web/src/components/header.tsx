@@ -66,7 +66,7 @@ export function Header({
   }, [open ]);
 
   return (
-    <header className="relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/60 px-4 backdrop-blur-xl">
+    <header className="relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/60 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <span className="text-sm font-semibold tracking-tight text-foreground">
         songnest
       </span>

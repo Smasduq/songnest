@@ -61,11 +61,49 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   * {
     border-color: var(--color-border);
   }
   body {
+    margin: 0;
+    overflow: hidden; /* only inner containers scroll */
+    overscroll-behavior: none;
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
   }
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px; /* avoids iOS zoom on focus */
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  /* only disable selection on touch devices, so desktop can still copy text */
+  @media (pointer: coarse) {
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+  }
+}
+
+.scroller {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
