@@ -43,6 +43,26 @@ struct AppState {
     http: reqwest::Client,
     urls: Arc<Mutex<HashMap<String, (String, Instant)>>>,
     resolve_lock: Arc<tokio::sync::Mutex<()>>,
+    /// max 2 concurrent downloads (anti-bot: look human, not a farm)
+    dl_sem: Arc<tokio::sync::Semaphore>,
+    /// set when YouTube 429s/bot-checks us; queue + resolves pause meanwhile
+    yt_cooldown_until: Arc<Mutex<Option<Instant>>>,
+    /// latest yt-dlp release seen (once-per-startup GitHub check)
+    ytdlp_latest: Arc<Mutex<Option<String>>>,
+}
+
+/// Seconds left on the YouTube cooldown, if any.
+fn cooled_down(s: &AppState) -> Option<u64> {
+    s.yt_cooldown_until
+        .lock()
+        .unwrap()
+        .filter(|t| *t > Instant::now())
+        .map(|t| t.duration_since(Instant::now()).as_secs())
+}
+
+/// True when yt-dlp output smells like throttling/bot-check.
+fn youtube_blocked(text: &str) -> bool {
+    text.contains("429") || text.contains("Sign in to confirm") || text.contains("bot check")
 }
 
 fn score(e: &YtEntry, t: &DzTrack) -> i32 {
@@ -145,12 +165,12 @@ fn tag_file(path: &str, t: &DzTrack, cover: &[u8]) -> anyhow::Result<()> {
 }
 
 use axum::{
-    Router,
+    Json, Router,
     body::Body,
     extract::{Path, Query, State},
     http::Request,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
@@ -166,11 +186,20 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
     )?;
     // best-effort migration for existing DBs; fails if column already exists
     let _ = db.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", []);
+    let _ = db.execute("ALTER TABLE tracks ADD COLUMN deezer_id INTEGER", []);
     // Deezer track -> YouTube video match, searched once then reused
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS yt_match (
         deezer_id INTEGER PRIMARY KEY, video_id TEXT NOT NULL,
         score INTEGER NOT NULL, matched_at INTEGER NOT NULL)",
+    )?;
+    // download queue: bulk downloads go here, 2 at a time max
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS downloads (
+        id INTEGER PRIMARY KEY, deezer_id INTEGER NOT NULL,
+        video_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued',
+        progress INTEGER NOT NULL DEFAULT 0, error TEXT,
+        queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
     )?;
     Ok(())
 }
@@ -244,6 +273,364 @@ async fn track(
     ServeFile::new(path).oneshot(req).await.unwrap()
 }
 
+fn set_job(db: &Db, id: i64, status: &str, progress: i64, error: Option<&str>) {
+    let _ = db.lock().unwrap().execute(
+        "UPDATE downloads SET status=?1, progress=?2, error=?3, updated_at=strftime('%s','now') WHERE id=?4",
+        rusqlite::params![status, progress, error, id],
+    );
+}
+
+/// Parse `[download]  34.5% of ...` progress lines.
+fn parse_progress(line: &str) -> Option<u8> {
+    let after = line.split("[download]").nth(1)?;
+    let pct = after.split_whitespace().next()?;
+    pct.strip_suffix('%')?
+        .parse::<f64>()
+        .ok()
+        .map(|p| p.clamp(0.0, 100.0) as u8)
+}
+
+/// Blocking yt-dlp download with human-like pauses and progress.
+/// Err carries stderr tail for throttle detection.
+fn download_job(video_id: &str, out_dir: &str, on_progress: &dyn Fn(u8)) -> Result<String, String> {
+    use std::io::BufRead;
+    let template = format!("{out_dir}/%(id)s.%(ext)s");
+    let mut child = Command::new("yt-dlp")
+        .args(cookie_args())
+        .args([
+            "--sleep-requests",
+            "2",
+            "--sleep-interval",
+            "3",
+            "--max-sleep-interval",
+            "10",
+            "--newline",
+            "--progress",
+            "-f",
+            "ba[ext=m4a]/ba",
+            "-x",
+            "--audio-format",
+            "m4a",
+            "-o",
+            &template,
+            &format!("https://youtube.com/watch?v={video_id}"),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    // drain stdout (discard) so the child never blocks on a full pipe
+    let mut sout = child.stdout.take().unwrap();
+    let drain = std::thread::spawn(move || {
+        std::io::copy(&mut sout, &mut std::io::sink()).ok();
+    });
+    let serr = child.stderr.take().unwrap();
+    for line in std::io::BufReader::new(serr).lines().map_while(Result::ok) {
+        if let Some(p) = parse_progress(&line) {
+            on_progress(p);
+        }
+    }
+    drain.join().ok();
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let tail: String = String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(tail);
+    }
+    on_progress(100);
+    Ok(format!("{out_dir}/{video_id}.m4a"))
+}
+
+async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
+    // 1. Deezer metadata (exact song, exact cover)
+    let t: DzTrack = match s
+        .http
+        .get(format!("https://api.deezer.com/track/{dzid}"))
+        .send()
+        .await
+    {
+        Ok(r) => match r.json().await {
+            Ok(t) => t,
+            Err(_) => {
+                set_job(&s.db, job_id, "error", 0, Some("deezer track fetch failed"));
+                return;
+            }
+        },
+        Err(_) => {
+            set_job(&s.db, job_id, "error", 0, Some("deezer track fetch failed"));
+            return;
+        }
+    };
+    // 2. cached match: each song is searched once, even across queue jobs
+    let Some((video_id, _)) = youtube_match(&s.db, &t, false).await else {
+        set_job(&s.db, job_id, "error", 0, Some("no YouTube match (throttled?)"));
+        return;
+    };
+    s.db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE downloads SET video_id=?1, updated_at=strftime('%s','now') WHERE id=?2",
+            rusqlite::params![video_id, job_id],
+        )
+        .ok();
+    // 3. blocking download with progress (sleeps included)
+    let db2 = s.db.clone();
+    let vid2 = video_id.clone();
+    let dl = tokio::task::spawn_blocking(move || {
+        download_job(&vid2, "music", &|p| {
+            let _ = db2.lock().unwrap().execute(
+                "UPDATE downloads SET progress=?1, updated_at=strftime('%s','now') WHERE id=?2",
+                rusqlite::params![p as i64, job_id],
+            );
+        })
+    })
+    .await;
+    let path = match dl {
+        Ok(Ok(p)) => p,
+        Ok(Err(stderr_tail)) => {
+            if youtube_blocked(&stderr_tail) {
+                *s.yt_cooldown_until.lock().unwrap() =
+                    Some(Instant::now() + Duration::from_secs(5 * 60));
+            }
+            let msg: String = stderr_tail.chars().take(300).collect();
+            set_job(&s.db, job_id, "error", 0, Some(&msg));
+            return;
+        }
+        Err(_) => {
+            set_job(&s.db, job_id, "error", 0, Some("download task failed"));
+            return;
+        }
+    };
+    // 4. cover + tag + library insert (same pipeline as the CLI)
+    let cover = match s.http.get(&t.album.cover_big).send().await {
+        Ok(r) => match r.bytes().await {
+            Ok(b) => b,
+            Err(_) => {
+                set_job(&s.db, job_id, "error", 100, Some("cover fetch failed"));
+                return;
+            }
+        },
+        Err(_) => {
+            set_job(&s.db, job_id, "error", 100, Some("cover fetch failed"));
+            return;
+        }
+    };
+    let title = t.title.clone();
+    let artist = t.artist.name.clone();
+    let album = t.album.title.clone();
+    let duration = t.duration;
+    let cover_url = t.album.cover_big.clone();
+    let dz = t.id as i64;
+    let tag_ok = tokio::task::spawn_blocking(move || tag_file(&path, &t, &cover))
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false);
+    if !tag_ok {
+        set_job(&s.db, job_id, "error", 100, Some("tagging failed"));
+        return;
+    }
+    // path moved into the closure; re-derive it for the library row
+    let lib_path = format!("music/{video_id}.m4a");
+    s.db
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO tracks (title, artist, album, duration, video_id, path, cover_url, deezer_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(video_id) DO UPDATE SET
+               title=excluded.title, artist=excluded.artist, album=excluded.album,
+               duration=excluded.duration, path=excluded.path,
+               cover_url=excluded.cover_url, deezer_id=excluded.deezer_id",
+            rusqlite::params![
+                title, artist, album, duration as i64, video_id, lib_path, cover_url, dz
+            ],
+        )
+        .ok();
+    set_job(&s.db, job_id, "done", 100, None);
+}
+
+async fn download_worker(s: AppState) {
+    loop {
+        // atomic claim under one lock: oldest queued job becomes active
+        let job: Option<(i64, u64)> = {
+            let db = s.db.lock().unwrap();
+            let next: Option<(i64, i64)> = db
+                .query_row(
+                    "SELECT id, deezer_id FROM downloads WHERE status='queued' ORDER BY queued_at LIMIT 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            match next {
+                Some((id, dz)) => {
+                    db.execute(
+                        "UPDATE downloads SET status='active', updated_at=strftime('%s','now') WHERE id=?1",
+                        [id],
+                    )
+                    .ok();
+                    Some((id, dz as u64))
+                }
+                None => None,
+            }
+        };
+        let Some((job_id, dzid)) = job else {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        };
+        // cooling down: put it back, wait it out, don't burn calls
+        if let Some(secs) = cooled_down(&s) {
+            set_job(&s.db, job_id, "queued", 0, None);
+            tokio::time::sleep(Duration::from_secs(secs.min(60).max(5))).await;
+            continue;
+        }
+        let _permit = s.dl_sem.acquire().await.unwrap();
+        run_job(&s, job_id, dzid).await;
+        // pause between downloads: never machine-gun YouTube
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+}
+
+/// Enqueue a Deezer track for download. Fast: matching happens in the worker.
+async fn enqueue(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let dzid: u64 = match q.get("dz").and_then(|v| v.parse().ok()) {
+        Some(id) => id,
+        None => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let db = s.db.lock().unwrap();
+    // already in library?
+    let in_lib: bool = db
+        .query_row(
+            "SELECT 1 FROM tracks WHERE deezer_id = ?1 LIMIT 1",
+            [dzid as i64],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if in_lib {
+        return (StatusCode::CONFLICT, "already in library").into_response();
+    }
+    // already queued/active?
+    let pending: bool = db
+        .query_row(
+            "SELECT 1 FROM downloads WHERE deezer_id = ?1 AND status IN ('queued','active') LIMIT 1",
+            [dzid as i64],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if pending {
+        return (StatusCode::CONFLICT, "already queued").into_response();
+    }
+    db.execute(
+        "INSERT INTO downloads (deezer_id, queued_at, updated_at)
+         VALUES (?1, strftime('%s','now'), strftime('%s','now'))",
+        [dzid as i64],
+    )
+    .ok();
+    let id = db.last_insert_rowid();
+    Json(serde_json::json!({"job": id})).into_response()
+}
+
+async fn downloads_list(State(s): State<AppState>) -> impl IntoResponse {
+    let rows: Vec<serde_json::Value> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT id, deezer_id, video_id, status, progress, COALESCE(error,'') FROM downloads ORDER BY queued_at DESC LIMIT 50")
+        .map(|mut st| {
+            st.query_map([], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "deezer_id": r.get::<_, i64>(1)?,
+                    "video_id": r.get::<_, String>(2)?,
+                    "status": r.get::<_, String>(3)?,
+                    "progress": r.get::<_, i64>(4)?,
+                    "error": r.get::<_, String>(5)?,
+                }))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        })
+        .unwrap_or_default();
+    Json(rows)
+}
+
+async fn queue_page(State(s): State<AppState>) -> impl IntoResponse {
+    let rows: Vec<(i64, i64, String, String, i64, String)> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT id, deezer_id, video_id, status, progress, COALESCE(error,'') FROM downloads ORDER BY queued_at DESC LIMIT 50")
+        .map(|mut st| {
+            st.query_map([], |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+                ))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        })
+        .unwrap_or_default();
+    let mut items = String::new();
+    for (id, dz, vid, status, prog, err) in &rows {
+        items.push_str(&format!(
+            "<li>#{id} dz={dz} yt={vid} [{status}] {prog}% {err}</li>",
+            id = id,
+            dz = dz,
+            vid = esc(vid),
+            status = esc(status),
+            prog = prog,
+            err = esc(err),
+        ));
+    }
+    if items.is_empty() {
+        items = "<li>(queue empty)</li>".to_string();
+    }
+    axum::response::Html(format!("<h1>download queue</h1><ul>{items}</ul><p><a href=\"/\">back</a></p>"))
+}
+
+async fn health(State(s): State<AppState>) -> impl IntoResponse {
+    let ver = tokio::process::Command::new("yt-dlp")
+        .arg("--version")
+        .output()
+        .await
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let depth: i64 = s
+        .db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM downloads WHERE status IN ('queued','active')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let latest = s.ytdlp_latest.lock().unwrap().clone();
+    let update_available = match &latest {
+        Some(l) => !l.contains(&ver) && !ver.is_empty(),
+        None => false,
+    };
+    Json(serde_json::json!({
+        "yt_dlp": ver,
+        "latest_release": latest,
+        "update_available": update_available,
+        "queue_depth": depth,
+        "cooldown_secs": cooled_down(&s).unwrap_or(0),
+    }))
+}
+
 async fn serve() -> anyhow::Result<()> {
     let conn = rusqlite::Connection::open("library.db")?;
     ensure_schema(&conn)?;
@@ -253,7 +640,32 @@ async fn serve() -> anyhow::Result<()> {
         http: reqwest::Client::new(),
         urls: Arc::new(Mutex::new(HashMap::new())),
         resolve_lock: Arc::new(tokio::sync::Mutex::new(())),
+        dl_sem: Arc::new(tokio::sync::Semaphore::new(2)),
+        yt_cooldown_until: Arc::new(Mutex::new(None)),
+        ytdlp_latest: Arc::new(Mutex::new(None)),
     };
+    // two queue workers = max 2 concurrent downloads, ever
+    tokio::spawn(download_worker(state.clone()));
+    tokio::spawn(download_worker(state.clone()));
+    // once-per-startup yt-dlp freshness check (best effort)
+    tokio::spawn({
+        let st = state.clone();
+        async move {
+            if let Ok(r) = st
+                .http
+                .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+                .header("User-Agent", "songnest")
+                .send()
+                .await
+            {
+                if let Ok(j) = r.json::<serde_json::Value>().await {
+                    if let Some(tag) = j.get("tag_name").and_then(|v| v.as_str()) {
+                        *st.ytdlp_latest.lock().unwrap() = Some(tag.to_string());
+                    }
+                }
+            }
+        }
+    });
     let app = Router::new()
         .route("/", get(index))
         .route("/track/:id", get(track))
@@ -263,6 +675,10 @@ async fn serve() -> anyhow::Result<()> {
         .route("/s/:id", get(stream_player))
         .route("/d", get(dplayer))
         .route("/dplay", get(dplay))
+        .route("/queue", get(queue_page))
+        .route("/api/enqueue", post(enqueue))
+        .route("/api/downloads", get(downloads_list))
+        .route("/api/health", get(health))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8787").await?;
     axum::serve(listener, app).await?;
@@ -523,17 +939,25 @@ async fn dplay(
         return StatusCode::BAD_GATEWAY.into_response();
     };
     // Cached match first (`?fresh=1` forces a new YouTube search).
-    // No match (or YouTube unreachable) -> fall back to Deezer's own
-    // 30s preview so every Deezer track still plays something.
+    // Cooling down -> preview with a cooldown note, no burnt calls.
+    // No match (or YouTube unreachable) -> 30s preview fallback.
     let fresh = q.get("fresh").map(|v| v == "1").unwrap_or(false);
-    let vid: Option<String> =
-        youtube_match(&s.db, &t, fresh).await.map(|(v, _)| v);
-    let (audio_src, note) = match vid {
-        Some(v) => (
+    let cooling = cooled_down(&s);
+    let vid: Option<String> = if cooling.is_some() {
+        None
+    } else {
+        youtube_match(&s.db, &t, fresh).await.map(|(v, _)| v)
+    };
+    let (audio_src, note) = match (vid, cooling) {
+        (Some(v), _) => (
             format!("/stream/{v}"),
             "Deezer match, not downloaded".to_string(),
         ),
-        None => (
+        (None, Some(secs)) => (
+            t.preview.clone(),
+            format!("YouTube cooling down ({secs}s) — 30s preview meanwhile"),
+        ),
+        (None, None) => (
             t.preview.clone(),
             "30-second preview — full track not found on YouTube".to_string(),
         ),
@@ -615,6 +1039,10 @@ async fn resolve_url(s: &AppState, id: &str) -> anyhow::Result<String> {
     };
     if let Some(u) = cached(s) {
         return Ok(u);
+    }
+    // cooling down: don't burn calls, fail fast (stream() -> 502)
+    if cooled_down(s).is_some() {
+        anyhow::bail!("youtube cooling down");
     }
     let _guard = s.resolve_lock.lock().await; // one resolver at a time
     if let Some(u) = cached(s) {
@@ -729,11 +1157,12 @@ async fn main() -> anyhow::Result<()> {
     tag_file(&path, t, &cover)?;
 
     db.lock().unwrap().execute(
-        "INSERT INTO tracks (title, artist, album, duration, video_id, path, cover_url)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)
+        "INSERT INTO tracks (title, artist, album, duration, video_id, path, cover_url, deezer_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
          ON CONFLICT(video_id) DO UPDATE SET
            title=excluded.title, artist=excluded.artist, album=excluded.album,
-           duration=excluded.duration, path=excluded.path, cover_url=excluded.cover_url",
+           duration=excluded.duration, path=excluded.path,
+           cover_url=excluded.cover_url, deezer_id=excluded.deezer_id",
         (
             &t.title,
             &t.artist.name,
@@ -742,6 +1171,7 @@ async fn main() -> anyhow::Result<()> {
             &best_id,
             &path,
             &t.album.cover_big,
+            t.id as i64,
         ),
     )?;
 
