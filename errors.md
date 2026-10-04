@@ -5,7 +5,8 @@ Format: `- [ ] <where> — <what> (<date>)`, checked when fixed.
 
 ## Open
 
-(none)
+- [ ] 2026-10-04 rustypipe media fetch throttling — iOS-client googlevideo URLs serve the first ~1MB range (206) then 403 every subsequent range (same/new connection, paced, fresh resolve). Plain/open-range GETs 403 too. Only full-file-capable client observed is yt-dlp's VISIONOS (`-g` URL serves sequential 1MB chunks 206/206). Workaround in `download_rustypipe`: 1MB chunks, 1s pacing, re-resolve+backoff resume, global 403→cooldown. Full downloads from datacenter IPs currently fail; residential/phone IPs untested.
+- [ ] 2026-10-04 rustypipe 0.11.4 `DeobfData::extract` fails ("could not extract sig fn name" on fresh cache, then 24h lockout per storage dir) — YouTube player-JS changed, only the iOS client (no deobf needed) resolves. Needs upstream update; `CLIENTS` order already tries Android first so it self-heals when upstream fixes parsing.
 
 ## Fixed
 

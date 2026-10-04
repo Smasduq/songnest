@@ -38,3 +38,7 @@ pub mod rustypipe_impl;
 
 #[cfg(feature = "rustypipe")]
 pub use rustypipe_impl::RustyPipeExtractor;
+
+/// Re-exported so callers can pick per-client resolve order.
+#[cfg(feature = "rustypipe")]
+pub use rustypipe::client::{ClientType, RustyPipe};

@@ -199,6 +199,7 @@ export interface DownloadJob {
 }
 
 export interface Health {
+  backend?: string;
   yt_dlp: string;
   queue_depth: number;
   cooldown_secs: number;
@@ -218,6 +219,7 @@ export interface JsRuntimeInfo {
 }
 
 export interface DownloaderStatus {
+  backend?: string;
   binary_source: string;
   path: string;
   version: string;

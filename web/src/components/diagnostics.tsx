@@ -68,6 +68,11 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold tracking-tight text-foreground">
           Downloader diagnostics
+          {status?.backend ? (
+            <span className="ml-2 rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/70">
+              {status.backend}
+            </span>
+          ) : null}
         </h2>
         <div className="flex gap-2">
           <Button

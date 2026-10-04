@@ -13,7 +13,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+songnest-server = { path = "../../crates/server" }
+tokio = { version = "1", features = ["full"] }
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Phone backend: in-process songnest-server with the pure-Rust YouTube
+# extractor (no yt-dlp on Android). Desktop builds skip this.
+android-backend = ["songnest-server/rustypipe"]

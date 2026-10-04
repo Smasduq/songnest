@@ -22,6 +22,7 @@ use rustypipe::client::{ClientType, RustyPipe};
 
 use crate::{Candidate, Extractor, Stream};
 
+#[derive(Clone)]
 pub struct RustyPipeExtractor {
     rp: RustyPipe,
 }

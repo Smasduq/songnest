@@ -27,8 +27,8 @@ fn sidecar_path(app: &tauri::AppHandle) -> std::path::PathBuf {
 }
 
 /// Spawn `songnest-cli serve --data-dir <app-data>`; the UI talks to it on :8787.
-/// On mobile there is no sidecar binary: the UI talks to a LAN server
-/// instead (VITE_API_URL baked at build time), so this is a no-op there.
+/// On mobile there is no sidecar binary (see spawn_phone_server below),
+/// so this is desktop-only.
 #[cfg(desktop)]
 fn spawn_backend(app: &tauri::AppHandle, slot: &ChildSlot) {
     let data_dir = match app.path().app_data_dir() {
@@ -64,6 +64,50 @@ fn spawn_backend(app: &tauri::AppHandle, slot: &ChildSlot) {
     }
 }
 
+/// On-device backend (phone): run songnest-server in-process with the
+/// rustypipe backend — no Python/yt-dlp/ffmpeg exists on Android. Serves
+/// 127.0.0.1:8787, the UI's default API base, with data in the app data dir.
+#[cfg(all(mobile, feature = "android-backend"))]
+fn spawn_phone_server(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("songnest: no app data dir: {e}");
+            return;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        eprintln!("songnest: cannot create {}: {e}", data_dir.display());
+        return;
+    }
+    // absolute cache path: the backend is built before run() chdirs.
+    let cache = data_dir.join(".rustypipe");
+    let backend = match songnest_server::backend_rustypipe(&cache.to_string_lossy()) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("songnest: phone backend init failed: {e}");
+            return;
+        }
+    };
+    let dir = data_dir.to_string_lossy().into_owned();
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("songnest: no tokio runtime: {e}");
+                return;
+            }
+        };
+        if let Err(e) = rt.block_on(songnest_server::run(Some(dir), backend, 8787)) {
+            eprintln!("songnest: phone server exited: {e}");
+        }
+    });
+}
+
 fn builder() {
     let backend: ChildSlot = Arc::new(Mutex::new(None));
     let slot = backend.clone();
@@ -74,6 +118,15 @@ fn builder() {
             spawn_backend(&app.handle(), &slot);
             #[cfg(not(desktop))]
             let _ = (&app, &slot);
+            // Phone: the backend runs in-process (no sidecar, no yt-dlp on
+            // Android) on 127.0.0.1:8787 — the UI's default API base.
+            #[cfg(all(mobile, feature = "android-backend"))]
+            spawn_phone_server(&app.handle());
+            #[cfg(all(mobile, not(feature = "android-backend")))]
+            eprintln!(
+                "songnest: phone build without the android-backend feature: \
+                 no on-device server (rebuild with -F android-backend)"
+            );
             Ok(())
         })
         .on_window_event(move |_, event| {
