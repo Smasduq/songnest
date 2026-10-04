@@ -7,6 +7,7 @@ import { Heart, Home, Library, Search } from "lucide-react";
 import { NowPlaying } from "@/components/now-playing";
 import { NowPlayingSheet } from "@/components/now-playing-sheet";
 import { MiniPlayer } from "@/components/mini-player";
+import { Diagnostics } from "@/components/diagnostics";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { PlayerBar } from "@/components/player-bar";
@@ -15,16 +16,21 @@ import { useCurrentTrack, usePlayer } from "@/player/store";
 import {
   dzOf,
   enqueueDownload,
+  fetchDownloader,
   fetchHealth,
+  postDownloaderUpdate,
   fetchLibrary,
   fetchLikedRows,
   fetchLikes,
   fetchSuggestions,
+  getServerUrl,
   likeKeyFor,
   resolveTrack,
   searchSongs,
   setLiked,
+  setServerUrl,
   waitForDownload,
+  type DownloaderStatus,
   type Health,
   type LikedRow,
   type SearchHit,
@@ -77,6 +83,19 @@ export default function App() {
   const [likes, setLikes] = useState<Set<string>>(new Set());
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
+  const [toast, setToast] = useState<{ id: number; msg: string } | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+  // frontend download gate: max 2 at once, ~2s between starts,
+  // 5-minute pause after a rate-limit style failure
+  const dlActive = useRef(0);
+  const dlLastStart = useRef(0);
+  const dlCooldownUntil = useRef(0);
+
+  function showToast(msg: string) {
+    window.clearTimeout(toastTimer.current);
+    setToast({ id: Date.now(), msg });
+    toastTimer.current = window.setTimeout(() => setToast(null), 2500);
+  }
   const [sheetOpen, setSheetOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const { theme, setTheme } = useTheme();
@@ -154,6 +173,37 @@ export default function App() {
       .then(setHealth)
       .catch(() => setHealth(null));
   }, [refreshLibrary, refreshLikes]);
+
+  // downloader status for the health banner (mount + every 60s)
+  const [dlStatus, setDlStatus] = useState<DownloaderStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    async function poll() {
+      try {
+        const s = await fetchDownloader();
+        if (alive) setDlStatus(s);
+      } catch {
+        if (alive) setDlStatus(null);
+      }
+    }
+    poll();
+    const t = window.setInterval(poll, 60000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, []);
+
+  // deep link: #diagnostics opens the diagnostics page
+  useEffect(() => {
+    function applyHash() {
+      if (window.location.hash === "#diagnostics") go("diagnostics");
+    }
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Publish fixed-bar heights for mobile scroll padding. No-ops on
   // desktop (stack is display:none there, so both read 0px).
@@ -255,16 +305,59 @@ export default function App() {
   }
 
   async function downloadSong(dz: number, mapKey: string) {
+    const now = Date.now();
+    if (now < dlCooldownUntil.current) {
+      const secs = Math.ceil((dlCooldownUntil.current - now) / 1000);
+      showToast(`Downloads paused (rate limited) — retry in ${secs}s`);
+      return;
+    }
     setDl((prev) => ({ ...prev, [mapKey]: { state: "working", progress: 0 } }));
+    showToast("Downloading…");
+    // wait for a slot (2 max) with ~2s spacing between starts
+    let queuedShown = false;
+    for (;;) {
+      if (dlActive.current < 2) {
+        const gap = 2000 - (Date.now() - dlLastStart.current);
+        if (gap <= 0) break;
+        if (!queuedShown) {
+          queuedShown = true;
+          setDl((prev) => ({ ...prev, [mapKey]: { state: "queued", progress: 0 } }));
+        }
+        await new Promise((r) => setTimeout(r, Math.min(gap, 500)));
+        continue;
+      }
+      if (!queuedShown) {
+        queuedShown = true;
+        setDl((prev) => ({ ...prev, [mapKey]: { state: "queued", progress: 0 } }));
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (queuedShown) {
+      setDl((prev) => ({ ...prev, [mapKey]: { state: "working", progress: 0 } }));
+    }
+    dlActive.current++;
+    dlLastStart.current = Date.now();
     try {
       await enqueueDownload(dz);
       await waitForDownload(dz, (progress) =>
         setDl((prev) => ({ ...prev, [mapKey]: { state: "working", progress } }))
       );
       setDl((prev) => ({ ...prev, [mapKey]: { state: "done", progress: 100 } }));
+      showToast("Downloaded");
       await refreshLibrary();
-    } catch {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "download failed";
+      if (/429|throttl|rate.?limit|sign.?in|bot/i.test(msg)) {
+        dlCooldownUntil.current = Date.now() + 5 * 60 * 1000;
+        showToast("YouTube is rate limiting — downloads paused 5 min");
+      } else if (/extract|unsupported url|ejs|js runtime|challenge/i.test(msg)) {
+        showToast("Download failed (extractor) — see Settings → Diagnostics");
+      } else {
+        showToast("Download failed");
+      }
       setDl((prev) => ({ ...prev, [mapKey]: { state: "error", progress: 0 } }));
+    } finally {
+      dlActive.current = Math.max(0, dlActive.current - 1);
     }
   }
 
@@ -344,6 +437,15 @@ export default function App() {
           setQuery("");
           setHits([]);
         }}
+        serverUrl={getServerUrl()}
+        onSaveServerUrl={(url) => {
+          setServerUrl(url);
+          refreshLibrary();
+          fetchHealth()
+            .then(setHealth)
+            .catch(() => setHealth(null));
+        }}
+        onOpenDiagnostics={() => go("diagnostics")}
       />
       <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)]">
         <div className="hidden md:block">
@@ -362,6 +464,49 @@ export default function App() {
           onTouchEnd={onTouchEnd}
           className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6"
         >
+          {dlStatus?.health === "outdated" && (
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm backdrop-blur-xl">
+              <span className="flex-1 text-foreground/85">
+                Downloader needs an update.
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const s = await postDownloaderUpdate();
+                    setDlStatus(s);
+                    showToast("Downloader updated");
+                  } catch {
+                    showToast("Update failed");
+                  }
+                }}
+                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
+              >
+                Update
+              </button>
+            </div>
+          )}
+          {dlStatus?.health === "rate_limited" && (
+            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm text-foreground/80 backdrop-blur-xl">
+              YouTube is rate limiting right now — streaming and downloads may
+              fail. Please wait a few minutes and try again.
+            </div>
+          )}
+          {dlStatus?.health === "js_runtime_missing" && (
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm backdrop-blur-xl">
+              <span className="flex-1 text-foreground/85">
+                A JavaScript runtime is needed — install Deno or Node 22+, then
+                re-check.
+              </span>
+              <button
+                type="button"
+                onClick={() => go("diagnostics")}
+                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
+              >
+                Details
+              </button>
+            </div>
+          )}
           {page === "search" && (
             <section className="space-y-3">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
@@ -490,6 +635,10 @@ export default function App() {
               )}
             </section>
           )}
+
+          {page === "diagnostics" && (
+            <Diagnostics onToast={showToast} />
+          )}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -576,6 +725,21 @@ export default function App() {
 
       <AnimatePresence>
         {sheetOpen && <NowPlayingSheet onClose={() => setSheetOpen(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {toast !== null && (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, y: 12, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, x: "-50%" }}
+            transition={{ type: "spring", stiffness: 400, damping: 35 }}
+            className="pointer-events-none fixed bottom-36 left-1/2 z-[110] rounded-full border border-border/50 bg-background/95 px-5 py-2.5 text-sm text-foreground shadow-lg backdrop-blur-2xl md:bottom-28"
+          >
+            {toast.msg}
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
     </MotionConfig>

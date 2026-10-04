@@ -1,11 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useMotionValue,
+  useMotionValueEvent,
+  useTransform,
+} from "framer-motion";
 
 import { formatTime, type Song } from "@/lib/api";
-import { Check, Download, Heart, ListPlus, MoreHorizontal } from "lucide-react";
+import { haptic } from "@/native/haptics";
+import {
+  Check,
+  Clock,
+  Download,
+  Heart,
+  ListPlus,
+  MoreHorizontal,
+  RotateCcw,
+} from "lucide-react";
 
-export type DlState = "idle" | "working" | "done" | "error";
+export type DlState = "idle" | "queued" | "working" | "done" | "error";
 
 interface Props {
   song: Song;
@@ -34,7 +49,6 @@ export function SongCard({
   onPlay,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [revealed, setRevealed] = useState(false);
   const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({
     top: 0,
     right: 0,
@@ -45,11 +59,29 @@ export function SongCard({
   // touchend is followed ~300ms later by a synthetic mousedown; without
   // this guard the long-press menu would close the instant it opens
   const lastTouchEnd = useRef(0);
+  // swipe bookkeeping: row threshold, threshold-crossed flag, edge-zone start
+  const rowRef = useRef<HTMLDivElement>(null);
+  const thresholdRef = useRef(0);
+  const crossedRef = useRef(false);
+  const edgeStartRef = useRef(false);
   // swipe-right distance drives the queue action reveal
   const x = useMotionValue(0);
   const actionOpacity = useTransform(x, [0, 90], [0, 1]);
   const actionScale = useTransform(x, [0, 90], [0.6, 1]);
-  const leftOpacity = useTransform(x, [-90, 0], [1, 0]);
+  // download strip reveal while swiping left
+  const stripOpacity = useTransform(x, [-120, -20], [1, 0]);
+  const stripScale = useTransform(x, [-140, -40], [1.2, 0.85]);
+
+  // haptic tick the moment the download threshold is crossed
+  useMotionValueEvent(x, "change", (v) => {
+    const t = thresholdRef.current;
+    if (!crossedRef.current && t > 0 && v < -t) {
+      crossedRef.current = true;
+      void haptic("medium");
+    } else if (v > -t + 12) {
+      crossedRef.current = false;
+    }
+  });
 
   // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
@@ -100,6 +132,8 @@ export function SongCard({
   // long-press (~400ms without moving) opens the context menu in place
   function onTouchStart(e: React.TouchEvent) {
     const t = e.touches[0];
+    // left 40px belongs to edge-swipe-back: never start a row swipe there
+    edgeStartRef.current = t.clientX < 40;
     const sx = t.clientX;
     const sy = t.clientY;
     window.clearTimeout(pressTimer.current);
@@ -120,11 +154,6 @@ export function SongCard({
     document.addEventListener("touchend", up);
   }
 
-  function bodyTap() {
-    if (revealed) setRevealed(false);
-    else onPlay();
-  }
-
   return (
     <div
       className="relative"
@@ -139,61 +168,59 @@ export function SongCard({
         <ListPlus className="h-5 w-5" />
         <span className="text-xs font-semibold">Queue</span>
       </motion.div>
-      {/* revealed while swiping left — row actions */}
+      {/* revealed while swiping left — download strip */}
       <motion.div
-        style={{ opacity: leftOpacity }}
-        className="absolute inset-y-0 right-0 flex w-[150px] items-center justify-end gap-1 pr-2"
+        style={{ opacity: stripOpacity }}
+        className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"
       >
-        <button
-          type="button"
-          onClick={() => {
-            setRevealed(false);
-            onAddToQueue();
-          }}
-          className="flex items-center gap-1.5 rounded-full bg-foreground px-3 py-2 text-xs font-semibold text-background"
-        >
-          <ListPlus className="h-4 w-4" />
-          Queue
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setRevealed(false);
-            onToggleLike();
-          }}
-          className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold ${
-            liked ? "bg-foreground text-background" : "bg-foreground/10 text-foreground"
-          }`}
-        >
-          <Heart className={`h-4 w-4 ${liked ? "fill-background" : ""}`} />
-          {liked ? "Liked" : "Like"}
-        </button>
+        <motion.span style={{ scale: stripScale }} className="flex items-center gap-1.5">
+          <Download className="h-5 w-5" />
+          <span className="text-xs font-semibold">Download</span>
+        </motion.span>
       </motion.div>
       <motion.div
+        ref={rowRef}
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.15}
         dragDirectionLock
         style={{ x }}
-        animate={{ x: revealed ? -150 : 0 }}
+        onDragStart={() => {
+          thresholdRef.current =
+            (rowRef.current?.clientWidth ?? 0) * 0.35;
+          crossedRef.current = false;
+        }}
         onDragEnd={(_, info) => {
+          // edge-back zone owns this gesture: bounce back, do nothing
+          if (edgeStartRef.current) {
+            edgeStartRef.current = false;
+            return;
+          }
+          const t = thresholdRef.current;
           if (info.offset.x > 90) {
-            setRevealed(false);
             onAddToQueue();
-          } else if (info.offset.x < -70) {
-            setRevealed(true);
-          } else if (revealed) {
-            setRevealed(false);
+          } else if (
+            (t > 0 && info.offset.x < -t) ||
+            info.velocity.x < -600
+          ) {
+            // already have it (or busy): rubber-band bounce only
+            if (
+              downloadableDz === null ||
+              (dl !== "idle" && dl !== "error")
+            ) {
+              return;
+            }
+            onDownload();
           }
         }}
-        className={`relative flex cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+        className={`relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
             ? "border-foreground/40 bg-foreground/[0.08]"
             : "border-border/40 bg-background/60"
         }`}
       ><button
         type="button"
-        onClick={bodyTap}
+        onClick={onPlay}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
         {song.coverUrl !== "" && (
@@ -207,7 +234,7 @@ export function SongCard({
       </button>
       <button
         type="button"
-        onClick={bodyTap}
+        onClick={onPlay}
         className="min-w-0 flex-1 text-left"
       >
         <p className="truncate text-sm font-semibold text-foreground/90">
@@ -221,6 +248,46 @@ export function SongCard({
         </p>
       </button>
       {liked && <Heart className="h-4 w-4 flex-shrink-0 fill-foreground text-foreground" />}
+      {dl === "working" && (
+        <span title={`Downloading ${dlProgress}%`} className="flex-shrink-0">
+          <svg viewBox="0 0 16 16" className="h-4 w-4 -rotate-90">
+            <circle cx="8" cy="8" r="7" fill="none" strokeWidth="2" className="stroke-foreground/15" />
+            <circle
+              cx="8"
+              cy="8"
+              r="7"
+              fill="none"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="stroke-foreground"
+              strokeDasharray={43.98}
+              strokeDashoffset={43.98 * (1 - dlProgress / 100)}
+            />
+          </svg>
+        </span>
+      )}
+      {dl === "queued" && (
+        <span title="Queued — waiting for a download slot" className="flex flex-shrink-0 items-center gap-1 text-[11px] text-foreground/60">
+          <Clock className="h-4 w-4" />
+          Queued
+        </span>
+      )}
+      {dl === "done" && (
+        <span title="Downloaded" className="flex flex-shrink-0">
+          <Check className="h-4 w-4 text-foreground" />
+        </span>
+      )}
+      {dl === "error" && (
+        <button
+          type="button"
+          title="Retry download"
+          aria-label="Retry download"
+          onClick={onDownload}
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border/40 text-foreground/70 hover:text-foreground"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
+      )}
       <div className="relative flex-shrink-0">
         <button
           ref={btnRef}
@@ -259,7 +326,12 @@ export function SongCard({
             </button>
             <button
               type="button"
-              disabled={downloadableDz === null || dl === "working" || dl === "done"}
+              disabled={
+                downloadableDz === null ||
+                dl === "working" ||
+                dl === "queued" ||
+                dl === "done"
+              }
               onClick={() => pick(onDownload)}
               className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5 disabled:opacity-40"
             >
@@ -270,11 +342,13 @@ export function SongCard({
               )}
               {dl === "working"
                 ? `Downloading ${dlProgress}%`
-                : dl === "done"
-                  ? "Downloaded"
-                  : dl === "error"
-                    ? "Retry download"
-                    : "Download"}
+                : dl === "queued"
+                  ? "Queued"
+                  : dl === "done"
+                    ? "Downloaded"
+                    : dl === "error"
+                      ? "Retry download"
+                      : "Download"}
             </button>
             <button
               type="button"

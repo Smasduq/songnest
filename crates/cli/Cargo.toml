@@ -3,8 +3,14 @@ name = "songnest-cli"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# RustyPipe extractor spike (test CLI only). Main build is unaffected.
+rp = ["songnest-extract/rustypipe"]
+
 [dependencies]
 songnest-core = { path = "../core" }
+songnest-extract = { path = "../extract" }
 tokio.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -16,3 +22,5 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
+sha2 = "0.10"
+hex = "0.4"

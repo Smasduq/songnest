@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-import { Check, Monitor, Moon, Search, Settings, Sun, X } from "lucide-react";
+import { Check, Monitor, Moon, Search, Settings, Sun, Wrench, X } from "lucide-react";
 import type { Health } from "@/lib/api";
 
 export type Theme = "light" | "dark" | "system";
@@ -46,6 +46,9 @@ export function Header({
   onQueryChange,
   onSubmitSearch,
   onClearSearch,
+  serverUrl,
+  onSaveServerUrl,
+  onOpenDiagnostics,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
@@ -54,9 +57,13 @@ export function Header({
   onQueryChange: (q: string) => void;
   onSubmitSearch: () => void;
   onClearSearch: () => void;
+  serverUrl: string;
+  onSaveServerUrl: (url: string) => void;
+  onOpenDiagnostics: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [serverDraft, setServerDraft] = useState(serverUrl);
   const menuRef = useRef<HTMLDivElement>(null);
   const slotRef = useRef<HTMLFormElement>(null);
   const reduceMotion = useReducedMotion();
@@ -184,7 +191,10 @@ export function Header({
           type="button"
           aria-label="Open settings"
           aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setServerDraft(serverUrl);
+            setOpen((o) => !o);
+          }}
           className={`flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur transition-colors ${
             open
               ? "border-foreground/40 bg-foreground/[0.08] text-foreground"
@@ -234,6 +244,40 @@ export function Header({
             <p className="px-2 pb-1.5 pt-3 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
               Server
             </p>
+            <form
+              className="flex gap-1.5 px-2 pb-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSaveServerUrl(serverDraft);
+              }}
+            >
+              <input
+                value={serverDraft}
+                onChange={(e) => setServerDraft(e.target.value)}
+                placeholder="http://192.168.1.10:8787"
+                autoComplete="off"
+                autoCorrect="off"
+                aria-label="Server URL"
+                className="h-8 min-w-0 flex-1 rounded-full border border-border/60 bg-surface/80 px-3 text-xs text-foreground placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/40"
+              />
+              <button
+                type="submit"
+                className="h-8 flex-shrink-0 rounded-full bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90"
+              >
+                Set
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onOpenDiagnostics();
+              }}
+              className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+            >
+              <Wrench className="h-4 w-4" />
+              Downloader diagnostics
+            </button>
             {server === null ? (
               <p className="px-2 text-xs text-foreground/60">
                 Unreachable — is the backend on :8787?

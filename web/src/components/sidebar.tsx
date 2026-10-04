@@ -1,6 +1,6 @@
-import { Heart, Home, Library, Search } from "lucide-react";
+import { Heart, Home, Library, Search, Wrench } from "lucide-react";
 
-export type Page = "home" | "library" | "liked" | "search";
+export type Page = "home" | "library" | "liked" | "search" | "diagnostics";
 
 interface Props {
   page: Page;
@@ -49,6 +49,14 @@ export function Sidebar({
         <Heart className="h-4 w-4" />
         Liked Songs
         <span className="ml-auto text-xs text-foreground/40">{likedCount}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onNavigate("diagnostics")}
+        className={linkCls(page === "diagnostics")}
+      >
+        <Wrench className="h-4 w-4" />
+        Diagnostics
       </button>
       <div className="mt-auto px-3 pb-1 pt-4 text-[11px] leading-relaxed text-foreground/40">
         Downloads live in your library. Streams play from the server on :8787.

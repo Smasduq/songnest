@@ -1,5 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::sync::RwLock;
+
+#[cfg(feature = "rp")]
+mod extract_cli;
 
 #[derive(Deserialize)]
 struct DzSearch {
@@ -47,8 +51,8 @@ struct AppState {
     dl_sem: Arc<tokio::sync::Semaphore>,
     /// set when YouTube 429s/bot-checks us; queue + resolves pause meanwhile
     yt_cooldown_until: Arc<Mutex<Option<Instant>>>,
-    /// latest yt-dlp release seen (once-per-startup GitHub check)
-    ytdlp_latest: Arc<Mutex<Option<String>>>,
+    /// downloader (yt-dlp binary, JS runtimes, health, updater)
+    downloader: DownloaderState,
 }
 
 /// Seconds left on the YouTube cooldown, if any.
@@ -106,6 +110,578 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     s
 }
 
+// ---- downloader: yt-dlp binary, JS runtimes, health, updates ----
+//
+// Runtime minimums below are quoted from
+// https://github.com/yt-dlp/yt-dlp/wiki/EJS as fetched on 2026-10-04:
+//   deno:      "Minimum supported version: `2.3.0`" (enabled by default)
+//   node:      "Minimum supported version: `22.0.0`"
+//   bun:       "Minimum supported version: `1.2.11`",
+//              "Latest supported version: `1.3.14`",
+//              "Support for `bun` is deprecated!"
+//   quickjs:   "Minimum supported QuickJS version: `2023-12-9`"
+//   quickjs-ng: "All versions of QuickJS-NG are supported."
+// Wiki priority order (also in --help): deno, node, quickjs, bun.
+const DENO_MIN: (u64, u64, u64) = (2, 3, 0);
+const NODE_MIN: (u64, u64, u64) = (22, 0, 0);
+const BUN_MIN: (u64, u64, u64) = (1, 2, 11);
+const BUN_MAX: (u64, u64, u64) = (1, 3, 14);
+const QUICKJS_MIN_DATE: (u64, u64, u64) = (2023, 12, 9);
+
+/// Exact binary names probed on PATH (change 8: nothing else is executed).
+const RUNTIME_BINS: &[&str] = &["deno", "node", "bun", "qjs", "quickjs-ng"];
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Health {
+    Ok,
+    RateLimited,
+    Outdated,
+    Offline,
+    #[serde(rename = "js_runtime_missing")]
+    JsRuntimeMissing,
+    #[default]
+    Unknown,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct RuntimeInfo {
+    name: String,
+    version: String,
+    supported: bool,
+    path: String,
+}
+
+#[derive(Clone, Default)]
+struct DownloaderInner {
+    binary_path: String,
+    /// "managed" | "path" | "none"
+    binary_source: String,
+    version: String,
+    latest: Option<String>,
+    update_available: bool,
+    last_check_at: i64,
+    last_update_at: Option<i64>,
+    health: Health,
+    last_error: String,
+    ffmpeg: Option<String>,
+    runtimes: Vec<RuntimeInfo>,
+    runtime_in_use: Option<String>,
+    /// auto | deno | node | bun | quickjs, optionally name:/explicit/path
+    runtime_setting: String,
+    /// parsed (name, path) from runtime_setting when it carries a path
+    setting_path: Option<(String, String)>,
+    /// None = unknown (see ejs_note)
+    ejs_available: Option<bool>,
+    ejs_note: String,
+    /// in-flight resolve/download calls; updater waits for 0
+    active: u64,
+}
+
+#[derive(Clone, Default)]
+struct DownloaderState {
+    inner: Arc<RwLock<DownloaderInner>>,
+}
+
+impl DownloaderState {
+    fn read<R>(&self, f: impl FnOnce(&DownloaderInner) -> R) -> R {
+        f(&self.inner.read().unwrap())
+    }
+
+    /// Hold an in-flight slot (RAII: see ActiveGuard).
+    fn hold(&self) -> ActiveGuard {
+        self.inner.write().unwrap().active += 1;
+        ActiveGuard {
+            inner: self.inner.clone(),
+        }
+    }
+
+    /// (binary, extra args) without the in-flight guard (sync call sites
+    /// hold their own guard).
+    fn argv(&self) -> anyhow::Result<(String, Vec<String>)> {
+        let (bin, name, path) = {
+            let d = self.inner.read().unwrap();
+            if d.binary_path.is_empty() {
+                anyhow::bail!("no yt-dlp binary configured");
+            }
+            let (name, path) = pick_runtime(
+                &d.runtimes,
+                &d.runtime_setting,
+                d.setting_path.as_ref()
+            )
+            .unwrap_or_default();
+            (d.binary_path.clone(), name, path)
+        };
+        let mut args = Vec::new();
+        if !name.is_empty() {
+            args.push("--js-runtimes".to_string());
+            args.push(match path {
+                Some(p) => format!("{name}:{p}"),
+                None => name.clone(),
+            });
+            self.inner.write().unwrap().runtime_in_use = Some(name);
+        } else {
+            self.inner.write().unwrap().runtime_in_use = None;
+        }
+        Ok((bin, args))
+    }
+}
+
+/// Detect everything about the downloader. Runs at startup (data dir = CWD).
+async fn init_downloader() -> DownloaderState {
+    let st = DownloaderState::default();
+    let (bin, source) = resolve_ytdlp_binary().await;
+    let version = if bin.is_empty() {
+        String::new()
+    } else {
+        run_timeout(tokio::process::Command::new(&bin).arg("--version"), 10)
+            .await
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .unwrap_or_default()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let (ejs_available, ejs_note) = probe_ejs(&bin, &source).await;
+    let ffmpeg = probe_ffmpeg().await;
+    let setting_raw = std::fs::read_to_string("js_runtime.txt")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let setting_env = std::env::var("SONGNEST_JS_RUNTIME").unwrap_or_default();
+    let (setting, setting_path) = parse_runtime_setting(if setting_raw.is_empty() {
+        &setting_env
+    } else {
+        &setting_raw
+    });
+    let runtimes = detect_runtimes(setting_path.clone()).await;
+    {
+        let mut d = st.inner.write().unwrap();
+        d.binary_path = bin;
+        d.binary_source = source;
+        d.version = version;
+        d.ejs_available = ejs_available;
+        d.ejs_note = ejs_note;
+        d.ffmpeg = ffmpeg;
+        d.runtime_setting = setting;
+        d.setting_path = setting_path;
+        d.runtimes = runtimes;
+        d.health = Health::Unknown;
+    }
+    st
+}
+
+/// RAII guard: the in-flight counter goes back down on drop, so errors,
+/// early returns and panics can never leave it stuck above zero.
+struct ActiveGuard {
+    inner: Arc<RwLock<DownloaderInner>>,
+}
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        if let Ok(mut d) = self.inner.write() {
+            d.active = d.active.saturating_sub(1);
+        }
+    }
+}
+
+struct YtDlpCall {
+    cmd: tokio::process::Command,
+    _guard: ActiveGuard,
+}
+
+
+/// Run a command with a timeout. None on timeout, spawn failure, or non-UTF8 issues.
+async fn run_timeout(
+    cmd: &mut tokio::process::Command,
+    secs: u64,
+) -> Option<std::process::Output> {
+    tokio::time::timeout(Duration::from_secs(secs), cmd.output())
+        .await
+        .ok()?
+        .ok()
+}
+
+/// Parse the first `N.N.N` triple in a --version string.
+fn parse_triple(s: &str) -> Option<(u64, u64, u64)> {
+    let mut nums = Vec::new();
+    let mut cur = String::new();
+    for ch in s.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_digit() {
+            cur.push(ch);
+        } else if ch == '.' && !cur.is_empty() {
+            nums.push(cur.parse::<u64>().ok()?);
+            cur = String::new();
+        } else if !cur.is_empty() {
+            nums.push(cur.parse::<u64>().ok()?);
+            cur = String::new();
+            if nums.len() == 3 {
+                break;
+            }
+        }
+    }
+    if nums.len() == 3 {
+        Some((nums[0], nums[1], nums[2]))
+    } else {
+        None
+    }
+}
+
+/// Parse the first `YYYY-MM-DD` date in a version string (QuickJS style).
+fn parse_qjs_date(s: &str) -> Option<(u64, u64, u64)> {
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len().saturating_sub(9) {
+        let w = &s[i..i + 10];
+        let parts: Vec<&str> = w.split('-').collect();
+        if parts.len() == 3
+            && parts[0].len() == 4
+            && parts[1].len() == 2
+            && parts[2].len() == 2
+            && parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_digit()))
+        {
+            return Some((
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            ));
+        }
+    }
+    None
+}
+
+/// (name, supported) decision for one probed runtime.
+fn classify_runtime(bin: &str, version_out: &str) -> (String, bool) {
+    match bin {
+        "deno" => (
+            "deno".to_string(),
+            parse_triple(version_out).is_some_and(|v| v >= DENO_MIN),
+        ),
+        "node" => (
+            "node".to_string(),
+            parse_triple(version_out).is_some_and(|v| v >= NODE_MIN),
+        ),
+        "bun" => (
+            "bun".to_string(),
+            parse_triple(version_out).is_some_and(|v| v >= BUN_MIN && v <= BUN_MAX),
+        ),
+        "qjs" => {
+            // classic QuickJS prints a date; a quickjs-ng binary answers semver
+            if let Some(d) = parse_qjs_date(version_out) {
+                ("quickjs".to_string(), d >= QUICKJS_MIN_DATE)
+            } else if parse_triple(version_out).is_some() {
+                ("quickjs".to_string(), true)
+            } else {
+                ("quickjs".to_string(), false)
+            }
+        }
+        _ => {
+            // "quickjs-ng" binary (or future names): semver or date = supported
+            if parse_triple(version_out).is_some() || parse_qjs_date(version_out).is_some() {
+                ("quickjs".to_string(), true)
+            } else {
+                ("quickjs".to_string(), false)
+            }
+        }
+    }
+}
+
+/// Probe one binary name with `--version` (8s timeout each).
+async fn probe_runtime(bin: &str) -> Option<(String, String)> {
+    let out = run_timeout(tokio::process::Command::new(bin).arg("--version"), 8).await?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let version = text.lines().next().unwrap_or("").trim().to_string();
+    if version.is_empty() {
+        return None;
+    }
+    Some((bin.to_string(), version))
+}
+
+/// Detect runtimes: exact binary names on PATH, or an explicit user path.
+async fn detect_runtimes(setting_path: Option<(String, String)>) -> Vec<RuntimeInfo> {
+    let mut out = Vec::new();
+    if let Some((name, path)) = setting_path {
+        // user explicitly set this path: probe exactly it, nothing else extra
+        let probed = run_timeout(
+            tokio::process::Command::new(&path).arg("--version"),
+            8,
+        )
+        .await;
+        if let Some(o) = probed.filter(|o| o.status.success()) {
+            let version = String::from_utf8(o.stdout)
+                .ok()
+                .and_then(|t| t.lines().next().map(|l| l.trim().to_string()))
+                .unwrap_or_default();
+            let (n, supported) = classify_runtime(&name, &version);
+            out.push(RuntimeInfo { name: n, version, supported, path });
+        }
+        return out;
+    }
+    for bin in RUNTIME_BINS {
+        if let Some((_, version)) = probe_runtime(bin).await {
+            let (name, supported) = classify_runtime(bin, &version);
+            out.push(RuntimeInfo {
+                name,
+                version,
+                supported,
+                path: bin.to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// Pick (runtime name, explicit path or None) for the --js-runtimes arg.
+/// Auto order follows the wiki: deno, node, quickjs, bun.
+fn pick_runtime(
+    runtimes: &[RuntimeInfo],
+    setting: &str,
+    setting_path: Option<&(String, String)>,
+) -> Option<(String, Option<String>)> {
+    let want = setting.split(':').next().unwrap_or("auto");
+    let usable = |name: &str| {
+        runtimes
+            .iter()
+            .find(|r| r.name == name && r.supported)
+            .map(|_| {
+                let explicit = setting_path
+                    .filter(|(n, _)| n == name)
+                    .map(|(_, p)| p.clone());
+                (name.to_string(), explicit)
+            })
+    };
+    if want != "auto" {
+        return usable(want);
+    }
+    ["deno", "node", "quickjs", "bun"]
+        .into_iter()
+        .find_map(usable)
+}
+
+/// Split a `name:/path` runtime setting. Returns (name, Option<(name, path)>).
+fn parse_runtime_setting(raw: &str) -> (String, Option<(String, String)>) {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return ("auto".to_string(), None);
+    }
+    match raw.split_once(':') {
+        Some((name, path)) if !path.is_empty() => {
+            (name.to_string(), Some((name.to_string(), path.to_string())))
+        }
+        _ => (raw.to_string(), None),
+    }
+}
+/// Managed binary location inside the app data dir.
+fn managed_bin_path() -> std::path::PathBuf {
+    let exe = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+    std::path::Path::new("bin").join(exe)
+}
+
+/// Resolve the yt-dlp binary: managed copy -> PATH -> none.
+/// Returns (path to exec, source label).
+async fn resolve_ytdlp_binary() -> (String, String) {
+    let managed = managed_bin_path();
+    if managed.exists() {
+        return (
+            managed.to_string_lossy().into_owned(),
+            "managed".to_string(),
+        );
+    }
+    // PATH check without executing anything: an executable file named
+    // yt-dlp in any PATH dir (plus .exe on Windows).
+    let on_path = std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|d| {
+                #[cfg(windows)]
+                if d.join("yt-dlp.exe").is_file() {
+                    return true;
+                }
+                d.join("yt-dlp").is_file()
+            })
+        })
+        .unwrap_or(false);
+    if on_path {
+        return ("yt-dlp".to_string(), "path".to_string());
+    }
+    (String::new(), "none".to_string())
+}
+
+/// Three-way EJS check. Returns (available, explanation).
+/// - managed/standalone binaries bundle yt-dlp-ejs -> true
+/// - script installs: probe `import yt_dlp_ejs` with the interpreter from
+///   the script's own shebang line (never whatever python3 resolves to)
+/// - unidentifiable binaries -> None (unknown), never assumed false:
+///   distro packages may ship yt-dlp-ejs separately
+async fn probe_ejs(binary: &str, source: &str) -> (Option<bool>, String) {
+    if source == "managed" {
+        return (
+            Some(true),
+            "bundled with the official standalone build".to_string(),
+        );
+    }
+    if binary.is_empty() || binary == "yt-dlp" {
+        // PATH lookup: find the real file first
+        let found = ["yt-dlp", "/usr/bin/yt-dlp", "/usr/local/bin/yt-dlp"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists());
+        match found {
+            Some(p) => return probe_ejs_file(p).await,
+            None => {
+                return (
+                    None,
+                    "no yt-dlp binary to inspect (PATH lookup failed)".to_string(),
+                )
+            }
+        }
+    }
+    probe_ejs_file(binary).await
+}
+
+async fn probe_ejs_file(path: &str) -> (Option<bool>, String) {
+    let bytes = tokio::fs::read(path).await.unwrap_or_default();
+    if bytes.is_empty() {
+        return (None, "could not read the yt-dlp binary".to_string());
+    }
+    // ELF / Mach-O / PE = standalone executable -> EJS bundled
+    let standalone = bytes.starts_with(b"\x7fELF")
+        || bytes.starts_with(b"\xcf\xfa\xed\xfb")
+        || bytes.starts_with(b"\xfe\xed\xfa\xce")
+        || bytes.starts_with(b"MZ");
+    if standalone {
+        return (
+            Some(true),
+            "standalone executable bundles yt-dlp-ejs".to_string(),
+        );
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let first = text.lines().next().unwrap_or("");
+    if !(first.starts_with("#!") && first.contains("python")) {
+        return (
+            None,
+            "binary type unrecognized; cannot tell if yt-dlp-ejs is present".to_string(),
+        );
+    }
+    // shebang interpreter, e.g. "#!/usr/bin/python3" (env -S forms included)
+    let interp = first
+        .trim_start_matches("#!")
+        .trim()
+        .replace("/usr/bin/env -S ", "")
+        .replace("/usr/bin/env ", "");
+    let interp = interp.split_whitespace().next().unwrap_or("").to_string();
+    if interp.is_empty() {
+        return (
+            None,
+            "shebang interpreter could not be determined".to_string(),
+        );
+    }
+    let ok = run_timeout(
+        tokio::process::Command::new(&interp)
+            .arg("-c")
+            .arg("import yt_dlp_ejs"),
+        15,
+    )
+    .await
+    .is_some_and(|o| o.status.success());
+    if ok {
+        (
+            Some(true),
+            format!("yt_dlp_ejs importable under {interp}"),
+        )
+    } else {
+        (
+            None,
+            format!(
+                "yt_dlp_ejs not importable under {interp}; distro packages may ship it separately"
+            ),
+        )
+    }
+}
+
+async fn probe_ffmpeg() -> Option<String> {
+    let out = run_timeout(
+        tokio::process::Command::new("ffmpeg").arg("-version"),
+        8,
+    )
+    .await?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout)
+        .ok()
+        .and_then(|t| t.lines().next().map(|l| l.trim().to_string()))
+        .filter(|l| !l.is_empty())
+}
+
+/// Single entry point for every yt-dlp invocation. Resolves the configured
+/// binary plus the `--js-runtimes` choice, and holds the in-flight guard
+/// until the returned call is dropped.
+fn ytdlp_command(dl: &DownloaderState) -> anyhow::Result<YtDlpCall> {
+    let (bin, args) = dl.argv()?;
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.args(&args);
+    Ok(YtDlpCall {
+        cmd,
+        _guard: dl.hold(),
+    })
+}
+
+/// Compare date-style versions ("2025.01.26", optional suffix).
+/// Numeric components compare numerically, extras lexicographically.
+fn cmp_date_version(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    fn parts(s: &str) -> Vec<String> {
+        s.split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_string())
+            .collect()
+    }
+    let (ap, bp) = (parts(a), parts(b));
+    for (x, y) in ap.iter().zip(bp.iter()) {
+        let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+            (Ok(xn), Ok(yn)) => xn.cmp(&yn),
+            _ => x.cmp(y),
+        };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    ap.len().cmp(&bp.len())
+}
+
+/// Health classification. Order matters: offline -> rate_limited ->
+/// js_runtime_missing -> outdated. Only Outdated may trigger an update.
+fn classify_failure(stderr_text: &str, io_failed: bool) -> Health {
+    let t = stderr_text.to_lowercase();
+    if io_failed
+        || t.contains("dns")
+        || t.contains("network is unreachable")
+        || t.contains("connection refused")
+        || t.contains("connection timed out")
+        || t.contains("temporary failure")
+    {
+        return Health::Offline;
+    }
+    if t.contains("429")
+        || t.contains("sign in to confirm")
+        || t.contains("bot check")
+    {
+        return Health::RateLimited;
+    }
+    if t.contains("js runtime")
+        || t.contains("javascript runtime")
+        || t.contains("challenge solving")
+        || t.contains("could not solve")
+        || t.contains("ejs script")
+        || t.contains("challenge solver")
+    {
+        return Health::JsRuntimeMissing;
+    }
+    Health::Outdated
+}
+
 /// Extra yt-dlp args from `SONGNEST_COOKIES` (default `cookies.txt`).
 /// Empty when the file doesn't exist: YouTube works until it 429s us.
 fn cookie_args() -> Vec<String> {
@@ -118,11 +694,14 @@ fn cookie_args() -> Vec<String> {
     }
 }
 
-fn download(video_id: &str, out_dir: &str) -> anyhow::Result<String> {
+fn download(dl: &DownloaderState, video_id: &str, out_dir: &str) -> anyhow::Result<String> {
     let template = format!("{out_dir}/%(id)s.%(ext)s");
-    let status = Command::new("yt-dlp")
-        .args(cookie_args())
-        .args([
+    let _guard = dl.hold();
+    let (bin, js_args) = dl.argv()?;
+    let mut args = cookie_args();
+    args.extend(js_args);
+    args.extend(
+        [
             "-f",
             "ba[ext=m4a]/ba",
             "-x",
@@ -131,8 +710,11 @@ fn download(video_id: &str, out_dir: &str) -> anyhow::Result<String> {
             "-o",
             &template,
             &format!("https://youtube.com/watch?v={video_id}"),
-        ])
-        .status()?;
+        ]
+        .into_iter()
+        .map(|s| s.to_string()),
+    );
+    let status = Command::new(&bin).args(&args).status()?;
     anyhow::ensure!(status.success(), "yt-dlp failed");
     Ok(format!("{out_dir}/{video_id}.m4a"))
 }
@@ -170,7 +752,7 @@ use axum::{
     extract::{Path, Query, State},
     http::Request,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{get, post},
 };
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
@@ -237,6 +819,7 @@ fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
 /// Run `ytsearch5` for a Deezer track and return the best video id + score.
 /// Returns None when YouTube yields nothing (throttled or truly absent).
 async fn youtube_match(
+    dl: &DownloaderState,
     db: &Db,
     t: &DzTrack,
     fresh: bool,
@@ -246,7 +829,8 @@ async fn youtube_match(
             return Some(hit);
         }
     }
-    let out = tokio::process::Command::new("yt-dlp")
+    let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
+    let out = cmd
         .args(cookie_args())
         .args([
             "-J",
@@ -299,12 +883,20 @@ fn parse_progress(line: &str) -> Option<u8> {
 
 /// Blocking yt-dlp download with human-like pauses and progress.
 /// Err carries stderr tail for throttle detection.
-fn download_job(video_id: &str, out_dir: &str, on_progress: &dyn Fn(u8)) -> Result<String, String> {
+fn download_job(
+    dl: &DownloaderState,
+    video_id: &str,
+    out_dir: &str,
+    on_progress: &dyn Fn(u8),
+) -> Result<String, String> {
     use std::io::BufRead;
     let template = format!("{out_dir}/%(id)s.%(ext)s");
-    let mut child = Command::new("yt-dlp")
-        .args(cookie_args())
-        .args([
+    let _guard = dl.hold();
+    let (bin, js_args) = dl.argv().map_err(|e| e.to_string())?;
+    let mut args = cookie_args();
+    args.extend(js_args);
+    args.extend(
+        [
             "--sleep-requests",
             "2",
             "--sleep-interval",
@@ -321,7 +913,12 @@ fn download_job(video_id: &str, out_dir: &str, on_progress: &dyn Fn(u8)) -> Resu
             "-o",
             &template,
             &format!("https://youtube.com/watch?v={video_id}"),
-        ])
+        ]
+        .into_iter()
+        .map(|s| s.to_string()),
+    );
+    let mut child = Command::new(&bin)
+        .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -373,7 +970,7 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         }
     };
     // 2. cached match: each song is searched once, even across queue jobs
-    let Some((video_id, _)) = youtube_match(&s.db, &t, false).await else {
+    let Some((video_id, _)) = youtube_match(&s.downloader, &s.db, &t, false).await else {
         set_job(&s.db, job_id, "error", 0, Some("no YouTube match (throttled?)"));
         return;
     };
@@ -388,8 +985,9 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
     // 3. blocking download with progress (sleeps included)
     let db2 = s.db.clone();
     let vid2 = video_id.clone();
+    let dl_state = s.downloader.clone();
     let dl = tokio::task::spawn_blocking(move || {
-        download_job(&vid2, "music", &|p| {
+        download_job(&dl_state, &vid2, "music", &|p| {
             let _ = db2.lock().unwrap().execute(
                 "UPDATE downloads SET progress=?1, updated_at=strftime('%s','now') WHERE id=?2",
                 rusqlite::params![p as i64, job_id],
@@ -811,7 +1409,7 @@ async fn api_resolve(
         return StatusCode::BAD_GATEWAY.into_response();
     };
     let fresh = q.get("fresh").map(|v| v == "1").unwrap_or(false);
-    match youtube_match(&s.db, &t, fresh).await {
+    match youtube_match(&s.downloader, &s.db, &t, fresh).await {
         Some((video_id, _)) => Json(serde_json::json!({
             "dz": t.id,
             "title": t.title,
@@ -839,16 +1437,103 @@ async fn api_resolve(
     }
 }
 
-async fn health(State(s): State<AppState>) -> impl IntoResponse {
-    let ver = tokio::process::Command::new("yt-dlp")
-        .arg("--version")
-        .output()
+/// GET /api/downloader — full downloader status for diagnostics.
+async fn api_downloader(State(s): State<AppState>) -> impl IntoResponse {
+    let v = s.downloader.read(|d| {
+        serde_json::json!({
+            "binary_source": d.binary_source,
+            "path": d.binary_path,
+            "version": d.version,
+            "latest_known_version": d.latest,
+            "update_available": d.update_available,
+            "last_check_at": d.last_check_at,
+            "last_update_at": d.last_update_at,
+            "health": d.health,
+            "last_error": d.last_error,
+            "ffmpeg": d.ffmpeg,
+            "js_runtimes": d.runtimes,
+            "js_runtime_in_use": d.runtime_in_use,
+            "js_runtime_setting": d.runtime_setting,
+            "ejs_available": d.ejs_available,
+            "ejs_note": d.ejs_note,
+        })
+    });
+    Json(v)
+}
+
+/// POST /api/downloader/recheck — run one health probe now, no update.
+async fn api_downloader_recheck(State(s): State<AppState>) -> impl IntoResponse {
+    health_check_once(&s).await;
+    api_downloader(State(s)).await.into_response()
+}
+
+/// POST /api/downloader/update — run the update flow now.
+async fn api_downloader_update(State(s): State<AppState>) -> impl IntoResponse {
+    let outcome = run_update(&s).await;
+    // refresh health once after the attempt (no further side effects)
+    health_check_once(&s).await;
+    let _ = outcome;
+    api_downloader(State(s)).await.into_response()
+}
+
+#[derive(Deserialize)]
+struct RuntimeSettingBody {
+    setting: String,
+}
+
+/// POST /api/downloader/runtime {"setting": "auto|deno|node|bun|quickjs[":/path]"}
+async fn api_downloader_runtime(
+    State(s): State<AppState>,
+    Json(b): Json<RuntimeSettingBody>,
+) -> impl IntoResponse {
+    let (setting, setting_path) = parse_runtime_setting(&b.setting);
+    if setting != "auto"
+        && !["deno", "node", "bun", "quickjs"].contains(&setting.as_str())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "setting must be auto|deno|node|bun|quickjs",
+        )
+            .into_response();
+    }
+    if std::fs::write("js_runtime.txt", &b.setting).is_err() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not persist setting",
+        )
+            .into_response();
+    }
+    {
+        let mut d = s.downloader.inner.write().unwrap();
+        d.runtime_setting = setting;
+        d.setting_path = setting_path;
+    }
+    // re-detect against the new setting (cheap, local probes only)
+    let runtimes = {
+        let (setting, path) = s
+            .downloader
+            .read(|d| (d.runtime_setting.clone(), d.setting_path.clone()));
+        detect_runtimes(path.map(|(_, p)| {
+            (
+                setting.split(':').next().unwrap_or("auto").to_string(),
+                p,
+            )
+        }))
         .await
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    };
+    s.downloader.inner.write().unwrap().runtimes = runtimes;
+    api_downloader(State(s)).await.into_response()
+}
+
+async fn health(State(s): State<AppState>) -> impl IntoResponse {
+    let d = s.downloader.read(|d| {
+        (
+            d.version.clone(),
+            d.latest.clone(),
+            d.update_available,
+        )
+    });
+    let (ver, latest, update_available) = d;
     let depth: i64 = s
         .db
         .lock()
@@ -859,11 +1544,6 @@ async fn health(State(s): State<AppState>) -> impl IntoResponse {
             |r| r.get(0),
         )
         .unwrap_or(0);
-    let latest = s.ytdlp_latest.lock().unwrap().clone();
-    let update_available = match &latest {
-        Some(l) => !l.contains(&ver) && !ver.is_empty(),
-        None => false,
-    };
     Json(serde_json::json!({
         "yt_dlp": ver,
         "latest_release": latest,
@@ -873,10 +1553,391 @@ async fn health(State(s): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// Wait for zero in-flight calls, up to 10 minutes. False = timed out
+/// (updater skips the cycle and tries again in 24h).
+async fn wait_idle(dl: &DownloaderState) -> bool {
+    let start = Instant::now();
+    loop {
+        let n = dl.read(|d| d.active);
+        if n == 0 {
+            return true;
+        }
+        if start.elapsed() > Duration::from_secs(600) {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
+/// Verify downloaded bytes against a SHA2-256SUMS-style listing.
+/// Refuses (Err) on missing entry or mismatch.
+fn verify_checksum(
+    bytes: &[u8],
+    sums_text: &str,
+    asset_name: &str,
+) -> Result<(), String> {
+    let expect = sums_text.lines().find_map(|l| {
+        let mut it = l.split_whitespace();
+        let (hash, name) = (it.next()?, it.next()?);
+        (name.trim_start_matches('*') == asset_name).then(|| hash.to_string())
+    });
+    match expect {
+        None => Err("checksum file has no entry for the asset; refusing to install".to_string()),
+        Some(expect) => {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(bytes);
+            if hex::encode(h.finalize()) == expect.to_lowercase() {
+                Ok(())
+            } else {
+                Err("checksum mismatch; refusing to install".to_string())
+            }
+        }
+    }
+}
+
+/// Atomically swap tmp into dest (keeping .bak), with rollback.
+/// `probe` answers whether a file is a working binary.
+fn swap_binary(
+    tmp: &std::path::Path,
+    dest: &std::path::Path,
+    probe: &dyn Fn(&std::path::Path) -> bool,
+) -> Result<(), String> {
+    if !probe(tmp) {
+        let _ = std::fs::remove_file(tmp);
+        return Err("downloaded binary failed --version; discarded".to_string());
+    }
+    let had_previous = dest.exists();
+    let bak = dest.with_extension("bak");
+    if had_previous {
+        let _ = std::fs::remove_file(&bak);
+        if std::fs::rename(dest, &bak).is_err() {
+            let _ = std::fs::remove_file(tmp);
+            return Err("could not stage previous binary".to_string());
+        }
+    }
+    if std::fs::rename(tmp, dest).is_err() {
+        if had_previous {
+            let _ = std::fs::rename(&bak, dest);
+        }
+        return Err("install rename failed; previous copy restored".to_string());
+    }
+    if !probe(dest) {
+        let _ = std::fs::remove_file(dest);
+        if had_previous {
+            let _ = std::fs::rename(&bak, dest);
+        }
+        return Err("installed binary failed --version; rolled back".to_string());
+    }
+    Ok(())
+}
+
+fn install_path() -> std::path::PathBuf {
+    managed_bin_path()
+}
+
+/// Download + verify + atomically install a managed yt-dlp copy.
+/// Returns a human-readable outcome. Never touches PATH installs.
+async fn run_update(s: &AppState) -> String {
+    let http = &s.http;
+    let dl = &s.downloader;
+    let rel: serde_json::Value = match tokio::time::timeout(
+        Duration::from_secs(15),
+        http
+            .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+            .header("User-Agent", "songnest")
+            .send(),
+    )
+    .await
+    {
+        Ok(Ok(r)) => match r.json().await {
+            Ok(j) => j,
+            Err(e) => return format!("release metadata unreadable: {e}"),
+        },
+        _ => {
+            return "offline or GitHub unreachable".to_string();
+        }
+    };
+    let assets = rel
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let by_name = |n: &str| {
+        assets.iter().find_map(|a| {
+            (a.get("name").and_then(|v| v.as_str()) == Some(n))
+                .then(|| a.get("browser_download_url").and_then(|u| u.as_str()))
+                .flatten()
+                .map(|u| u.to_string())
+        })
+    };
+    // asset names verified against the live release asset list
+    let want_asset = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "yt-dlp_macos"
+        } else {
+            "yt-dlp_macos_legacy"
+        }
+    } else if cfg!(target_arch = "aarch64") {
+        "yt-dlp_linux_aarch64"
+    } else {
+        "yt-dlp_linux"
+    };
+    let Some(asset_url) = by_name(want_asset) else {
+        return format!("release has no asset named {want_asset}");
+    };
+    let Some(sums_url) = by_name("SHA2-256SUMS") else {
+        return "release is missing SHA2-256SUMS; refusing to install".to_string();
+    };
+    async fn get_bytes(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
+        let resp = tokio::time::timeout(
+            Duration::from_secs(300),
+            http.get(url).header("User-Agent", "songnest").send(),
+        )
+        .await
+        .ok()?
+        .ok()?;
+        let resp = resp.error_for_status().ok()?;
+        resp.bytes().await.ok().map(|b| b.to_vec())
+    }
+    let (sums, bytes) = tokio::join!(
+        get_bytes(http, &sums_url),
+        get_bytes(http, &asset_url)
+    );
+    let (Some(sums), Some(bytes)) = (sums, bytes) else {
+        return "download failed".to_string();
+    };
+    let sums = String::from_utf8_lossy(&sums);
+    if let Err(e) = verify_checksum(&bytes, &sums, want_asset) {
+        return e;
+    }
+    let dest = install_path();
+    if let Some(parent) = dest.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // never swap under running jobs
+    if !wait_idle(dl).await {
+        return "downloads in progress; update skipped, will retry in 24h".to_string();
+    }
+    let tmp = dest.with_extension("new");
+    if std::fs::write(&tmp, &bytes).is_err() {
+        return "could not write temp file".to_string();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    }
+    // Windows: cannot overwrite a running exe -> rename aside first
+    #[cfg(windows)]
+    {
+        if dest.exists() {
+            let _ = std::fs::rename(&dest, dest.with_extension("old"));
+        }
+    }
+    let probe = |p: &std::path::Path| {
+        std::process::Command::new(p)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    if let Err(e) = swap_binary(&tmp, &dest, &probe) {
+        return e;
+    }
+    // re-detect against the fresh binary
+    let fresh = init_downloader().await;
+    let (version, ejs, note) = fresh.read(|d| {
+        (
+            d.version.clone(),
+            d.ejs_available,
+            d.ejs_note.clone(),
+        )
+    });
+    {
+        let mut d = dl.inner.write().unwrap();
+        d.binary_path = dest.to_string_lossy().into_owned();
+        d.binary_source = "managed".to_string();
+        d.version = version;
+        d.ejs_available = ejs;
+        d.ejs_note = note;
+        d.latest = None;
+        d.update_available = false;
+        d.last_check_at = now_unix();
+        d.last_update_at = Some(now_unix());
+        d.health = Health::Unknown;
+        d.last_error.clear();
+    }
+    "updated to the managed copy".to_string()
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// One update-check cycle: compare installed vs latest, update when a
+/// managed copy exists and something newer is out.
+async fn update_cycle(s: &AppState) {
+    let (has_managed, current) = s.downloader.read(|d| {
+        (
+            d.binary_source == "managed" && !d.binary_path.is_empty(),
+            d.version.clone(),
+        )
+    });
+    let latest: Option<String> = fetch_latest_tag(&s.http).await;
+    {
+        let mut d = s.downloader.inner.write().unwrap();
+        d.latest = latest.clone();
+        d.last_check_at = now_unix();
+        d.update_available = match (&latest, current.is_empty()) {
+            (Some(l), false) => {
+                cmp_date_version(l.trim_start_matches(|c: char| !c.is_ascii_alphanumeric()), &current)
+                    == std::cmp::Ordering::Greater
+            }
+            _ => false,
+        };
+    }
+    if has_managed && s.downloader.read(|d| d.update_available) {
+        let outcome = run_update(s).await;
+        s.downloader.inner.write().unwrap().last_error = outcome;
+    }
+}
+
+async fn fetch_latest_tag(http: &reqwest::Client) -> Option<String> {
+    let r = tokio::time::timeout(
+        Duration::from_secs(15),
+        http
+            .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+            .header("User-Agent", "songnest")
+            .send(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    let j: serde_json::Value = r.json().await.ok()?;
+    j.get("tag_name")
+        .and_then(|v| v.as_str())
+        .map(|t| t.to_string())
+}
+
+/// Health probe: resolve the stable test video, classify the failure.
+/// Order: offline -> rate_limited -> js_runtime_missing -> outdated.
+/// Only Outdated triggers an update attempt (then exactly one re-check).
+async fn health_check(s: &AppState) {
+    // fast path: no runtime at all and none configured
+    let runtimes_empty = s.downloader.read(|d| {
+        d.runtimes.iter().all(|r| !r.supported)
+    });
+    let probe = tokio::time::timeout(
+        Duration::from_secs(60),
+        async {
+            let YtDlpCall { mut cmd, _guard } = ytdlp_command(&s.downloader)?;
+            cmd.args(cookie_args())
+                .args(["-g", "https://youtube.com/watch?v=jNQXAC9IVRw"])
+                .output()
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
+        },
+    )
+    .await;
+    let (health, err) = match probe {
+        Err(_) => (Health::Offline, "probe timed out (offline?)".to_string()),
+        Ok(Err(e)) => {
+            let msg = e.to_string();
+            if msg.contains("no yt-dlp binary") {
+                (Health::Outdated, msg)
+            } else {
+                (Health::Offline, msg)
+            }
+        }
+        Ok(Ok(out)) => {
+            let text = String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr);
+            if out.status.success() && !text.lines().next().unwrap_or("").trim().is_empty() {
+                (Health::Ok, String::new())
+            } else {
+                (classify_failure(&text, false), text.lines().take(3).collect::<Vec<_>>().join(" | "))
+            }
+        }
+    };
+    // no supported runtime + failing probe that smells like it -> that state
+    let health = if runtimes_empty && health != Health::Ok {
+        Health::JsRuntimeMissing
+    } else {
+        health
+    };
+    {
+        let mut d = s.downloader.inner.write().unwrap();
+        d.health = health;
+        d.last_error = err;
+    }
+    if health == Health::Outdated {
+        let outcome = run_update(s).await;
+        {
+            let mut d = s.downloader.inner.write().unwrap();
+            if !outcome.starts_with("updated") && !outcome.starts_with("offline") {
+                d.last_error = outcome;
+            }
+        }
+        // exactly one re-check after the attempt
+        health_check_once(s).await;
+    }
+}
+
+/// Single health probe without update side effects (used for re-check).
+async fn health_check_once(s: &AppState) {
+    let probe = tokio::time::timeout(
+        Duration::from_secs(60),
+        async {
+            let YtDlpCall { mut cmd, _guard } = ytdlp_command(&s.downloader)?;
+            cmd.args(cookie_args())
+                .args(["-g", "https://youtube.com/watch?v=jNQXAC9IVRw"])
+                .output()
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))
+        },
+    )
+    .await;
+    let (health, err) = match probe {
+        Err(_) => (Health::Offline, "probe timed out (offline?)".to_string()),
+        Ok(Err(e)) => (Health::Offline, e.to_string()),
+        Ok(Ok(out)) => {
+            let text = String::from_utf8_lossy(&out.stdout).into_owned()
+                + &String::from_utf8_lossy(&out.stderr);
+            if out.status.success() {
+                (Health::Ok, String::new())
+            } else {
+                (classify_failure(&text, false), text.lines().take(3).collect::<Vec<_>>().join(" | "))
+            }
+        }
+    };
+    let mut d = s.downloader.inner.write().unwrap();
+    d.health = health;
+    d.last_error = err;
+}
+
+async fn run_downloader_tasks(s: AppState) {
+    // startup: check, then health
+    update_cycle(&s).await;
+    health_check(&s).await;
+    // 24h loop
+    loop {
+        tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
+        update_cycle(&s).await;
+        health_check(&s).await;
+    }
+}
+
 async fn serve() -> anyhow::Result<()> {
     let conn = rusqlite::Connection::open("library.db")?;
     ensure_schema(&conn)?;
     let db: Db = Arc::new(Mutex::new(conn));
+    let downloader = init_downloader().await;
     let state = AppState {
         db,
         http: reqwest::Client::new(),
@@ -884,30 +1945,13 @@ async fn serve() -> anyhow::Result<()> {
         resolve_lock: Arc::new(tokio::sync::Mutex::new(())),
         dl_sem: Arc::new(tokio::sync::Semaphore::new(2)),
         yt_cooldown_until: Arc::new(Mutex::new(None)),
-        ytdlp_latest: Arc::new(Mutex::new(None)),
+        downloader,
     };
     // two queue workers = max 2 concurrent downloads, ever
     tokio::spawn(download_worker(state.clone()));
     tokio::spawn(download_worker(state.clone()));
-    // once-per-startup yt-dlp freshness check (best effort)
-    tokio::spawn({
-        let st = state.clone();
-        async move {
-            if let Ok(r) = st
-                .http
-                .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
-                .header("User-Agent", "songnest")
-                .send()
-                .await
-            {
-                if let Ok(j) = r.json::<serde_json::Value>().await {
-                    if let Some(tag) = j.get("tag_name").and_then(|v| v.as_str()) {
-                        *st.ytdlp_latest.lock().unwrap() = Some(tag.to_string());
-                    }
-                }
-            }
-        }
-    });
+    // downloader updater loop + health checks are spawned by run_downloader_tasks()
+    tokio::spawn(run_downloader_tasks(state.clone()));
     let app = Router::new()
         .route("/", get(index))
         .route("/track/:id", get(track))
@@ -921,6 +1965,10 @@ async fn serve() -> anyhow::Result<()> {
         .route("/api/enqueue", post(enqueue))
         .route("/api/downloads", get(downloads_list))
         .route("/api/health", get(health))
+        .route("/api/downloader", get(api_downloader))
+        .route("/api/downloader/update", post(api_downloader_update))
+        .route("/api/downloader/recheck", post(api_downloader_recheck))
+        .route("/api/downloader/runtime", post(api_downloader_runtime))
         .route("/api/suggest", get(api_suggest))
         .route("/api/likes", get(api_likes))
         .route("/api/like", post(api_like).delete(api_unlike))
@@ -929,7 +1977,9 @@ async fn serve() -> anyhow::Result<()> {
         .route("/api/resolve", get(api_resolve))
         .layer(CorsLayer::very_permissive())
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8787").await?;
+    // LAN binding so phones on the same WiFi can reach the API/QrReader
+    // (localhost-only would refuse them). Loopback still works locally.
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8787").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -1037,8 +2087,9 @@ for(const e of ['seeking','seeked','timeupdate','loadedmetadata','error'])
 
 /// Best-effort Deezer cover for a bare YouTube id: yt title -> Deezer search.
 /// Returns None when the video has no Deezer match (e.g. non-music videos).
-async fn deezer_cover_for_youtube(http: &reqwest::Client, video_id: &str) -> Option<String> {
-    let out = tokio::process::Command::new("yt-dlp")
+async fn deezer_cover_for_youtube(s: &AppState, video_id: &str) -> Option<String> {
+    let YtDlpCall { mut cmd, _guard } = ytdlp_command(&s.downloader).ok()?;
+    let out = cmd
         .args(cookie_args())
         .args([
             "--get-title",
@@ -1061,7 +2112,7 @@ async fn deezer_cover_for_youtube(http: &reqwest::Client, video_id: &str) -> Opt
     if title.is_empty() {
         return None;
     }
-    let res: DzSearch = http
+    let res: DzSearch = s.http
         .get("https://api.deezer.com/search")
         .query(&[("q", &title)])
         .send()
@@ -1089,7 +2140,7 @@ async fn stream_player(State(s): State<AppState>, Path(id): Path<String>) -> imp
     // 2. fallback: YouTube title -> Deezer search
     let cover = match db_cover.filter(|c| !c.is_empty()) {
         Some(c) => Some(c),
-        None => deezer_cover_for_youtube(&s.http, &id).await,
+        None => deezer_cover_for_youtube(&s, &id).await,
     };
     let img = match cover {
         Some(url) => format!("<img src=\"{}\" width=\"300\">", esc(&url)),
@@ -1195,7 +2246,7 @@ async fn dplay(
     let vid: Option<String> = if cooling.is_some() {
         None
     } else {
-        youtube_match(&s.db, &t, fresh).await.map(|(v, _)| v)
+        youtube_match(&s.downloader, &s.db, &t, fresh).await.map(|(v, _)| v)
     };
     let (audio_src, note) = match (vid, cooling) {
         (Some(v), _) => (
@@ -1300,7 +2351,8 @@ async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<Stri
         return Ok(u); // someone else may have finished while we waited
     }
 
-    let out = tokio::process::Command::new("yt-dlp")
+    let YtDlpCall { mut cmd, _guard } = ytdlp_command(&s.downloader)?;
+    let out = cmd
         .args(cookie_args())
         .args([
             "-f",
@@ -1379,6 +2431,14 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let arg = args.get(1).expect("usage: cli <query> | serve [--data-dir DIR]");
+    #[cfg(feature = "rp")]
+    if arg == "extract" || arg == "extract-compare" || arg == "search" {
+        return extract_cli::extract_cli(&args).await;
+    }
+    #[cfg(not(feature = "rp"))]
+    if arg == "extract" || arg == "extract-compare" || arg == "search" {
+        anyhow::bail!("rebuild with --features rp for the extractor spike");
+    }
     if arg == "serve" {
         // desktop mode: keep library.db/music/cookies.txt in the app data dir
         let dir = std::env::var("SONGNEST_DATA_DIR").ok().or_else(|| {
@@ -1422,9 +2482,10 @@ async fn main() -> anyhow::Result<()> {
     let conn = rusqlite::Connection::open("library.db")?;
     ensure_schema(&conn)?;
     let db: Db = Arc::new(Mutex::new(conn));
+    let dl = init_downloader().await;
 
     // cached Deezer->YouTube match: each song is searched once
-    let Some((best_id, best_score)) = youtube_match(&db, t, false).await
+    let Some((best_id, best_score)) = youtube_match(&dl, &db, t, false).await
     else {
         // yt-dlp exits 0 with entries:[] when YouTube throttles search
         anyhow::bail!(
@@ -1434,7 +2495,7 @@ async fn main() -> anyhow::Result<()> {
     println!("best: https://youtube.com/watch?v={best_id} (score {best_score})");
 
     std::fs::create_dir_all("music")?;
-    let path = download(&best_id, "music")?;
+    let path = download(&dl, &best_id, "music")?;
 
     let cover = reqwest::get(&t.album.cover_big).await?.bytes().await?;
     tag_file(&path, t, &cover)?;
@@ -1459,4 +2520,186 @@ async fn main() -> anyhow::Result<()> {
     )?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod downloader_tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn date_versions_compare_numerically() {
+        assert_eq!(cmp_date_version("2025.01.26", "2025.01.26"), Ordering::Equal);
+        assert_eq!(cmp_date_version("2026.08.19", "2025.01.26"), Ordering::Greater);
+        assert_eq!(cmp_date_version("2025.01.9", "2025.01.26"), Ordering::Less);
+        assert_eq!(cmp_date_version("2026.08.19", "2026.08.19.1"), Ordering::Less);
+    }
+
+    #[test]
+    fn version_triples_parse() {
+        assert_eq!(parse_triple("deno 2.9.6 (stable)"), Some((2, 9, 6)));
+        assert_eq!(parse_triple("v26.8.2"), Some((26, 8, 2)));
+        assert_eq!(parse_triple("1.3.14"), Some((1, 3, 14)));
+        assert_eq!(parse_triple("nope"), None);
+        assert_eq!(parse_qjs_date("QuickJS v2025-04-26"), Some((2025, 4, 26)));
+        assert_eq!(parse_qjs_date("qjs 1.0"), None);
+    }
+
+    #[test]
+    fn runtime_support_decisions() {
+        assert_eq!(classify_runtime("deno", "deno 2.9.6").1, true);
+        assert_eq!(classify_runtime("deno", "deno 2.2.0").1, false);
+        assert_eq!(classify_runtime("node", "v26.8.2").1, true);
+        assert_eq!(classify_runtime("node", "v20.0.0").1, false);
+        assert_eq!(classify_runtime("bun", "1.3.0").1, true);
+        assert_eq!(classify_runtime("bun", "1.4.0").1, false); // past wiki max
+        assert_eq!(classify_runtime("bun", "1.2.0").1, false); // below wiki min
+        assert_eq!(classify_runtime("qjs", "QuickJS v2025-04-26").1, true);
+        assert_eq!(classify_runtime("qjs", "QuickJS v2020-01-01").1, false);
+    }
+
+    #[test]
+    fn runtime_pick_order_and_setting() {
+        let mk = |name: &str, supported: bool| RuntimeInfo {
+            name: name.to_string(),
+            version: "x".to_string(),
+            supported,
+            path: name.to_string(),
+        };
+        let all = vec![mk("bun", true), mk("quickjs", true), mk("node", true), mk("deno", true)];
+        // auto follows wiki order regardless of probe order
+        assert_eq!(
+            pick_runtime(&all, "auto", None).map(|v| v.0),
+            Some("deno".to_string())
+        );
+        let no_deno: Vec<RuntimeInfo> =
+            all.into_iter().filter(|r| r.name != "deno").collect();
+        assert_eq!(
+            pick_runtime(&no_deno, "auto", None).map(|v| v.0),
+            Some("node".to_string())
+        );
+        // explicit setting respected, unsupported explicit choice = None
+        assert!(pick_runtime(&no_deno, "deno", None).is_none());
+        let only_bun = vec![mk("bun", true)];
+        assert_eq!(
+            pick_runtime(&only_bun, "bun", None).map(|v| v.0),
+            Some("bun".to_string())
+        );
+        // unsupported runtimes never picked
+        let old = vec![mk("deno", false)];
+        assert!(pick_runtime(&old, "auto", None).is_none());
+    }
+
+    #[test]
+    fn checksum_match_mismatch_missing() {
+        let data = b"fake-binary-bytes";
+        let good = {
+            use sha2::{Digest, Sha256};
+            let mut h = Sha256::new();
+            h.update(data);
+            hex::encode(h.finalize())
+        };
+        let sums = format!("{good}  yt-dlp_linux\ndeadbeef  other\n");
+        assert!(verify_checksum(data, &sums, "yt-dlp_linux").is_ok());
+        assert!(verify_checksum(b"tampered", &sums, "yt-dlp_linux").is_err());
+        assert!(verify_checksum(data, &sums, "yt-dlp.exe").is_err());
+        assert!(verify_checksum(data, "", "yt-dlp_linux").is_err());
+    }
+
+    #[test]
+    fn swap_rejects_bad_binary_and_keeps_old() {
+        let dir = std::env::temp_dir().join(format!("songnest-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("yt-dlp");
+        let tmp = dir.join("yt-dlp.new");
+        std::fs::write(&dest, b"old-good").unwrap();
+        std::fs::write(&tmp, b"new-bad").unwrap();
+        let bad_probe = |_: &std::path::Path| false;
+        assert!(swap_binary(&tmp, &dest, &bad_probe).is_err());
+        // tmp discarded, live copy untouched
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old-good");
+        assert!(!tmp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn swap_installs_and_rolls_back() {
+        let dir = std::env::temp_dir().join(format!("songnest-test2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("yt-dlp");
+        // fresh install (no previous copy)
+        let tmp = dir.join("yt-dlp.new");
+        std::fs::write(&tmp, b"v2").unwrap();
+        let good_probe = |_: &std::path::Path| true;
+        assert!(swap_binary(&tmp, &dest, &good_probe).is_ok());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"v2");
+        // post-install probe fails -> previous copy restored
+        let tmp2 = dir.join("yt-dlp.new");
+        std::fs::write(&tmp2, b"v3").unwrap();
+        let flaky = {
+            let n = std::cell::Cell::new(0);
+            move |_: &std::path::Path| {
+                n.set(n.get() + 1);
+                n.get() > 1 // tmp passes, dest fails
+            }
+        };
+        assert!(swap_binary(&tmp2, &dest, &flaky).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn guard_always_releases() {
+        let dl = DownloaderState::default();
+        assert_eq!(dl.read(|d| d.active), 0);
+        {
+            let _g1 = dl.hold();
+            assert_eq!(dl.read(|d| d.active), 1);
+            {
+                let _g2 = dl.hold();
+                assert_eq!(dl.read(|d| d.active), 2);
+            }
+            assert_eq!(dl.read(|d| d.active), 1);
+        }
+        assert_eq!(dl.read(|d| d.active), 0);
+    }
+
+    #[test]
+    fn failure_classification_order() {
+        // offline wins over everything
+        assert_eq!(
+            classify_failure("HTTP Error 429 plus DNS failure", true),
+            Health::Offline
+        );
+        assert_eq!(
+            classify_failure("nodename nor servname provided", true),
+            Health::Offline
+        );
+        // rate limit next
+        assert_eq!(
+            classify_failure("ERROR: HTTP Error 429 Too Many Requests", false),
+            Health::RateLimited
+        );
+        assert_eq!(
+            classify_failure("Sign in to confirm you're not a bot", false),
+            Health::RateLimited
+        );
+        // then JS runtime
+        assert_eq!(
+            classify_failure("No JS runtime available for challenge solving", false),
+            Health::JsRuntimeMissing
+        );
+        assert_eq!(
+            classify_failure("could not solve the challenge", false),
+            Health::JsRuntimeMissing
+        );
+        // everything else is outdated
+        assert_eq!(
+            classify_failure("ERROR: Unsupported URL", false),
+            Health::Outdated
+        );
+        assert_eq!(classify_failure("", false), Health::Outdated);
+    }
 }
