@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-motion";
 
@@ -60,7 +60,14 @@ function Anim({ id, children }: { id: string; children: ReactNode }) {
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
+  const [history, setHistory] = useState<Page[]>(["home"]);
+  const page = history[history.length - 1];
+  function go(p: Page) {
+    setHistory((h) => (h[h.length - 1] === p ? h : [...h, p]));
+  }
+  function back() {
+    setHistory((h) => (h.length > 1 ? h.slice(0, -1) : h));
+  }
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -73,6 +80,40 @@ export default function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const { theme, setTheme } = useTheme();
+  const mainRef = useRef<HTMLElement>(null);
+  const edgeRef = useRef<{
+    x: number;
+    t0: number;
+    lx: number;
+    lt: number;
+  } | null>(null);
+
+  // edge-swipe-back: touch starting within 20px of main's left edge pops
+  // the page history (commits past 40% width or on a fast flick)
+  function onTouchStart(e: React.TouchEvent) {
+    const r = mainRef.current?.getBoundingClientRect();
+    const t = e.touches[0];
+    if (r !== undefined && t.clientX - r.left <= 20 && history.length > 1) {
+      const now = performance.now();
+      edgeRef.current = { x: t.clientX, t0: now, lx: t.clientX, lt: now };
+    }
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    const cur = edgeRef.current;
+    if (cur === null) return;
+    cur.lx = e.touches[0].clientX;
+    cur.lt = performance.now();
+  }
+  function onTouchEnd() {
+    const cur = edgeRef.current;
+    edgeRef.current = null;
+    if (cur === null) return;
+    const width = mainRef.current?.getBoundingClientRect().width ?? 0;
+    if (width === 0) return;
+    const dx = cur.lx - cur.x;
+    const velocity = dx / Math.max(1, cur.lt - cur.t0); // px per ms
+    if (dx > width * 0.4 || velocity > 0.5) back();
+  }
   const reduceMotion = useReducedMotion();
 
   // playback state lives in the zustand store (audio element is module-level)
@@ -294,7 +335,7 @@ export default function App() {
         onQueryChange={setQuery}
         onSubmitSearch={() => {
           runSearch();
-          setPage("search");
+          go("search");
           if (window.matchMedia("(pointer: coarse)").matches) {
             (document.activeElement as HTMLElement | null)?.blur?.();
           }
@@ -308,13 +349,19 @@ export default function App() {
         <div className="hidden md:block">
           <Sidebar
             page={page}
-            onNavigate={setPage}
+            onNavigate={go}
             libraryCount={library.length}
             likedCount={likes.size}
           />
         </div>
 
-        <main className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6">
+        <main
+          ref={mainRef}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6"
+        >
           {page === "search" && (
             <section className="space-y-3">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
@@ -507,7 +554,7 @@ export default function App() {
               key={item.id}
               type="button"
               onClick={() => {
-                setPage(item.id);
+                go(item.id);
                 if (item.id === "search") {
                   requestAnimationFrame(() =>
                     document.getElementById("songnest-search")?.focus()

@@ -34,13 +34,22 @@ export function SongCard({
   onPlay,
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
+  const [revealed, setRevealed] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({
+    top: 0,
+    right: 0,
+  });
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pressTimer = useRef<number | undefined>(undefined);
+  // touchend is followed ~300ms later by a synthetic mousedown; without
+  // this guard the long-press menu would close the instant it opens
+  const lastTouchEnd = useRef(0);
   // swipe-right distance drives the queue action reveal
   const x = useMotionValue(0);
   const actionOpacity = useTransform(x, [0, 90], [0, 1]);
   const actionScale = useTransform(x, [0, 90], [0.6, 1]);
+  const leftOpacity = useTransform(x, [-90, 0], [1, 0]);
 
   // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
@@ -52,6 +61,7 @@ export function SongCard({
     }
     place();
     function close(e: MouseEvent) {
+      if (Date.now() - lastTouchEnd.current < 500) return;
       const t = e.target as Node;
       if (!menuRef.current?.contains(t) && !btnRef.current?.contains(t))
         setOpen(false);
@@ -79,8 +89,48 @@ export function SongCard({
     fn();
   }
 
+  function openAt(clientX: number, clientY: number) {
+    setPos({
+      top: Math.min(clientY, window.innerHeight - 220),
+      left: Math.max(8, Math.min(clientX - 96, window.innerWidth - 200)),
+    });
+    setOpen(true);
+  }
+
+  // long-press (~400ms without moving) opens the context menu in place
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    const sx = t.clientX;
+    const sy = t.clientY;
+    window.clearTimeout(pressTimer.current);
+    pressTimer.current = window.setTimeout(() => openAt(sx, sy), 400);
+    const cancel = (ev: TouchEvent) => {
+      const m = ev.touches[0];
+      if (m !== undefined && Math.hypot(m.clientX - sx, m.clientY - sy) > 10) {
+        window.clearTimeout(pressTimer.current);
+      }
+    };
+    const up = () => {
+      window.clearTimeout(pressTimer.current);
+      lastTouchEnd.current = Date.now();
+      document.removeEventListener("touchmove", cancel);
+      document.removeEventListener("touchend", up);
+    };
+    document.addEventListener("touchmove", cancel, { passive: true });
+    document.addEventListener("touchend", up);
+  }
+
+  function bodyTap() {
+    if (revealed) setRevealed(false);
+    else onPlay();
+  }
+
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onTouchStart={onTouchStart}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {/* revealed while swiping right — Spotify style */}
       <motion.div
         style={{ opacity: actionOpacity, scale: actionScale }}
@@ -89,14 +139,52 @@ export function SongCard({
         <ListPlus className="h-5 w-5" />
         <span className="text-xs font-semibold">Queue</span>
       </motion.div>
+      {/* revealed while swiping left — row actions */}
+      <motion.div
+        style={{ opacity: leftOpacity }}
+        className="absolute inset-y-0 right-0 flex w-[150px] items-center justify-end gap-1 pr-2"
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setRevealed(false);
+            onAddToQueue();
+          }}
+          className="flex items-center gap-1.5 rounded-full bg-foreground px-3 py-2 text-xs font-semibold text-background"
+        >
+          <ListPlus className="h-4 w-4" />
+          Queue
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setRevealed(false);
+            onToggleLike();
+          }}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold ${
+            liked ? "bg-foreground text-background" : "bg-foreground/10 text-foreground"
+          }`}
+        >
+          <Heart className={`h-4 w-4 ${liked ? "fill-background" : ""}`} />
+          {liked ? "Liked" : "Like"}
+        </button>
+      </motion.div>
       <motion.div
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.15}
         dragDirectionLock
         style={{ x }}
+        animate={{ x: revealed ? -150 : 0 }}
         onDragEnd={(_, info) => {
-          if (info.offset.x > 90) onAddToQueue();
+          if (info.offset.x > 90) {
+            setRevealed(false);
+            onAddToQueue();
+          } else if (info.offset.x < -70) {
+            setRevealed(true);
+          } else if (revealed) {
+            setRevealed(false);
+          }
         }}
         className={`relative flex cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
@@ -105,7 +193,7 @@ export function SongCard({
         }`}
       ><button
         type="button"
-        onClick={onPlay}
+        onClick={bodyTap}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
         {song.coverUrl !== "" && (
@@ -119,7 +207,7 @@ export function SongCard({
       </button>
       <button
         type="button"
-        onClick={onPlay}
+        onClick={bodyTap}
         className="min-w-0 flex-1 text-left"
       >
         <p className="truncate text-sm font-semibold text-foreground/90">
@@ -149,7 +237,10 @@ export function SongCard({
               <motion.div
                 key="song-menu"
                 ref={menuRef}
-                style={{ top: pos.top, right: pos.right }}
+                style={{
+                  top: pos.top,
+                  ...(pos.left !== undefined ? { left: pos.left } : { right: pos.right ?? 0 }),
+                }}
                 initial={{ opacity: 0, scale: 0.96, y: -4 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.98 }}
