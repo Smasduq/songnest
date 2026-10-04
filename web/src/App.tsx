@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-motion";
 
@@ -11,9 +11,10 @@ import { Diagnostics } from "@/components/diagnostics";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { PlayerBar } from "@/components/player-bar";
-import { SongCard, type DlState } from "@/components/song-card";
+import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
 import {
+  deleteTrack,
   dzOf,
   enqueueDownload,
   fetchDownloader,
@@ -46,10 +47,13 @@ function hitToSong(h: SearchHit): Song {
     duration: h.duration,
     coverUrl: h.cover,
     streamUrl: "",
+    deezerId: h.dz,
   };
 }
 
-/** Fade/slide wrapper so lists animate in and out (mobile feel). */
+/** Slide/fade wrapper so lists animate in and out (mobile feel).
+ *  Exit mirrors the queue rows (slide right + fade) so deletes and
+ *  unlikes leave the list the same way queue removals do. */
 function Anim({ id, children }: { id: string; children: ReactNode }) {
   return (
     <motion.div
@@ -57,7 +61,7 @@ function Anim({ id, children }: { id: string; children: ReactNode }) {
       layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
+      exit={{ opacity: 0, x: 24 }}
       transition={{ type: "spring", stiffness: 400, damping: 35 }}
     >
       {children}
@@ -365,15 +369,66 @@ export default function App() {
     return dl[mapKey] ?? { state: "idle", progress: 0 };
   }
 
+  const libraryDz = useMemo(
+    () =>
+      new Set(
+        library
+          .map((t) => t.deezerId)
+          .filter((d): d is number => typeof d === "number")
+      ),
+    [library]
+  );
+
+  /** True when the song exists as a file: library row, finished queue job,
+   *  or a Deezer id already in the library. */
+  function isDownloaded(song: Song, mapKey: string): boolean {
+    if (song.id.startsWith("db-")) return true;
+    if (dlFor(mapKey).state === "done") return true;
+    return song.deezerId != null && libraryDz.has(song.deezerId);
+  }
+
+  async function deleteSong(song: Song) {
+    const m = /^db-(\d+)$/.exec(song.id);
+    if (m === null) return;
+    try {
+      await deleteTrack(Number(m[1]));
+    } catch {
+      showToast("Delete failed");
+      return;
+    }
+    store.getState().removeFromQueue(song.id);
+    await refreshLibrary();
+    await refreshLikes();
+    // deleted while playing: move on (or pause when nothing is left)
+    if (activeTrack?.id === song.id) {
+      const st = store.getState();
+      const stillThere =
+        st.queue.some((t) => t.id === song.id) ||
+        st.library.some((t) => t.id === song.id);
+      if (!stillThere) {
+        if (st.queue.length + st.library.length === 0) {
+          if (st.playing) st.toggle();
+        } else {
+          st.next(true);
+        }
+      }
+    }
+    showToast("Deleted");
+  }
+
   function cardFor(
     song: Song,
     downloadableDz: number | null,
     mapKey: string,
     onPlay: () => void,
-    active = false
+    active = false,
+    swipe: SwipeLeftKind = "download"
   ) {
     const key = likeKeyFor(song);
     const d = dlFor(mapKey);
+    const onDownloadNow = () => {
+      if (downloadableDz !== null) downloadSong(downloadableDz, mapKey);
+    };
     return (
       <SongCard
         key={song.id}
@@ -383,10 +438,17 @@ export default function App() {
         dl={d.state}
         dlProgress={d.progress}
         active={active}
+        swipeLeft={swipe}
         onToggleLike={() => toggleLike(song)}
-        onDownload={() => {
-          if (downloadableDz !== null) downloadSong(downloadableDz, mapKey);
-        }}
+        onDownload={onDownloadNow}
+        onDelete={swipe === "delete" ? () => void deleteSong(song) : null}
+        onSwipeLeft={
+          swipe === "delete"
+            ? () => void deleteSong(song)
+            : swipe === "like"
+              ? () => toggleLike(song)
+              : onDownloadNow
+        }
         onAddToQueue={() => addToQueue(song)}
         onPlay={onPlay}
       />
@@ -403,6 +465,7 @@ export default function App() {
           duration: 0,
           coverUrl: r.cover,
           streamUrl: "",
+          deezerId: Number(r.key.slice(3)) || null,
         }
       : (
           library.find((t) => t.id === `db-${r.key.slice(3)}`) ?? {
@@ -413,6 +476,7 @@ export default function App() {
             duration: 0,
             coverUrl: r.cover,
             streamUrl: "",
+            deezerId: null,
           }
         )
   );
@@ -429,9 +493,6 @@ export default function App() {
         onSubmitSearch={() => {
           runSearch();
           go("search");
-          if (window.matchMedia("(pointer: coarse)").matches) {
-            (document.activeElement as HTMLElement | null)?.blur?.();
-          }
         }}
         onClearSearch={() => {
           setQuery("");
@@ -521,13 +582,22 @@ export default function App() {
               ) : (
               <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                 <AnimatePresence initial={false}>
-                  {hits.map((h) => (
-                    <Anim key={`hit-dz:${h.dz}`} id={`hit-dz:${h.dz}`}>
-                      {cardFor(hitToSong(h), h.dz, `hit-dz:${h.dz}`, () =>
-                        playHit(h)
-                      )}
-                    </Anim>
-                  ))}
+                  {hits.map((h) => {
+                    const s = hitToSong(h);
+                    const k = `hit-dz:${h.dz}`;
+                    return (
+                      <Anim key={k} id={k}>
+                        {cardFor(
+                          s,
+                          h.dz,
+                          k,
+                          () => playHit(h),
+                          false,
+                          isDownloaded(s, k) ? "like" : "download"
+                        )}
+                      </Anim>
+                    );
+                  })}
                 </AnimatePresence>
               </div>
               )}
@@ -557,13 +627,22 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
-                    {suggestions.map((h) => (
-                      <Anim key={`sug-dz:${h.dz}`} id={`sug-dz:${h.dz}`}>
-                        {cardFor(hitToSong(h), h.dz, `sug-dz:${h.dz}`, () =>
-                          playHit(h)
-                        )}
-                      </Anim>
-                    ))}
+                    {suggestions.map((h) => {
+                      const s = hitToSong(h);
+                      const k = `sug-dz:${h.dz}`;
+                      return (
+                        <Anim key={k} id={k}>
+                          {cardFor(
+                            s,
+                            h.dz,
+                            k,
+                            () => playHit(h),
+                            false,
+                            isDownloaded(s, k) ? "like" : "download"
+                          )}
+                        </Anim>
+                      );
+                    })}
                   </AnimatePresence>
                 </div>
               )}
@@ -592,7 +671,8 @@ export default function App() {
                           null,
                           `lib-${t.id}`,
                           () => playSong(t),
-                          t.id === activeTrack?.id
+                          t.id === activeTrack?.id,
+                          "delete"
                         )}
                       </Anim>
                     ))}
@@ -619,17 +699,21 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
-                    {likedSongs.map((t) => (
-                      <Anim key={`liked-${t.id}`} id={`liked-${t.id}`}>
-                        {cardFor(
-                          t,
-                          dzOf(t),
-                          `liked-${t.id}`,
-                          () => playSong(t),
-                          t.id === activeTrack?.id
-                        )}
-                      </Anim>
-                    ))}
+                    {likedSongs.map((t) => {
+                      const k = `liked-${t.id}`;
+                      return (
+                        <Anim key={k} id={k}>
+                          {cardFor(
+                            t,
+                            dzOf(t),
+                            k,
+                            () => playSong(t),
+                            t.id === activeTrack?.id,
+                            isDownloaded(t, k) ? "like" : "download"
+                          )}
+                        </Anim>
+                      );
+                    })}
                   </AnimatePresence>
                 </div>
               )}

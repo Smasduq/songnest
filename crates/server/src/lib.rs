@@ -804,7 +804,7 @@ use axum::{
     extract::{Path, Query, State},
     http::Request,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
@@ -872,7 +872,7 @@ fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
 /// `ytsearch5`; rustypipe searches in-process and reuses the same scorer.
 async fn youtube_match(
     dl: &DownloaderState,
-    backend: &Backend,
+    #[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))] backend: &Backend,
     db: &Db,
     t: &DzTrack,
     fresh: bool,
@@ -1485,6 +1485,32 @@ async fn api_unlike(
         }
         None => StatusCode::BAD_REQUEST.into_response(),
     }
+}
+
+/// DELETE /api/track/:id — delete a downloaded track: audio file, library
+/// row, and its `db:<id>` like (the song is gone, so the like goes too).
+/// Queue/match history is left alone (re-download reuses the match).
+async fn api_delete_track(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    let path: Option<String> = s
+        .db
+        .lock()
+        .unwrap()
+        .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+        .ok();
+    let Some(path) = path else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let _ = std::fs::remove_file(&path);
+    {
+        let db = s.db.lock().unwrap();
+        db.execute("DELETE FROM tracks WHERE id = ?1", [id]).ok();
+        db.execute("DELETE FROM liked WHERE key = ?1", [format!("db:{id}")])
+            .ok();
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 /// JSON API for the React frontend.
@@ -2203,6 +2229,7 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/suggest", get(api_suggest))
         .route("/api/likes", get(api_likes))
         .route("/api/like", post(api_like).delete(api_unlike))
+        .route("/api/track/:id", delete(api_delete_track))
         .route("/api/library", get(api_library))
         .route("/api/search", get(api_search))
         .route("/api/resolve", get(api_resolve))
@@ -2563,6 +2590,7 @@ use std::time::{Duration, Instant};
 /// File extension for a resolved audio mime. yt-dlp always yields m4a
 /// (transcoded); rustypipe yields m4a (AAC) or webm (opus) depending on
 /// what the client offers.
+#[cfg(feature = "rustypipe")]
 fn audio_ext(mime: &str) -> &'static str {
     if mime.contains("mp4") {
         "m4a"
@@ -2649,6 +2677,7 @@ async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<Stri
 }
 
 /// Mime of the cached resolve, if any (set by resolve_url).
+#[cfg(feature = "rustypipe")]
 fn cached_mime(s: &AppState, id: &str) -> Option<String> {
     s.urls
         .lock()

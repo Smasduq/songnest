@@ -69,6 +69,12 @@ export function Header({
   const reduceMotion = useReducedMotion();
   // pill widths in px, measured from the in-flow slot (never mutated)
   const [pillW, setPillW] = useState({ rest: 0, expanded: 0 });
+  // overlay (pill expands over the wordmark, wordmark fades) only where
+  // space is tight; on desktop the pill stays put and the logo never fades
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia("(max-width: 767px)").matches
+  );
+  const overlaid = focused && narrow;
 
   function measure(): { rest: number; expanded: number } {
     const slot = slotRef.current?.clientWidth ?? 0;
@@ -85,6 +91,7 @@ export function Header({
   useEffect(() => {
     setPillW(measure());
     function onResize() {
+      setNarrow(window.matchMedia("(max-width: 767px)").matches);
       setPillW((w) => (document.activeElement?.id === "songnest-search" ? w : measure()));
     }
     window.addEventListener("resize", onResize);
@@ -113,19 +120,19 @@ export function Header({
       id="app-header"
       className="glass-bar relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 pt-[env(safe-area-inset-top)] max-md:fixed max-md:inset-x-3 max-md:top-3"
     >
-      <span className="w-[68px] flex-shrink-0 overflow-hidden" aria-hidden={focused}>
+      <span className="w-[68px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
         <motion.span
           className="block text-sm font-semibold tracking-tight text-foreground"
           initial={false}
-          animate={focused ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
+          animate={overlaid ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
           transition={
             reduceMotion
               ? { duration: 0 }
               : { type: "spring", stiffness: 400, damping: 35 }
           }
-          style={{ pointerEvents: focused ? "none" : "auto" }}
+          style={{ pointerEvents: overlaid ? "none" : "auto" }}
         >
-          songnest
+          Songnest
         </motion.span>
       </span>
       <form
@@ -133,6 +140,9 @@ export function Header({
         className="relative h-10 min-w-0 flex-1 self-center md:mx-auto md:max-w-[480px]"
         onSubmit={(e) => {
           e.preventDefault();
+          // release focus so the wordmark returns (Enter-submit otherwise
+          // keeps focus and the logo stays hidden behind the pill)
+          (document.activeElement as HTMLElement | null)?.blur?.();
           onSubmitSearch();
         }}
       >
@@ -143,7 +153,7 @@ export function Header({
         >
           <motion.div
             initial={false}
-            animate={{ width: focused ? pillW.expanded : pillW.rest }}
+            animate={{ width: overlaid ? pillW.expanded : pillW.rest }}
             transition={
               reduceMotion
                 ? { duration: 0 }

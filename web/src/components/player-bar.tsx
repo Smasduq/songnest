@@ -73,7 +73,18 @@ export function PlayerBar() {
     seekTo(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
   }
 
+  const volRef = useRef<HTMLDivElement>(null);
+
+  function setVol(clientX: number) {
+    const bar = volRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    // setVolume unmutes by itself when the level is above 0
+    setVolume(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
+  }
+
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const volPct = (muted ? 0 : volume) * 100;
 
   return (
     <footer className="hidden h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5 md:flex">
@@ -195,15 +206,17 @@ export function PlayerBar() {
             <Volume2 className="h-4 w-4" />
           )}
         </Button>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={muted ? 0 : volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          className="h-1 w-full accent-foreground"
-        />
+        {/* same bar as the song seek: click-to-set, gradient fill */}
+        <div
+          ref={volRef}
+          onClick={(e) => setVol(e.clientX)}
+          className="h-1.5 flex-1 cursor-pointer rounded-full bg-foreground/10"
+        >
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-foreground to-foreground/40"
+            style={{ width: `${volPct}%` }}
+          />
+        </div>
       </div>
     </footer>
   );

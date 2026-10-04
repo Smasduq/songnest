@@ -36,6 +36,8 @@ export interface Song {
   duration: number;
   coverUrl: string;
   streamUrl: string;
+  /** Deezer id when known (search hits, library rows); null otherwise. */
+  deezerId?: number | null;
 }
 
 interface LibraryRow {
@@ -81,8 +83,8 @@ export async function fetchLibrary(): Promise<Song[]> {
   const r = await fetch(`${apiBase()}/api/library`);
   if (!r.ok) throw new Error(`library: ${r.status}`);
   const rows = (await r.json()) as LibraryRow[];
-  return rows.map((t) =>
-    toSong(
+  return rows.map((t) => ({
+    ...toSong(
       `db-${t.id}`,
       t.title,
       t.artist,
@@ -90,8 +92,18 @@ export async function fetchLibrary(): Promise<Song[]> {
       t.duration,
       t.cover_url ? `${apiBase()}${t.cover_url}` : t.cover,
       `${apiBase()}${t.stream}`
-    )
-  );
+    ),
+    deezerId: t.deezer_id || null,
+  }));
+}
+
+/** Delete a downloaded track (library row `db-<id>` + audio file). */
+export async function deleteTrack(dbId: number): Promise<void> {
+  const r = await fetch(`${apiBase()}/api/track/${dbId}`, {
+    method: "DELETE",
+  });
+  if (r.status === 404) throw new Error("already gone");
+  if (!r.ok) throw new Error(`delete: ${r.status}`);
 }
 
 /** Deezer candidates for a query (same-name songs stay distinguishable). */

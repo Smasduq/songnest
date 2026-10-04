@@ -18,9 +18,14 @@ import {
   ListPlus,
   MoreHorizontal,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 
 export type DlState = "idle" | "queued" | "working" | "done" | "error";
+
+/** Swipe-left action, picked by context: library deletes, downloaded songs
+ *  elsewhere like/unlike, everything else downloads. */
+export type SwipeLeftKind = "download" | "delete" | "like";
 
 interface Props {
   song: Song;
@@ -30,8 +35,11 @@ interface Props {
   dl: DlState;
   dlProgress: number;
   active?: boolean;
+  swipeLeft: SwipeLeftKind;
   onToggleLike: () => void;
   onDownload: () => void;
+  onDelete: (() => void) | null;
+  onSwipeLeft: () => void;
   onAddToQueue: () => void;
   onPlay: () => void;
 }
@@ -43,8 +51,11 @@ export function SongCard({
   dl,
   dlProgress,
   active = false,
+  swipeLeft,
   onToggleLike,
   onDownload,
+  onDelete,
+  onSwipeLeft,
   onAddToQueue,
   onPlay,
 }: Props) {
@@ -59,29 +70,38 @@ export function SongCard({
   // touchend is followed ~300ms later by a synthetic mousedown; without
   // this guard the long-press menu would close the instant it opens
   const lastTouchEnd = useRef(0);
-  // swipe bookkeeping: row threshold, threshold-crossed flag, edge-zone start
+  // swipe bookkeeping: threshold-crossed side (for haptics), edge-zone start
   const rowRef = useRef<HTMLDivElement>(null);
-  const thresholdRef = useRef(0);
-  const crossedRef = useRef(false);
+  const crossedRef = useRef<"left" | "right" | null>(null);
   const edgeStartRef = useRef(false);
-  // swipe-right distance drives the queue action reveal
+  // swipe distances drive the action reveals; both sides mirror each other
+  // (same 90px commit, same spring back) so left feels like swipe-to-queue
   const x = useMotionValue(0);
   const actionOpacity = useTransform(x, [0, 90], [0, 1]);
   const actionScale = useTransform(x, [0, 90], [0.6, 1]);
-  // download strip reveal while swiping left
-  const stripOpacity = useTransform(x, [-120, -20], [1, 0]);
-  const stripScale = useTransform(x, [-140, -40], [1.2, 0.85]);
+  const stripOpacity = useTransform(x, [-90, 0], [1, 0]);
+  const stripScale = useTransform(x, [-90, 0], [1, 0.6]);
 
-  // haptic tick the moment the download threshold is crossed
+  // haptic tick the moment either threshold is crossed
   useMotionValueEvent(x, "change", (v) => {
-    const t = thresholdRef.current;
-    if (!crossedRef.current && t > 0 && v < -t) {
-      crossedRef.current = true;
-      void haptic("medium");
-    } else if (v > -t + 12) {
-      crossedRef.current = false;
+    const crossed = crossedRef.current;
+    if (crossed === null) {
+      if (v < -90) {
+        crossedRef.current = "left";
+        void haptic("medium");
+      } else if (v > 90) {
+        crossedRef.current = "right";
+        void haptic("medium");
+      }
+    } else if (crossed === "left" && v > -78) {
+      crossedRef.current = null;
+    } else if (crossed === "right" && v < 78) {
+      crossedRef.current = null;
     }
   });
+
+  const leftLabel =
+    swipeLeft === "delete" ? "Delete" : swipeLeft === "like" ? (liked ? "Unlike" : "Like") : "Download";
 
   // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
@@ -168,15 +188,23 @@ export function SongCard({
         <ListPlus className="h-5 w-5" />
         <span className="text-xs font-semibold">Queue</span>
       </motion.div>
-      {/* revealed while swiping left — download strip */}
+      {/* revealed while swiping left — action depends on context.
+          Scale sits on the pill itself (like the queue pill) so the whole
+          button grows under the finger, not just its content. */}
       <motion.div
-        style={{ opacity: stripOpacity }}
+        style={{ opacity: stripOpacity, scale: stripScale }}
         className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"
       >
-        <motion.span style={{ scale: stripScale }} className="flex items-center gap-1.5">
-          <Download className="h-5 w-5" />
-          <span className="text-xs font-semibold">Download</span>
-        </motion.span>
+        <span className="flex items-center gap-1.5">
+          {swipeLeft === "delete" ? (
+            <Trash2 className="h-5 w-5" />
+          ) : swipeLeft === "like" ? (
+            <Heart className={`h-5 w-5 ${liked ? "fill-background" : ""}`} />
+          ) : (
+            <Download className="h-5 w-5" />
+          )}
+          <span className="text-xs font-semibold">{leftLabel}</span>
+        </span>
       </motion.div>
       <motion.div
         ref={rowRef}
@@ -186,9 +214,7 @@ export function SongCard({
         dragDirectionLock
         style={{ x }}
         onDragStart={() => {
-          thresholdRef.current =
-            (rowRef.current?.clientWidth ?? 0) * 0.35;
-          crossedRef.current = false;
+          crossedRef.current = null;
         }}
         onDragEnd={(_, info) => {
           // edge-back zone owns this gesture: bounce back, do nothing
@@ -196,21 +222,19 @@ export function SongCard({
             edgeStartRef.current = false;
             return;
           }
-          const t = thresholdRef.current;
-          if (info.offset.x > 90) {
+          if (info.offset.x > 90 || info.velocity.x > 600) {
             onAddToQueue();
-          } else if (
-            (t > 0 && info.offset.x < -t) ||
-            info.velocity.x < -600
-          ) {
-            // already have it (or busy): rubber-band bounce only
-            if (
-              downloadableDz === null ||
-              (dl !== "idle" && dl !== "error")
-            ) {
-              return;
+          } else if (info.offset.x < -90 || info.velocity.x < -600) {
+            if (swipeLeft === "download") {
+              // already have it (or busy): rubber-band bounce only
+              if (
+                downloadableDz === null ||
+                (dl !== "idle" && dl !== "error")
+              ) {
+                return;
+              }
             }
-            onDownload();
+            onSwipeLeft();
           }
         }}
         className={`relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
@@ -358,6 +382,16 @@ export function SongCard({
               <ListPlus className="h-4 w-4" />
               Add to queue
             </button>
+            {onDelete !== null && (
+              <button
+                type="button"
+                onClick={() => pick(onDelete)}
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            )}
               </motion.div>
             )}
           </AnimatePresence>,

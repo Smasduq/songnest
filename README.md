@@ -1,4 +1,4 @@
-# songnest
+# Songnest
 If you can't pay Spotify or any other music platform. This is for you.
 
 Serve with `cargo run -p songnest-cli -- serve` (http://127.0.0.1:8787).
