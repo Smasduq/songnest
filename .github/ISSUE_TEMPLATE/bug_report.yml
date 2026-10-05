@@ -1,0 +1,53 @@
+name: Bug report
+description: Report something broken in Songnest.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do NOT include cookies, tokens,
+        database files, media files, or anything personal. Logs from the
+        diagnostics screen are enough. Do not ask for help circumventing
+        paid services, DRM, or access controls.
+  - type: input
+    id: os
+    attributes:
+      label: OS and device
+      description: e.g. Ubuntu 24.04 desktop, Windows 11, Android 14 on TECNO KG5j
+      placeholder: OS / device
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Commit hash or release version, plus how you built it.
+      placeholder: e.g. 0.1.0 / commit abc1234 / `cargo run -p songnest-cli -- serve`
+    validations:
+      required: true
+  - type: textarea
+    id: backend
+    attributes:
+      label: Backend status (from the diagnostics screen)
+      description: Downloader version, health state, JS runtime in use, cooldown state.
+      placeholder: e.g. yt-dlp 2026.08.19, health ok, runtime deno, cooldown none
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What you did, what you expected, what happened instead.
+      placeholder: |
+        1. ...
+        2. ...
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste server output or diagnostics text. Strip anything personal first.
+      render: text

@@ -1,6 +1,10 @@
 [package]
 name = "songnest-core"
 version = "0.1.0"
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+authors.workspace = true
 edition = "2024"
 
 [dependencies]

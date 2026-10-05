@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest something for Songnest.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Out of scope: features whose purpose is to circumvent DRM,
+        paywalls, or access controls, and third-party branding.
+        Such requests will be closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who hits it and when.
+      validations:
+        required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What do you propose?
+      description: Short description of the change.
+      validations:
+        required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Backend (Rust server)
+        - Web frontend
+        - Desktop app
+        - Android build
+        - Docs / repo
+        - Not sure

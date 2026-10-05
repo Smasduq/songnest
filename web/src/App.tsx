@@ -353,7 +353,7 @@ export default function App() {
       const msg = e instanceof Error ? e.message : "download failed";
       if (/429|throttl|rate.?limit|sign.?in|bot/i.test(msg)) {
         dlCooldownUntil.current = Date.now() + 5 * 60 * 1000;
-        showToast("YouTube is rate limiting — downloads paused 5 min");
+        showToast("The source is rate limiting requests. Pausing for a few minutes.");
       } else if (/extract|unsupported url|ejs|js runtime|challenge/i.test(msg)) {
         showToast("Download failed (extractor) — see Settings → Diagnostics");
       } else {
@@ -549,7 +549,7 @@ export default function App() {
           )}
           {dlStatus?.health === "rate_limited" && (
             <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm text-foreground/80 backdrop-blur-xl">
-              YouTube is rate limiting right now — streaming and downloads may
+              The source is rate limiting requests — streaming and downloads may
               fail. Please wait a few minutes and try again.
             </div>
           )}

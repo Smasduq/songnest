@@ -1,66 +1,112 @@
 # Songnest
-If you can't pay Spotify or any other music platform. This is for you.
 
-Serve with `cargo run -p songnest-cli -- serve` (http://127.0.0.1:8787).
+Songnest is a music library and player with a pluggable source system,
+desktop-first, built with Tauri, Rust and React.
 
-Env knobs: `SONGNEST_BACKEND=ytdlp|rustypipe` (default `ytdlp`;
-`rustypipe` needs `--features rp` and uses the pure-Rust extractor —
-no yt-dlp/ffmpeg subprocesses), `SONGNEST_PORT` (default `8787`),
-`SONGNEST_DATA_DIR` / `--data-dir`, `SONGNEST_COOKIES`.
+> **Status: early alpha. Expect breaking changes.**
 
-## Phone (on-device backend, no PC needed)
+What works today:
 
-The Android app runs the server in-process on `127.0.0.1:8787` with the
-rustypipe backend — streaming, downloads, library all on the phone:
+- Metadata search, suggestions, and a local library with likes.
+- Playback of saved tracks, plus proxied streaming for unsaved ones.
+- A save-to-library queue (max 2 at a time) with request pacing and
+  rate-limit handling, progress, and health reporting.
+- Source health and diagnostics screen (backend versions, update status,
+  cooldown state).
+- Desktop app (Tauri) that spawns and manages the backend automatically.
+- Android builds are **experimental** (thin client over your local network).
 
+Planned or experimental:
+
+- Legal-source support — planned.
+- Source health checks and updates — available.
+- Mobile builds — experimental.
+- Local-file import — planned.
+- Loudness normalization — planned.
+
+## Screenshots
+
+Current prototype (desktop library view):
+
+![Songnest desktop library](docs/screenshots/desktop-library.png)
+
+## Quick start
+
+Prerequisites: a recent Rust toolchain and Node.js. Optional, installed
+and configured by you: `yt-dlp` and a JavaScript runtime (Deno 2.3+, or
+Node.js 22+) for source challenge-solving.
+
+```sh
+# backend API + queue workers (http://127.0.0.1:8787)
+cargo run -p songnest-cli -- serve
+
+# web frontend (dev)
+cd web
+npm install
+npm run dev -- --port 1420 --strictPort
+
+# type check + production frontend build
+npm run build
+
+# lint
+npm run lint
 ```
-cd web && npx tauri android build --apk --debug -f android-backend
-adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+
+Desktop app (builds the backend binary as a sidecar, then the app):
+
+```sh
+cd web
+npm run desktop:sidecar
+npm run desktop:build
 ```
 
-The Rust backend needs NDK C toolchains in the environment (ring,
-rusqlite, quickjs bindgen) — with `NDK_HOME` pointing at the NDK:
+Android (experimental thin client; needs the Android SDK):
 
-```
-TC=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
-export BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-export CC_aarch64_linux_android=$TC/aarch64-linux-android24-clang
-export CC_armv7_linux_androideabi=$TC/armv7a-linux-androideabi24-clang
-export CC_i686_linux_android=$TC/i686-linux-android24-clang
-export CC_x86_64_linux_android=$TC/x86_64-linux-android24-clang
-# (+ matching CXX_* …-clang++); API level 24 = app minSdk
+```sh
+cd web
+npx tauri android build --apk
 ```
 
-No `adb reverse` needed in this mode (the UI's default API base already
-points at device localhost). Data lives in the app data dir. The old
-thin-client mode (PC server + `adb reverse tcp:8787 tcp:8787`) still works
-with a build without `-f android-backend`.
+Tests and checks:
 
-Caveats (2026-10-04): rustypipe 0.11.4 can only resolve via the iOS
-client right now (its player-JS deobfuscation parse fails upstream, so
-Android/TV/Desktop clients error out); iOS media URLs are throttled
-harder than yt-dlp's. On a throttled network, streaming falls back per
-range and downloads may 403 — the queue backs off with the usual
-5-minute cooldown.
+```sh
+cargo test --workspace
+cargo clippy --workspace
+cd web && npm run build
+```
 
-## YouTube throttling (502 / "no candidates")
+## How it works
 
-Undownloaded streaming shells out to `yt-dlp`. YouTube 429/bot-checks
-datacenter IPs, and throttled searches return zero entries. If that hits:
+- Track metadata comes from a public catalog API.
+- A pluggable source layer matches catalog entries to playable audio,
+  caches matches and stream URLs, and keeps a local SQLite library.
+- Saved tracks live as tagged audio files in the data directory; the
+  bundled web UI talks to the local server over HTTP.
+- `yt-dlp`, when used, is an optional separate tool installed and
+  configured by the user. It is not bundled with Songnest.
 
-1. Log into YouTube in your browser.
-2. Export `cookies.txt` (e.g. Get cookies.txt LOCALLY extension).
-3. Drop it next to `library.db` (or set `SONGNEST_COOKIES=/path/to/cookies.txt`).
-4. No restart needed — it is picked up on the next request.
+## Responsible use
 
-`cookies.txt` is gitignored. Never commit it.
+Songnest does not host, distribute, or provide any music. It is a player
+and library manager. Users are solely responsible for complying with
+copyright law and the terms of any service they connect to, and for the
+source of any files they use. Prefer sources with licenses that allow
+saving copies (Creative Commons catalogs, music you own).
 
-> Use a **throwaway YouTube account** for the cookies. Heavy automated
-> use can get the account flagged — don't risk your main Google account.
+## Not affiliated
 
-## Download queue
+Songnest is not affiliated with or endorsed by any streaming or video
+service.
 
-Bulk downloads go through a queue: max 2 at a time, sleeps between
-tracks, 5-minute cooldown when YouTube 429s. `POST /api/enqueue?dz=<id>`,
-progress at `/queue` or `GET /api/downloads`, `GET /api/health` shows
-yt-dlp version, update status, and cooldown.
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately
+as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE), at your option. Third-party Rust
+dependency licenses are listed in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

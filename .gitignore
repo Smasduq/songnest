@@ -1,5 +1,13 @@
 /target
 /music
 cookies.txt
+cookies*.txt
 .idea/
 library.db
+*.db
+*.sqlite
+*.log
+.env*
+bin/
+.private/
+PRIVATE-FINDINGS.md

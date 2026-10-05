@@ -180,7 +180,7 @@ export function SongCard({
       onTouchStart={onTouchStart}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {/* revealed while swiping right — Spotify style */}
+      {/* revealed while swiping right — add-to-queue action */}
       <motion.div
         style={{ opacity: actionOpacity, scale: actionScale }}
         className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"

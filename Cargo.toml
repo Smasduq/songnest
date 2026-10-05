@@ -3,6 +3,12 @@ resolver = "2"
 members = ["crates/core", "crates/cli", "crates/extract", "crates/server"]
 exclude = ["web/src-tauri"]
 
+[workspace.package]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Smasduq/songnest"
+description = "Songnest is a music library and player with a pluggable source system."
+authors = ["Smasduq"]
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-webpki-roots"] }
