@@ -5,7 +5,7 @@
 Do not open a public issue for security problems. Instead, contact the
 maintainer privately:
 
-> **Contact: [SECURITY-CONTACT — maintainer to fill in]**
+> **Contact: WhatsApp +234 704 154 3965 · Instagram [@s.masduq](https://instagram.com/s.masduq)**
 
 Include: what is affected (backend, frontend, desktop app, Android
 build), the version or commit, steps to reproduce, and what you think
