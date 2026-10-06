@@ -33,6 +33,24 @@ pub trait Extractor: Send + Sync {
     async fn resolve(&self, video_id: &str) -> anyhow::Result<Stream>;
 }
 
+/// Device-code login (TV-style: user types the code at google.com/device).
+/// No passwords involved; the token stays in the extractor's storage dir.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DeviceCode {
+    pub user_code: String,
+    pub verification_url: String,
+    pub expires_in: u32,
+    pub interval: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthStatus {
+    LoggedIn,
+    Pending,
+    Expired,
+}
+
 #[cfg(feature = "rustypipe")]
 pub mod rustypipe_impl;
 

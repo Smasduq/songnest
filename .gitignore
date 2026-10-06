@@ -8,6 +8,7 @@ library.db
 *.sqlite
 *.log
 .env*
+js_runtime.txt
 bin/
 .private/
 PRIVATE-FINDINGS.md

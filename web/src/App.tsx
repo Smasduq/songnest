@@ -507,6 +507,12 @@ export default function App() {
             .catch(() => setHealth(null));
         }}
         onOpenDiagnostics={() => go("diagnostics")}
+        authed={health?.authed ?? false}
+        onAuthChange={() => {
+          fetchHealth()
+            .then(setHealth)
+            .catch(() => setHealth(null));
+        }}
       />
       <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem+env(safe-area-inset-top))]">
         <div className="hidden md:block">

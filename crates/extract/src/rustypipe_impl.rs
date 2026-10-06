@@ -16,15 +16,26 @@
 //! as `JoinError` (converted to `Err`) instead of crashing the caller,
 //! with a short retry for transient failures.
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
+use std::time::Instant;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use rustypipe::client::{ClientType, RustyPipe};
 
-use crate::{Candidate, Extractor, Stream};
+use crate::{AuthStatus, Candidate, DeviceCode, Extractor, Stream};
 
 #[derive(Clone)]
 pub struct RustyPipeExtractor {
     rp: RustyPipe,
+    /// Set once a device-code login completes (or a cached session checks
+    /// out at startup); cleared on logout. Queries attach auth only then —
+    /// anonymous clients must never send half-authenticated requests.
+    authed: std::sync::Arc<AtomicBool>,
+    pending: std::sync::Arc<Mutex<Option<(rustypipe::client::OauthDeviceCode, Instant)>>>,
 }
 
 impl RustyPipeExtractor {
@@ -33,7 +44,95 @@ impl RustyPipeExtractor {
             .storage_dir(storage_dir)
             .build()
             .context("rustypipe client init")?;
-        Ok(Self { rp })
+        Ok(Self {
+            rp,
+            authed: Default::default(),
+            pending: Default::default(),
+        })
+    }
+
+    fn authed_query(&self) -> rustypipe::client::RustyPipeQuery {
+        let q = self.rp.query();
+        if self.authed.load(Ordering::Relaxed) {
+            q.authenticated()
+        } else {
+            q
+        }
+    }
+
+    /// Begin TV device-code login. Show `user_code` to the user with
+    /// `verification_url`; poll with `auth_poll()`.
+    pub async fn auth_begin(&self) -> anyhow::Result<DeviceCode> {
+        let code = self.rp.user_auth_get_code().await?;
+        let out = DeviceCode {
+            user_code: code.user_code.clone(),
+            verification_url: code.verification_url.clone(),
+            expires_in: code.expires_in,
+            interval: code.interval,
+        };
+        *self.pending.lock().unwrap() =
+            Some((code, Instant::now() + std::time::Duration::from_secs(out.expires_in as u64)));
+        Ok(out)
+    }
+
+    /// Poll a pending login once. LoggedIn also flips future queries to
+    /// authenticated; Expired clears the pending code.
+    pub async fn auth_poll(&self) -> anyhow::Result<AuthStatus> {
+        // take (don't borrow): the login call awaits and must not hold the lock.
+        let entry = self.pending.lock().unwrap().take();
+        let Some((code, until)) = entry else {
+            return Ok(AuthStatus::Expired);
+        };
+        if Instant::now() > until {
+            return Ok(AuthStatus::Expired);
+        }
+        match self.rp.user_auth_login(&code).await {
+            Ok(true) => {
+                self.authed.store(true, Ordering::Relaxed);
+                Ok(AuthStatus::LoggedIn)
+            }
+            Ok(false) => {
+                *self.pending.lock().unwrap() = Some((code, until));
+                Ok(AuthStatus::Pending)
+            }
+            Err(e) if e.to_string().contains("expired") => Ok(AuthStatus::Expired),
+            Err(e) => {
+                *self.pending.lock().unwrap() = Some((code, until));
+                Err(anyhow::anyhow!("{e}"))
+            }
+        }
+    }
+
+    pub async fn auth_logout(&self) -> anyhow::Result<()> {
+        let r = self.rp.user_auth_logout().await;
+        self.authed.store(false, Ordering::Relaxed);
+        // already-logged-out is fine
+        match r {
+            Ok(()) => Ok(()),
+            Err(e)
+                if e.to_string().contains("not logged in")
+                    || e.to_string().contains("invalid_token") =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!("{e}")),
+        }
+    }
+
+    /// Non-fatal session check for startup: a cached token that still
+    /// refreshes flips queries to authenticated.
+    pub async fn check_login(&self) -> bool {
+        match self.rp.user_auth_check_login().await {
+            Ok(()) => {
+                self.authed.store(true, Ordering::Relaxed);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    pub fn is_logged_in(&self) -> bool {
+        self.authed.load(Ordering::Relaxed)
     }
 }
 
@@ -75,6 +174,17 @@ const CLIENTS: &[ClientType] = &[
     ClientType::Desktop,
 ];
 
+/// When signed in, TV goes first: it is the only non-web client whose
+/// requests actually carry the login (OAuth Bearer token), so its URLs
+/// get trusted treatment. Anonymous keeps Android first (no deobfuscation
+/// needed and historically the strongest anonymous client).
+const CLIENTS_AUTHED: &[ClientType] = &[
+    ClientType::Tv,
+    ClientType::Android,
+    ClientType::Ios,
+    ClientType::Desktop,
+];
+
 /// rustypipe 0.11.4 panics (unwrap) on transient visitor-data fetch
 /// failures instead of returning Err. Run each query in a spawned task so
 /// the panic is captured as a JoinError and converted to Err.
@@ -90,13 +200,14 @@ fn panic_detail(err: tokio::task::JoinError) -> String {
 }
 
 async fn player_guarded(
-    rp: &RustyPipe,
+    ex: &RustyPipeExtractor,
     video_id: &str,
     client: ClientType,
 ) -> anyhow::Result<rustypipe::model::VideoPlayer> {
-    let rp = rp.clone();
+    let ex = ex.clone();
     let id = video_id.to_string();
-    let join = tokio::task::spawn(async move { rp.query().player_from_client(&id, client).await });
+    let join =
+        tokio::task::spawn(async move { ex.authed_query().player_from_client(&id, client).await });
     match join.await {
         Ok(inner) => inner.map_err(|e| anyhow::anyhow!("{client:?} player failed: {e}")),
         Err(e) if e.is_panic() => {
@@ -107,13 +218,14 @@ async fn player_guarded(
 }
 
 async fn search_guarded(
-    rp: &RustyPipe,
+    ex: &RustyPipeExtractor,
     query: &str,
 ) -> anyhow::Result<rustypipe::model::SearchResult<rustypipe::model::VideoItem>> {
-    let rp = rp.clone();
+    let ex = ex.clone();
     let q = query.to_string();
-    let join =
-        tokio::task::spawn(async move { rp.query().search::<rustypipe::model::VideoItem, _>(&q).await });
+    let join = tokio::task::spawn(
+        async move { ex.authed_query().search::<rustypipe::model::VideoItem, _>(&q).await },
+    );
     match join.await {
         Ok(inner) => inner.context("rustypipe search"),
         Err(e) if e.is_panic() => {
@@ -128,7 +240,7 @@ impl Extractor for RustyPipeExtractor {
     async fn search_music(&self, query: &str) -> anyhow::Result<Vec<Candidate>> {
         let mut last_err = String::new();
         for attempt in 1..=3 {
-            match search_guarded(&self.rp, query).await {
+            match search_guarded(self, query).await {
                 Ok(res) => {
                     return Ok(res
                         .items
@@ -157,10 +269,15 @@ impl Extractor for RustyPipeExtractor {
 
     async fn resolve(&self, video_id: &str) -> anyhow::Result<Stream> {
         let mut last_err = String::new();
-        for client in CLIENTS {
+        let clients = if self.is_logged_in() {
+            CLIENTS_AUTHED
+        } else {
+            CLIENTS
+        };
+        for client in clients {
             let mut client_err = String::new();
             for attempt in 1..=2 {
-                match player_guarded(&self.rp, video_id, *client).await {
+                match player_guarded(self, video_id, *client).await {
                     Ok(player) => {
                         if let Some(a) = pick_audio(&player) {
                             return Ok(Stream {

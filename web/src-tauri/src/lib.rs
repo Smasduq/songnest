@@ -113,6 +113,7 @@ fn builder() {
     let slot = backend.clone();
     let exit_slot = backend.clone();
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             #[cfg(desktop)]
             spawn_backend(&app.handle(), &slot);

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { Check, Monitor, Moon, Search, Settings, Sun, Wrench, X } from "lucide-react";
-import type { Health } from "@/lib/api";
+import type { DeviceCode, Health } from "@/lib/api";
+import { logoutAuth, pollAuthStatus, requestDeviceCode } from "@/lib/api";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -49,6 +50,8 @@ export function Header({
   serverUrl,
   onSaveServerUrl,
   onOpenDiagnostics,
+  authed,
+  onAuthChange,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
@@ -60,10 +63,53 @@ export function Header({
   serverUrl: string;
   onSaveServerUrl: (url: string) => void;
   onOpenDiagnostics: () => void;
+  authed: boolean;
+  onAuthChange: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [serverDraft, setServerDraft] = useState(serverUrl);
+  const [code, setCode] = useState<DeviceCode | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authNote, setAuthNote] = useState<string | null>(null);
+
+  /** System browser via Tauri opener, else a new tab (desktop dev). */
+  async function openExternal(url: string): Promise<boolean> {
+    try {
+      const mod = await import("@tauri-apps/plugin-opener").catch(() => null);
+      const openUrl = mod?.openUrl as ((u: string) => Promise<void>) | undefined;
+      if (openUrl !== undefined) {
+        await openUrl(url);
+        return true;
+      }
+    } catch {
+      // fall through to window.open
+    }
+    return window.open(url, "_blank", "noopener") !== null;
+  }
+
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // clipboard API unavailable (permissions, old webview): legacy path
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
   const menuRef = useRef<HTMLDivElement>(null);
   const slotRef = useRef<HTMLFormElement>(null);
   const reduceMotion = useReducedMotion();
@@ -114,6 +160,71 @@ export function Header({
       document.removeEventListener("keydown", onKey);
     };
   }, [open ]);
+
+  // device-code sign-in polling: once a code is showing, poll on the
+  // server's interval until it resolves or the menu closes
+  useEffect(() => {
+    if (!open || code === null || authed) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const s = await pollAuthStatus();
+        if (!alive) return;
+        if (s === "logged_in") {
+          setCode(null);
+          setAuthError(null);
+          setAuthNote(null);
+          onAuthChange();
+        } else if (s === "expired") {
+          setCode(null);
+          setAuthError("Code expired — get a new one and try again.");
+        }
+      } catch {
+        if (alive) setAuthError("Login check failed — will keep trying.");
+      }
+    };
+    const id = window.setInterval(tick, Math.max(3, code.interval) * 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [open, code, authed, onAuthChange]);
+
+  async function startSignIn() {
+    setAuthBusy(true);
+    setAuthError(null);
+    setAuthNote(null);
+    try {
+      const dc = await requestDeviceCode();
+      setCode(dc);
+      // one tap: code on the clipboard, verification page in the browser
+      const copied = await copyText(dc.user_code);
+      const opened = await openExternal(dc.verification_url);
+      if (copied && opened) {
+        setAuthNote("Code copied — finish signing in in your browser.");
+      } else if (copied) {
+        setAuthNote("Code copied — enter it at google.com/device.");
+      } else if (opened) {
+        setAuthNote("Enter the code shown above in your browser.");
+      }
+    } catch (e: unknown) {
+      setAuthError(e instanceof Error ? e.message : "sign-in failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function signOut() {
+    setAuthBusy(true);
+    try {
+      await logoutAuth();
+      onAuthChange();
+    } catch {
+      // ignore
+    } finally {
+      setAuthBusy(false);
+    }
+  }
 
   return (
     <header
@@ -277,6 +388,57 @@ export function Header({
                 Set
               </button>
             </form>
+            <p className="px-2 pb-1.5 pt-3 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
+              YouTube sign-in
+            </p>
+            <div className="px-2 pb-2">
+              {authed ? (
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-xs text-foreground/70">
+                    Signed in — sources treat requests as yours.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={authBusy}
+                    onClick={() => void signOut()}
+                    className="h-8 flex-shrink-0 rounded-full border border-border/60 px-3 text-xs text-foreground/80 hover:text-foreground disabled:opacity-50"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : code !== null ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-foreground/70">
+                    Enter this code at{" "}
+                    <span className="font-medium text-foreground">
+                      {code.verification_url.replace(/^https?:\/\//, "")}
+                    </span>{" "}
+                    in your browser:
+                  </p>
+                  <p className="text-center text-2xl font-bold tracking-[0.2em] text-foreground">
+                    {code.user_code}
+                  </p>
+                  <p className="text-center text-[11px] text-foreground/50">
+                    Waiting for you — valid about {Math.max(1, Math.round(code.expires_in / 60))} min.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={authBusy}
+                  onClick={() => void startSignIn()}
+                  className="h-8 w-full rounded-full bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90 disabled:opacity-50"
+                >
+                  {authBusy ? "Starting…" : "Sign in with YouTube"}
+                </button>
+              )}
+              {authError !== null && (
+                <p className="pt-1 text-[11px] text-foreground/60">{authError}</p>
+              )}
+              {authNote !== null && (
+                <p className="pt-1 text-[11px] text-foreground/60">{authNote}</p>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => {

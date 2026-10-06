@@ -224,6 +224,7 @@ export interface DownloadJob {
 
 export interface Health {
   backend?: string;
+  authed?: boolean;
   yt_dlp: string;
   queue_depth: number;
   cooldown_secs: number;
@@ -233,6 +234,36 @@ export async function fetchHealth(): Promise<Health> {
   const r = await fetch(`${apiBase()}/api/health`);
   if (!r.ok) throw new Error(`health: ${r.status}`);
   return (await r.json()) as Health;
+}
+
+export interface DeviceCode {
+  user_code: string;
+  verification_url: string;
+  expires_in: number;
+  interval: number;
+}
+
+/** Begin TV device-code sign-in. Show user_code + verification_url. */
+export async function requestDeviceCode(): Promise<DeviceCode> {
+  const r = await fetch(`${apiBase()}/api/auth/device`, { method: "POST" });
+  if (r.status === 409) throw new Error("sign-in needs the rustypipe backend");
+  if (!r.ok) throw new Error(`device code: ${r.status}`);
+  return (await r.json()) as DeviceCode;
+}
+
+export type AuthPoll = "logged_in" | "pending" | "expired";
+
+/** Poll a pending sign-in once. */
+export async function pollAuthStatus(): Promise<AuthPoll> {
+  const r = await fetch(`${apiBase()}/api/auth/status`);
+  if (!r.ok) throw new Error(`auth status: ${r.status}`);
+  return ((await r.json()) as { status: AuthPoll }).status;
+}
+
+/** Sign out (revoke token, back to anonymous). */
+export async function logoutAuth(): Promise<void> {
+  const r = await fetch(`${apiBase()}/api/auth/logout`, { method: "POST" });
+  if (!r.ok) throw new Error(`logout: ${r.status}`);
 }
 
 export interface JsRuntimeInfo {

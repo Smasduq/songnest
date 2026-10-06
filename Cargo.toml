@@ -15,3 +15,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+
+# Local fixes on top of rustypipe 0.11.4 (see patches/rustypipe):
+# visitor-data fetch returns Err instead of panicking; missing
+# deobfuscation data falls back to cipher-free formats instead of
+# failing the whole resolve. Inert unless the `rp` feature is enabled.
+[patch.crates-io]
+rustypipe = { path = "patches/rustypipe" }

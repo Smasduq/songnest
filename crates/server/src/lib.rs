@@ -98,6 +98,8 @@ struct AppState {
     dl_sem: Arc<tokio::sync::Semaphore>,
     /// set when YouTube 429s/bot-checks us; queue + resolves pause meanwhile
     yt_cooldown_until: Arc<Mutex<Option<Instant>>>,
+    /// last googlevideo media request: paced player-style, never bursty
+    last_media: Arc<tokio::sync::Mutex<Option<Instant>>>,
     /// downloader (yt-dlp binary, JS runtimes, health, updater)
     downloader: DownloaderState,
 }
@@ -1026,6 +1028,60 @@ fn download_job(
 /// URL cache, then stream bounded 1MB range chunks to `music/<id>.m4a`
 /// with progress. No transcoding — the resolved stream is already m4a.
 /// Err carries a short message, checked for throttle signals by the caller.
+/// Browser-grade headers for googlevideo media requests, copied from a
+/// working player session: bare-bones clients get flagged faster.
+const MEDIA_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+
+fn media_request(
+    http: &reqwest::Client,
+    url: &str,
+    range: Option<String>,
+) -> reqwest::RequestBuilder {
+    let mut rb = http
+        .get(url)
+        .header(reqwest::header::USER_AGENT, MEDIA_UA)
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .header(reqwest::header::ACCEPT_LANGUAGE, "en-us,en;q=0.5")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity");
+    if let Some(r) = range {
+        rb = rb.header(reqwest::header::RANGE, r);
+    }
+    rb
+}
+
+/// Sleep until a player-like gap passed since the last media request,
+/// then record this one. Serializes googlevideo traffic (1.5s + up to
+/// 1.5s jitter) instead of machine-gunning it.
+async fn pace_media(s: &AppState) {
+    const BASE_MS: u64 = 1500;
+    let jitter = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| (d.subsec_nanos() as u64) % 1500)
+        .unwrap_or(500);
+    let gap = BASE_MS + jitter;
+    let mut last = s.last_media.lock().await;
+    if let Some(t) = *last {
+        let elapsed = t.elapsed().as_millis() as u64;
+        if elapsed < gap {
+            tokio::time::sleep(Duration::from_millis(gap - elapsed)).await;
+        }
+    }
+    *last = Some(Instant::now());
+}
+
+async fn paced_media_get(
+    s: &AppState,
+    url: &str,
+    range: Option<String>,
+) -> Result<reqwest::Response, reqwest::Error> {
+    pace_media(s).await;
+    media_request(&s.http, url, range).send().await
+}
+
 #[cfg(feature = "rustypipe")]
 async fn download_rustypipe(
     s: &AppState,
@@ -1043,21 +1099,22 @@ async fn download_rustypipe(
     let mut file = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
     let mut start: u64 = 0;
     let mut total: u64 = 0;
-    // googlevideo 403s back-to-back range requests on one URL: pace chunks
-    // player-style, and on 403 re-resolve fresh + back off, resuming at `start`.
-    let mut url_retries: u32 = 0;
+    // One paced retry max: a second 403 means throttling, not a stale URL.
+    // Hammering hot retries is what gets IPs flagged — fail fast into the
+    // shared cooldown instead.
+    let mut retried = false;
     loop {
-        let resp = s
-            .http
-            .get(&url)
-            .header("Range", format!("bytes={start}-{}", start + CHUNK - 1))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+        let resp = paced_media_get(
+            s,
+            &url,
+            Some(format!("bytes={start}-{}", start + CHUNK - 1)),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         let status = resp.status();
-        if status == reqwest::StatusCode::FORBIDDEN && url_retries < 3 {
-            url_retries += 1;
-            tokio::time::sleep(std::time::Duration::from_secs(url_retries as u64 * 2)).await;
+        if status == reqwest::StatusCode::FORBIDDEN && !retried {
+            retried = true;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             url = resolve_url(s, video_id, true)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -1091,7 +1148,12 @@ async fn download_rustypipe(
         }
         start += bytes.len() as u64;
         if total > 0 {
-            on_progress((start * 100 / total).min(100) as u8);
+            let pct = start
+                .saturating_mul(100)
+                .checked_div(total)
+                .unwrap_or(0)
+                .min(100) as u8;
+            on_progress(pct);
         }
         if total > 0 && start >= total {
             break;
@@ -1099,8 +1161,7 @@ async fn download_rustypipe(
         if status.as_u16() == 200 {
             break; // server ignored the range: full body in one shot
         }
-        // player-like pacing: never machine-gun range requests
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        // pacing is enforced by the shared media gate (paced_media_get)
     }
     file.flush().await.map_err(|e| e.to_string())?;
     drop(file);
@@ -1513,6 +1574,79 @@ async fn api_delete_track(
     StatusCode::NO_CONTENT.into_response()
 }
 
+/// POST /api/auth/device — begin TV device-code login. Show `user_code`
+/// to the user with `verification_url` (google.com/device); poll
+/// /api/auth/status until logged_in. Rustypipe backend only.
+#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
+async fn api_auth_device(State(s): State<AppState>) -> impl IntoResponse {
+    #[cfg(feature = "rustypipe")]
+    if let Backend::RustyPipe(ex) = &s.backend {
+        return match ex.auth_begin().await {
+            Ok(code) => Json(
+                serde_json::json!({
+                    "user_code": code.user_code,
+                    "verification_url": code.verification_url,
+                    "expires_in": code.expires_in,
+                    "interval": code.interval,
+                }),
+            )
+            .into_response(),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                format!("device code failed: {e}"),
+            )
+                .into_response(),
+        };
+    }
+    (
+        StatusCode::CONFLICT,
+        "sign-in needs the rustypipe backend",
+    )
+        .into_response()
+}
+
+/// GET /api/auth/status — poll a pending login once.
+#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
+async fn api_auth_status(State(s): State<AppState>) -> impl IntoResponse {
+    #[cfg(feature = "rustypipe")]
+    if let Backend::RustyPipe(ex) = &s.backend {
+        return match ex.auth_poll().await {
+            Ok(status) => Json(serde_json::json!({ "status": status })).into_response(),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                format!("login poll failed: {e}"),
+            )
+                .into_response(),
+        };
+    }
+    (
+        StatusCode::CONFLICT,
+        "sign-in needs the rustypipe backend",
+    )
+        .into_response()
+}
+
+/// POST /api/auth/logout — revoke the token, drop back to anonymous.
+#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
+async fn api_auth_logout(State(s): State<AppState>) -> impl IntoResponse {
+    #[cfg(feature = "rustypipe")]
+    if let Backend::RustyPipe(ex) = &s.backend {
+        return match ex.auth_logout().await {
+            Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+            Err(e) => (
+                StatusCode::BAD_GATEWAY,
+                format!("logout failed: {e}"),
+            )
+                .into_response(),
+        };
+    }
+    (
+        StatusCode::CONFLICT,
+        "sign-in needs the rustypipe backend",
+    )
+        .into_response()
+}
+
 /// JSON API for the React frontend.
 async fn api_library(State(s): State<AppState>) -> impl IntoResponse {
     let rows: Vec<serde_json::Value> = s
@@ -1746,8 +1880,13 @@ async fn health(State(s): State<AppState>) -> impl IntoResponse {
             |r| r.get(0),
         )
         .unwrap_or(0);
+    #[cfg(feature = "rustypipe")]
+    let authed = matches!(&s.backend, Backend::RustyPipe(ex) if ex.is_logged_in());
+    #[cfg(not(feature = "rustypipe"))]
+    let authed = false;
     Json(serde_json::json!({
         "backend": s.backend.name(),
+        "authed": authed,
         "yt_dlp": ver,
         "latest_release": latest,
         "update_available": update_available,
@@ -2193,11 +2332,19 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         resolve_lock: Arc::new(tokio::sync::Mutex::new(())),
         dl_sem: Arc::new(tokio::sync::Semaphore::new(2)),
         yt_cooldown_until: Arc::new(Mutex::new(None)),
+        last_media: Arc::new(tokio::sync::Mutex::new(None)),
         downloader,
     };
     // two queue workers = max 2 concurrent downloads, ever
     tokio::spawn(download_worker(state.clone()));
     tokio::spawn(download_worker(state.clone()));
+    // a cached OAuth session (if any) flips queries to authenticated
+    #[cfg(feature = "rustypipe")]
+    if let Backend::RustyPipe(ex) = &state.backend {
+        if ex.check_login().await {
+            eprintln!("songnest: YouTube session active");
+        }
+    }
     // downloader updater loop + health checks are spawned by run_downloader_tasks()
     tokio::spawn(run_downloader_tasks(state.clone()));
     let app = Router::new()
@@ -2221,6 +2368,9 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/likes", get(api_likes))
         .route("/api/like", post(api_like).delete(api_unlike))
         .route("/api/track/:id", delete(api_delete_track))
+        .route("/api/auth/device", post(api_auth_device))
+        .route("/api/auth/status", get(api_auth_status))
+        .route("/api/auth/logout", post(api_auth_logout))
         .route("/api/library", get(api_library))
         .route("/api/search", get(api_search))
         .route("/api/resolve", get(api_resolve))
@@ -2692,12 +2842,12 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
     let Ok(url) = resolve_url(&s, &id, false).await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    let range = req.headers().get(header::RANGE).cloned();
-    let mut rb = s.http.get(&url);
-    if let Some(r) = &range {
-        rb = rb.header(header::RANGE, r);
-    }
-    let mut up = match rb.send().await {
+    let range = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+    let mut up = match paced_media_get(&s, &url, range.clone()).await {
         Ok(up) => up,
         Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
     };
@@ -2706,11 +2856,7 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
     if up.status() == StatusCode::FORBIDDEN {
         s.urls.lock().unwrap().remove(&id);
         if let Ok(fresh_url) = resolve_url(&s, &id, true).await {
-            let mut rb2 = s.http.get(&fresh_url);
-            if let Some(r) = &range {
-                rb2 = rb2.header(header::RANGE, r);
-            }
-            if let Ok(retry) = rb2.send().await {
+            if let Ok(retry) = paced_media_get(&s, &fresh_url, range).await {
                 up = retry;
             }
         }
@@ -2802,9 +2948,62 @@ mod downloader_tests {
     use super::*;
     use std::cmp::Ordering;
 
+    /// Diagnostic probe (ignored by default): resolve one video with every
+    /// rustypipe client and range-fetch two chunks per URL. Shows which
+    /// clients yield usable media from the current network.
+    /// Run: cargo test -p songnest-server --features rustypipe probe_clients -- --ignored --nocapture
     #[tokio::test]
     #[ignore]
     #[cfg(feature = "rustypipe")]
+    async fn probe_clients() {
+        use songnest_extract::{ClientType, RustyPipe};
+        let rp = RustyPipe::builder()
+            .storage_dir("/tmp/sn-rp-probe")
+            .build()
+            .unwrap();
+        let c = reqwest::Client::new();
+        for ct in [
+            ClientType::Tv,
+            ClientType::Mobile,
+            ClientType::DesktopMusic,
+            ClientType::Android,
+            ClientType::Ios,
+        ] {
+            let player = match rp.query().player_from_client("5NV6Rdv1a3I", ct).await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{ct:?}: resolve ERR {e}");
+                    continue;
+                }
+            };
+            let audio = match player.audio_streams.iter().max_by_key(|a| a.bitrate) {
+                Some(a) => a,
+                None => {
+                    eprintln!("{ct:?}: no audio");
+                    continue;
+                }
+            };
+            let r = c
+                .get(&audio.url)
+                .header("Range", "bytes=0-1048575")
+                .send()
+                .await
+                .unwrap();
+            eprintln!(
+                "{ct:?}: {} {}kbps chunk1={}",
+                audio.mime,
+                audio.bitrate / 1000,
+                r.status()
+            );
+            let r2 = c
+                .get(&audio.url)
+                .header("Range", "bytes=1048576-2097151")
+                .send()
+                .await
+                .unwrap();
+            eprintln!("{ct:?}: chunk2={}", r2.status());
+        }
+    }
 
     #[test]
     fn date_versions_compare_numerically() {
