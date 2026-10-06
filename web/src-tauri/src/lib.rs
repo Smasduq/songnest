@@ -125,7 +125,9 @@ fn builder() {
             #[cfg(all(mobile, not(feature = "android-backend")))]
             eprintln!(
                 "songnest: phone build without the android-backend feature: \
-                 no on-device server (rebuild with -F android-backend)"
+                 no on-device server, so /api/resolve has no full-song backend. \
+                 Rebuild with the on-device rustypipe server: \
+                 npm run android:dev (or android:build)"
             );
             Ok(())
         })

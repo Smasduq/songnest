@@ -118,7 +118,7 @@ export function Header({
   return (
     <header
       id="app-header"
-      className="glass-bar relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 pt-[env(safe-area-inset-top)] max-md:fixed max-md:inset-x-3 max-md:top-3"
+      className="glass-bar relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 max-md:fixed max-md:inset-x-3 max-md:top-[calc(0.75rem+env(safe-area-inset-top))]"
     >
       <span className="w-[68px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
         <motion.span

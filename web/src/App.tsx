@@ -508,7 +508,7 @@ export default function App() {
         }}
         onOpenDiagnostics={() => go("diagnostics")}
       />
-      <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)]">
+      <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem+env(safe-area-inset-top))]">
         <div className="hidden md:block">
           <Sidebar
             page={page}

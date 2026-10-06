@@ -17,7 +17,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:sidecar": "cargo build --release -p songnest-cli && mkdir -p src-tauri/bin && cp ../target/release/songnest-cli src-tauri/bin/songnest-cli",
-    "desktop:build": "npm run desktop:sidecar && tauri build"
+    "desktop:build": "npm run desktop:sidecar && tauri build",
+    "android:dev": "tauri android dev -f android-backend",
+    "android:build": "tauri android build -f android-backend"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",

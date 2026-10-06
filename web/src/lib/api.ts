@@ -64,6 +64,8 @@ export interface SearchHit {
 interface ResolveHit extends SearchHit {
   video_id: string;
   stream: string;
+  /** Present on older backends that fell back to a 30s Deezer clip. */
+  preview?: boolean;
 }
 
 function toSong(
@@ -113,11 +115,21 @@ export async function searchSongs(q: string): Promise<SearchHit[]> {
   return (await r.json()) as SearchHit[];
 }
 
-/** Resolve one exact Deezer track to playable audio. */
+/** Resolve one exact Deezer track to playable audio (full song only). */
 export async function resolveTrack(dz: number): Promise<Song> {
   const r = await fetch(`${apiBase()}/api/resolve?dz=${dz}`);
+  if (r.status === 404)
+    throw new Error("full track not found — try another song");
+  if (r.status === 503)
+    throw new Error("source is cooling down — retry shortly");
   if (!r.ok) throw new Error(`resolve: ${r.status}`);
   const t = (await r.json()) as ResolveHit;
+  // Older LAN backends may still answer with a 30s Deezer preview
+  // (`preview: true`, empty video_id). Refuse it: the app streams full
+  // songs, and those clips don't play in the Android WebView anyway.
+  if (t.preview === true || t.video_id === "") {
+    throw new Error("full track not found — try another song");
+  }
   return toSong(
     `dz-${t.dz}`,
     t.title,

@@ -98,6 +98,39 @@
   [role="button"] {
     touch-action: manipulation;
   }
+  /* Android WebView ships a native button/search UA style (gray gradient
+     background, outset border, extra padding) that beats the design and
+     leaks into the header. Neutralize the UA defaults here — Tailwind
+     utilities (higher specificity) still win for styled buttons. */
+  button,
+  [role="button"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  button::-moz-focus-inner {
+    border: 0;
+    padding: 0;
+  }
+  input[type="search"] {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration,
+  input[type="search"]::-webkit-search-results-button,
+  input[type="search"]::-webkit-search-results-decoration {
+    display: none;
+  }
+  input[type="search"]::-ms-clear {
+    display: none;
+  }
   input,
   textarea,
   select {

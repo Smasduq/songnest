@@ -194,7 +194,11 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     let song: Song;
     try {
       song = await resolveTrack(dz);
-    } catch {
+    } catch (e: unknown) {
+      if (g !== generation) return; // a newer request already won
+      usePlayer.setState({
+        error: e instanceof Error ? e.message : "Couldn't play that track.",
+      });
       return;
     }
     if (g !== generation) return; // a newer request already won

@@ -1612,6 +1612,9 @@ async fn api_resolve(
         return StatusCode::BAD_GATEWAY.into_response();
     };
     let fresh = q.get("fresh").map(|v| v == "1").unwrap_or(false);
+    // Full song only: when YouTube has no match we 404 instead of handing
+    // out the 30s Deezer preview. Previews don't play in the Android
+    // WebView and the app promises full tracks, so never fall back to them.
     match youtube_match(&s.downloader, &s.backend, &s.db, &t, fresh).await {
         Some((video_id, _)) => Json(serde_json::json!({
             "dz": t.id,
@@ -1622,18 +1625,6 @@ async fn api_resolve(
             "cover": t.album.cover_big,
             "video_id": video_id,
             "stream": format!("/stream/{video_id}"),
-        }))
-        .into_response(),
-        None if !t.preview.is_empty() => Json(serde_json::json!({
-            "dz": t.id,
-            "title": t.title,
-            "artist": t.artist.name,
-            "album": t.album.title,
-            "duration": 30,
-            "cover": t.album.cover_big,
-            "video_id": "",
-            "stream": t.preview,
-            "preview": true,
         }))
         .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
