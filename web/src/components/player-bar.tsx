@@ -106,16 +106,16 @@ export function PlayerBar() {
               className="h-11 w-11 flex-shrink-0 rounded-xl border border-border/40 object-cover sm:h-14 sm:w-14"
             />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground/90">
+              <p className="truncate text-sm font-semibold text-foreground">
                 {track.title}
               </p>
-              <p className="truncate text-xs text-foreground/60">
+              <p className="truncate text-xs text-muted-foreground">
                 {track.artist}
               </p>
             </div>
           </>
         ) : (
-          <p className="text-sm text-foreground/40">Nothing playing</p>
+          <p className="text-sm text-muted-foreground">Nothing playing</p>
         )}
       </motion.div>
 
@@ -124,7 +124,7 @@ export function PlayerBar() {
           <Button
             variant="ghost"
             size="icon"
-            className="hidden h-8 w-8 rounded-full text-foreground/60 hover:text-foreground sm:inline-flex"
+            className="hidden h-8 w-8 rounded-full text-muted-foreground hover:text-foreground sm:inline-flex"
           >
             <Shuffle className="h-4 w-4" />
           </Button>
@@ -132,13 +132,13 @@ export function PlayerBar() {
             variant="ghost"
             size="icon"
             onClick={() => prev()}
-            className="h-8 w-8 rounded-full text-foreground/70 hover:text-foreground"
+            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
           >
             <SkipBack className="h-4 w-4" />
           </Button>
           <Button
             onClick={() => toggle()}
-            className="h-10 w-10 rounded-full bg-foreground text-background hover:bg-foreground/90"
+            className="h-10 w-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {playing ? (
               <Pause className="h-4 w-4" />
@@ -150,7 +150,7 @@ export function PlayerBar() {
             variant="ghost"
             size="icon"
             onClick={() => next(true)}
-            className="h-8 w-8 rounded-full text-foreground/70 hover:text-foreground"
+            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
           >
             <SkipForward className="h-4 w-4" />
           </Button>
@@ -160,7 +160,7 @@ export function PlayerBar() {
             onClick={() => cycleRepeat()}
             title={`Repeat: ${repeat}`}
             className={`hidden h-8 w-8 rounded-full hover:text-foreground sm:inline-flex ${
-              repeat === "off" ? "text-foreground/60" : "text-foreground"
+              repeat === "off" ? "text-muted-foreground" : "text-foreground"
             }`}
           >
             {repeat === "one" ? (
@@ -171,25 +171,25 @@ export function PlayerBar() {
           </Button>
         </div>
         <div className="flex w-full max-w-xl items-center gap-2">
-          <span className="w-10 text-right text-[11px] tabular-nums text-foreground/50">
+          <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
             {formatTime(currentTime)}
           </span>
           <div
             ref={barRef}
             onClick={(e) => seek(e.clientX)}
-            className="h-1.5 flex-1 cursor-pointer rounded-full bg-foreground/10"
+            className="h-1.5 flex-1 cursor-pointer rounded-full bg-muted"
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-foreground to-foreground/40"
+              className="h-full rounded-full bg-gradient-to-r from-primary to-primary/40"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <span className="w-10 text-[11px] tabular-nums text-foreground/50">
+          <span className="w-10 text-xs tabular-nums text-muted-foreground">
             {formatTime(duration || track?.duration || 0)}
           </span>
         </div>
         {error !== null && (
-          <p className="text-[11px] text-foreground/60">{error}</p>
+          <p className="text-xs text-muted-foreground">{error}</p>
         )}
       </div>
 
@@ -198,7 +198,7 @@ export function PlayerBar() {
           variant="ghost"
           size="icon"
           onClick={() => toggleMute()}
-          className="h-8 w-8 rounded-full text-foreground/60 hover:text-foreground"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
         >
           {muted ? (
             <VolumeX className="h-4 w-4" />
@@ -210,10 +210,10 @@ export function PlayerBar() {
         <div
           ref={volRef}
           onClick={(e) => setVol(e.clientX)}
-          className="h-1.5 flex-1 cursor-pointer rounded-full bg-foreground/10"
+          className="h-1.5 flex-1 cursor-pointer rounded-full bg-muted"
         >
           <div
-            className="h-full rounded-full bg-gradient-to-r from-foreground to-foreground/40"
+            className="h-full rounded-full bg-gradient-to-r from-primary to-primary/40"
             style={{ width: `${volPct}%` }}
           />
         </div>

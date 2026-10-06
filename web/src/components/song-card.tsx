@@ -183,7 +183,7 @@ export function SongCard({
       {/* revealed while swiping right — add-to-queue action */}
       <motion.div
         style={{ opacity: actionOpacity, scale: actionScale }}
-        className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"
+        className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-center gap-1.5 rounded-2xl bg-primary text-primary-foreground sm:rounded-3xl"
       >
         <ListPlus className="h-5 w-5" />
         <span className="text-xs font-semibold">Queue</span>
@@ -193,7 +193,7 @@ export function SongCard({
           button grows under the finger, not just its content. */}
       <motion.div
         style={{ opacity: stripOpacity, scale: stripScale }}
-        className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-center gap-1.5 rounded-2xl bg-foreground text-background sm:rounded-3xl"
+        className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-center gap-1.5 rounded-2xl bg-primary text-primary-foreground sm:rounded-3xl"
       >
         <span className="flex items-center gap-1.5">
           {swipeLeft === "delete" ? (
@@ -261,13 +261,13 @@ export function SongCard({
         onClick={onPlay}
         className="min-w-0 flex-1 text-left"
       >
-        <p className="truncate text-sm font-semibold text-foreground/90">
+        <p className="truncate text-sm font-semibold text-foreground">
           {song.title}
         </p>
-        <p className="truncate text-xs text-foreground/60">
+        <p className="truncate text-xs text-muted-foreground">
           {song.artist} · {song.album}
         </p>
-        <p className="mt-0.5 text-xs font-medium uppercase tracking-[0.2em] text-foreground/50">
+        <p className="mt-0.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
           {formatTime(song.duration)}
         </p>
       </button>
@@ -291,7 +291,7 @@ export function SongCard({
         </span>
       )}
       {dl === "queued" && (
-        <span title="Queued — waiting for a download slot" className="flex flex-shrink-0 items-center gap-1 text-[11px] text-foreground/60">
+        <span title="Queued — waiting for a download slot" className="flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-4 w-4" />
           Queued
         </span>
@@ -307,7 +307,7 @@ export function SongCard({
           title="Retry download"
           aria-label="Retry download"
           onClick={onDownload}
-          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border/40 text-foreground/70 hover:text-foreground"
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border/40 text-muted-foreground hover:text-foreground"
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
@@ -318,7 +318,7 @@ export function SongCard({
           type="button"
           aria-label="More actions"
           onClick={() => setOpen((o) => !o)}
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/40 bg-background/60 text-foreground/70 backdrop-blur hover:text-foreground sm:h-9 sm:w-9"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/40 bg-background/60 text-muted-foreground backdrop-blur hover:text-foreground sm:h-9 sm:w-9"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -341,7 +341,7 @@ export function SongCard({
             <button
               type="button"
               onClick={() => pick(onToggleLike)}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-primary/5"
             >
               <Heart
                 className={`h-4 w-4 ${liked ? "fill-foreground text-foreground" : ""}`}
@@ -357,7 +357,7 @@ export function SongCard({
                 dl === "done"
               }
               onClick={() => pick(onDownload)}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5 disabled:opacity-40"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-primary/5 disabled:opacity-40"
             >
               {dl === "done" ? (
                 <Check className="h-4 w-4" />
@@ -377,7 +377,7 @@ export function SongCard({
             <button
               type="button"
               onClick={() => pick(onAddToQueue)}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-primary/5"
             >
               <ListPlus className="h-4 w-4" />
               Add to queue
@@ -386,7 +386,7 @@ export function SongCard({
               <button
                 type="button"
                 onClick={() => pick(onDelete)}
-                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-primary/5"
               >
                 <Trash2 className="h-4 w-4" />
                 Delete

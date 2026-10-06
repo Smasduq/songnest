@@ -39,17 +39,17 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
           />
         )}
         <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-foreground/90">
+          <span className="block truncate text-sm font-semibold text-foreground">
             {track.title}
           </span>
-          <span className="block truncate text-xs text-foreground/60">
+          <span className="block truncate text-xs text-muted-foreground">
             {track.artist}
           </span>
         </span>
       </button>
       <Button
         onClick={() => st.toggle()}
-        className="h-10 w-10 flex-shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
+        className="h-10 w-10 flex-shrink-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
       >
         {playing ? (
           <Pause className="h-4 w-4" />

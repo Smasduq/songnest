@@ -532,8 +532,8 @@ export default function App() {
           className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6"
         >
           {dlStatus?.health === "outdated" && (
-            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm backdrop-blur-xl">
-              <span className="flex-1 text-foreground/85">
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl">
+              <span className="flex-1 text-muted-foreground">
                 Downloader needs an update.
               </span>
               <button
@@ -547,28 +547,28 @@ export default function App() {
                     showToast("Update failed");
                   }
                 }}
-                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
+                className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
               >
                 Update
               </button>
             </div>
           )}
           {dlStatus?.health === "rate_limited" && (
-            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm text-foreground/80 backdrop-blur-xl">
+            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm text-muted-foreground backdrop-blur-xl">
               The source is rate limiting requests — streaming and downloads may
               fail. Please wait a few minutes and try again.
             </div>
           )}
           {dlStatus?.health === "js_runtime_missing" && (
-            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-2.5 text-sm backdrop-blur-xl">
-              <span className="flex-1 text-foreground/85">
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl">
+              <span className="flex-1 text-muted-foreground">
                 A JavaScript runtime is needed — install Deno or Node 22+, then
                 re-check.
               </span>
               <button
                 type="button"
                 onClick={() => go("diagnostics")}
-                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
+                className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
               >
                 Details
               </button>
@@ -580,9 +580,9 @@ export default function App() {
                 Results
               </h2>
               {searching ? (
-                <p className="text-sm text-foreground/60">Searching…</p>
+                <p className="text-sm text-muted-foreground">Searching…</p>
               ) : hits.length === 0 ? (
-                <p className="text-sm text-foreground/60">
+                <p className="text-sm text-muted-foreground">
                   Search for a song or artist.
                 </p>
               ) : (
@@ -625,9 +625,9 @@ export default function App() {
                 Suggested for you
               </h2>
               {loading ? (
-                <p className="text-sm text-foreground/60">Loading…</p>
+                <p className="text-sm text-muted-foreground">Loading…</p>
               ) : suggestions.length === 0 ? (
-                <p className="text-sm text-foreground/60">
+                <p className="text-sm text-muted-foreground">
                   No suggestions right now — is the server reachable?
                 </p>
               ) : (
@@ -661,9 +661,9 @@ export default function App() {
                 Your Library
               </h2>
               {loading ? (
-                <p className="text-sm text-foreground/60">Loading library…</p>
+                <p className="text-sm text-muted-foreground">Loading library…</p>
               ) : library.length === 0 ? (
-                <p className="text-sm text-foreground/60">
+                <p className="text-sm text-muted-foreground">
                   Nothing downloaded yet — pick a song below or search above,
                   then ⋯ → Download.
                 </p>
@@ -686,7 +686,7 @@ export default function App() {
                 </div>
               )}
               {loadError !== null && (
-                <p className="text-sm text-foreground/60">
+                <p className="text-sm text-muted-foreground">
                   Library unreachable ({loadError}) — is the server on :8787?
                 </p>
               )}
@@ -699,7 +699,7 @@ export default function App() {
                 Liked Songs
               </h2>
               {likedSongs.length === 0 ? (
-                <p className="text-sm text-foreground/60">
+                <p className="text-sm text-muted-foreground">
                   Nothing liked yet — use ⋯ → Like on any song.
                 </p>
               ) : (
@@ -800,8 +800,8 @@ export default function App() {
                   );
                 }
               }}
-              className={`flex flex-col items-center gap-1 rounded-2xl px-5 py-1.5 text-[11px] font-medium ${
-                on ? "text-foreground" : "text-foreground/50"
+              className={`flex flex-col items-center gap-1.5 rounded-2xl px-4 py-3 text-xs font-medium ${
+                on ? "text-foreground" : "text-muted-foreground"
               }`}
             >
               <Icon className="h-5 w-5" />

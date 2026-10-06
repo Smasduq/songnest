@@ -57,8 +57,8 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
   function row(label: string, value: React.ReactNode) {
     return (
       <div className="flex items-center justify-between gap-4 py-1.5">
-        <dt className="text-sm text-foreground/60">{label}</dt>
-        <dd className="text-right text-sm text-foreground/90">{value}</dd>
+        <dt className="text-sm text-muted-foreground">{label}</dt>
+        <dd className="text-right text-sm text-foreground">{value}</dd>
       </div>
     );
   }
@@ -69,7 +69,7 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
         <h2 className="text-xl font-semibold tracking-tight text-foreground">
           Downloader diagnostics
           {status?.backend ? (
-            <span className="ml-2 rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/70">
+            <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
               {status.backend}
             </span>
           ) : null}
@@ -105,10 +105,10 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
         </div>
       </div>
       {error !== null && (
-        <p className="text-sm text-foreground/60">Error: {error}</p>
+        <p className="text-sm text-muted-foreground">Error: {error}</p>
       )}
       {status === null ? (
-        <p className="text-sm text-foreground/60">Loading…</p>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
         <>
           <dl className="divide-y divide-border/40 rounded-3xl border border-border/40 bg-background/60 px-4 backdrop-blur-xl">
@@ -141,7 +141,7 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
           </dl>
 
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold text-foreground/80">
+            <h3 className="text-sm font-semibold text-muted-foreground">
               JavaScript runtime
             </h3>
             <div className="flex flex-wrap gap-2">
@@ -165,16 +165,16 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
                   key={`${r.name}-${r.path}`}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-foreground/80">
+                  <span className="text-foreground">
                     {r.name} {r.version}
                   </span>
-                  <span className="text-xs text-foreground/50">
+                  <span className="text-xs text-muted-foreground">
                     {r.supported ? "supported" : "too old"} · {r.path}
                   </span>
                 </li>
               ))}
               {status.js_runtimes.length === 0 && (
-                <li className="text-sm text-foreground/60">
+                <li className="text-sm text-muted-foreground">
                   No supported runtime found.{" "}
                   {INSTALL_HINTS.deno} {INSTALL_HINTS.node}
                 </li>

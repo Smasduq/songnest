@@ -285,14 +285,14 @@ export function Header({
               onBlur={() => setFocused(false)}
               placeholder="Search artist or song"
               aria-label="Search artist or song"
-              className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-foreground/40 focus:outline-none"
+              className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             {query !== "" && (
               <button
                 type="button"
                 aria-label="Clear search"
                 onClick={onClearSearch}
-                className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-foreground/50 hover:text-foreground"
+                className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -300,7 +300,7 @@ export function Header({
             <button
               type="submit"
               aria-label="Search"
-              className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-foreground text-background hover:bg-foreground/90"
+              className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <Search className="h-4 w-4" />
             </button>
@@ -318,8 +318,8 @@ export function Header({
           }}
           className={`flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur transition-colors ${
             open
-              ? "border-foreground/40 bg-foreground/[0.08] text-foreground"
-              : "border-border/40 bg-background/60 text-foreground/60 hover:text-foreground"
+              ? "border-foreground/40 bg-foreground/5 text-foreground"
+              : "border-border/40 bg-background/60 text-muted-foreground hover:text-foreground"
           }`}
         >
           <Settings className="h-4 w-4" />
@@ -334,7 +334,7 @@ export function Header({
               transition={{ type: "spring", stiffness: 400, damping: 35 }}
               className="absolute right-0 top-11 z-30 w-64 overflow-hidden rounded-3xl border border-border/50 bg-background/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
             >
-            <p className="px-2 pb-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
+            <p className="px-2 pb-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Appearance
             </p>
             <div className="grid grid-cols-3 gap-1.5">
@@ -349,8 +349,8 @@ export function Header({
                     aria-pressed={on}
                     className={`flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-xs transition-colors ${
                       on
-                        ? "border-foreground/40 bg-foreground/[0.08] text-foreground"
-                        : "border-border/30 text-foreground/60 hover:border-border/60 hover:text-foreground"
+                        ? "border-foreground/40 bg-foreground/5 text-foreground"
+                        : "border-border/30 text-muted-foreground hover:border-border/60 hover:text-foreground"
                     }`}
                   >
                     <span className="flex items-center gap-1">
@@ -362,7 +362,7 @@ export function Header({
                 );
               })}
             </div>
-            <p className="px-2 pb-1.5 pt-3 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
+            <p className="px-2 pb-1.5 pt-3 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Server
             </p>
             <form
@@ -379,36 +379,36 @@ export function Header({
                 autoComplete="off"
                 autoCorrect="off"
                 aria-label="Server URL"
-                className="h-8 min-w-0 flex-1 rounded-full border border-border/60 bg-surface/80 px-3 text-xs text-foreground placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/40"
+                className="h-8 min-w-0 flex-1 rounded-full border border-border/60 bg-surface/80 px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <button
                 type="submit"
-                className="h-8 flex-shrink-0 rounded-full bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90"
+                className="h-8 flex-shrink-0 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               >
                 Set
               </button>
             </form>
-            <p className="px-2 pb-1.5 pt-3 text-[11px] font-medium uppercase tracking-[0.2em] text-foreground/50">
+            <p className="px-2 pb-1.5 pt-3 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               YouTube sign-in
             </p>
             <div className="px-2 pb-2">
               {authed ? (
                 <div className="flex items-center gap-2">
-                  <span className="flex-1 text-xs text-foreground/70">
+                  <span className="flex-1 text-xs text-muted-foreground">
                     Signed in — sources treat requests as yours.
                   </span>
                   <button
                     type="button"
                     disabled={authBusy}
                     onClick={() => void signOut()}
-                    className="h-8 flex-shrink-0 rounded-full border border-border/60 px-3 text-xs text-foreground/80 hover:text-foreground disabled:opacity-50"
+                    className="h-8 flex-shrink-0 rounded-full border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
                   >
                     Sign out
                   </button>
                 </div>
               ) : code !== null ? (
                 <div className="space-y-1.5">
-                  <p className="text-xs text-foreground/70">
+                  <p className="text-xs text-muted-foreground">
                     Enter this code at{" "}
                     <span className="font-medium text-foreground">
                       {code.verification_url.replace(/^https?:\/\//, "")}
@@ -418,7 +418,7 @@ export function Header({
                   <p className="text-center text-2xl font-bold tracking-[0.2em] text-foreground">
                     {code.user_code}
                   </p>
-                  <p className="text-center text-[11px] text-foreground/50">
+                  <p className="text-center text-xs text-muted-foreground">
                     Waiting for you — valid about {Math.max(1, Math.round(code.expires_in / 60))} min.
                   </p>
                 </div>
@@ -427,16 +427,16 @@ export function Header({
                   type="button"
                   disabled={authBusy}
                   onClick={() => void startSignIn()}
-                  className="h-8 w-full rounded-full bg-foreground px-3 text-xs font-medium text-background hover:bg-foreground/90 disabled:opacity-50"
+                  className="h-8 w-full rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   {authBusy ? "Starting…" : "Sign in with YouTube"}
                 </button>
               )}
               {authError !== null && (
-                <p className="pt-1 text-[11px] text-foreground/60">{authError}</p>
+                <p className="pt-1 text-xs text-muted-foreground">{authError}</p>
               )}
               {authNote !== null && (
-                <p className="pt-1 text-[11px] text-foreground/60">{authNote}</p>
+                <p className="pt-1 text-xs text-muted-foreground">{authNote}</p>
               )}
             </div>
             <button
@@ -445,7 +445,7 @@ export function Header({
                 setOpen(false);
                 onOpenDiagnostics();
               }}
-              className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground/80 hover:bg-foreground/5"
+              className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-muted-foreground hover:bg-foreground/5"
             >
               <Wrench className="h-4 w-4" />
               Downloader diagnostics
@@ -455,18 +455,18 @@ export function Header({
                 Unreachable — is the backend on :8787?
               </p>
             ) : (
-              <dl className="space-y-1 px-2 text-xs text-foreground/60">
+              <dl className="space-y-1 px-2 text-xs text-muted-foreground">
                 <div className="flex justify-between">
                   <dt>yt-dlp</dt>
-                  <dd className="text-foreground/85">{server.yt_dlp || "?"}</dd>
+                  <dd className="text-foreground">{server.yt_dlp || "?"}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt>Queued</dt>
-                  <dd className="text-foreground/85">{server.queue_depth}</dd>
+                  <dd className="text-foreground">{server.queue_depth}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt>Cooldown</dt>
-                  <dd className="text-foreground/85">
+                  <dd className="text-foreground">
                     {server.cooldown_secs > 0
                       ? `${server.cooldown_secs}s`
                       : "none"}

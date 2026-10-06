@@ -12,8 +12,8 @@ interface Props {
 const linkCls = (on: boolean) =>
   `flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
     on
-      ? "bg-foreground/[0.08] text-foreground"
-      : "text-foreground/60 hover:bg-foreground/5 hover:text-foreground"
+      ? "bg-primary/10 text-primary"
+      : "text-muted-foreground hover:bg-primary/5 hover:text-primary"
   }`;
 
 export function Sidebar({
@@ -39,7 +39,7 @@ export function Sidebar({
       >
         <Library className="h-4 w-4" />
         Your Library
-        <span className="ml-auto text-xs text-foreground/40">{libraryCount}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{libraryCount}</span>
       </button>
       <button
         type="button"
@@ -48,7 +48,7 @@ export function Sidebar({
       >
         <Heart className="h-4 w-4" />
         Liked Songs
-        <span className="ml-auto text-xs text-foreground/40">{likedCount}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{likedCount}</span>
       </button>
       <button
         type="button"
@@ -58,7 +58,7 @@ export function Sidebar({
         <Wrench className="h-4 w-4" />
         Diagnostics
       </button>
-      <div className="mt-auto px-3 pb-1 pt-4 text-[11px] leading-relaxed text-foreground/40">
+      <div className="mt-auto px-3 pb-1 pt-4 text-xs leading-relaxed text-muted-foreground">
         Downloads live in your library. Streams play from the server on :8787.
       </div>
     </aside>

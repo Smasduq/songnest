@@ -84,7 +84,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
           onPointerDown={(e) => controls.start(e)}
           className="flex cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing"
         >
-          <span className="h-1.5 w-12 rounded-full bg-foreground/20" />
+          <span className="h-1.5 w-12 rounded-full bg-muted" />
         </div>
 
         <div className="flex items-center justify-between">
@@ -93,11 +93,11 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
             size="icon"
             onClick={onClose}
             aria-label="Close player"
-            className="h-9 w-9 rounded-full text-foreground/60 hover:text-foreground"
+            className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground"
           >
             <ChevronDown className="h-5 w-5" />
           </Button>
-          <p className="text-[11px] font-medium uppercase tracking-[0.25em] text-foreground/50">
+          <p className="text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground">
             Now playing
           </p>
           <span className="w-9" />
@@ -121,23 +121,23 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
               <h2 className="truncate text-2xl font-semibold tracking-tight text-foreground">
                 {track.title}
               </h2>
-              <p className="truncate text-base text-foreground/60">
+              <p className="truncate text-base text-muted-foreground">
                 {track.artist} · {track.album}
               </p>
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs tabular-nums text-foreground/50">
+              <div className="flex items-center justify-between text-xs tabular-nums text-muted-foreground">
                 <span>{formatTime(currentTime)}</span>
                 <span>{formatTime(duration || track.duration)}</span>
               </div>
               <div
                 ref={barRef}
                 onClick={(e) => seek(e.clientX)}
-                className="h-2 w-full cursor-pointer rounded-full bg-foreground/10"
+                className="h-2 w-full cursor-pointer rounded-full bg-muted"
               >
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-foreground to-foreground/40 will-change-transform"
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-primary/40 will-change-transform"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -154,7 +154,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
               </Button>
               <Button
                 onClick={() => st.toggle()}
-                className="h-14 w-14 rounded-full bg-foreground text-background hover:bg-foreground/90"
+                className="h-14 w-14 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {playing ? (
                   <Pause className="h-6 w-6" />
@@ -166,7 +166,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 variant="ghost"
                 size="icon"
                 onClick={() => st.next(true)}
-                className="h-11 w-11 rounded-full text-foreground/80 hover:text-foreground"
+                className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
               >
                 <SkipForward className="h-5 w-5" />
               </Button>
@@ -179,7 +179,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 onClick={() => st.cycleRepeat()}
                 className={`h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] ${
                   repeat === "off"
-                    ? "text-foreground/50"
+                    ? "text-muted-foreground"
                     : "text-foreground"
                 }`}
               >
@@ -194,7 +194,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowQueue((v) => !v)}
-                className="h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] text-foreground/70"
+                className="h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] text-muted-foreground"
               >
                 <ListMusic className="h-4 w-4" />
                 Queue ({queue.length})
@@ -204,7 +204,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
             {showQueue && (
               <div className="scroller min-h-0 flex-1 space-y-1.5 pb-4">
                 {queue.length === 0 ? (
-                  <p className="text-sm text-foreground/50">
+                  <p className="text-sm text-muted-foreground">
                     Queue is empty — swipe a song right or use ⋯ → Add to
                     queue.
                   </p>
@@ -215,14 +215,14 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                         key={t.id}
                         className={`flex items-center gap-2 rounded-2xl border px-3 py-2 ${
                           i === index
-                            ? "border-foreground/40 bg-foreground/[0.08]"
+                            ? "border-primary/40 bg-primary/10"
                             : "border-border/30 bg-background/50"
                         }`}
                       >
                         <button
                           type="button"
                           onClick={() => st.playTrack(t)}
-                          className="min-w-0 flex-1 truncate text-left text-sm text-foreground/85"
+                          className="min-w-0 flex-1 truncate text-left text-sm text-foreground"
                         >
                           {t.title} · {t.artist}
                         </button>
@@ -230,7 +230,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                           type="button"
                           aria-label={`Remove ${t.title}`}
                           onClick={() => st.removeFromQueue(t.id)}
-                          className="text-foreground/40 hover:text-foreground"
+                          className="text-muted-foreground hover:text-foreground"
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -242,7 +242,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
             )}
           </>
         ) : (
-          <p className="py-16 text-center text-foreground/50">
+          <p className="py-16 text-center text-muted-foreground">
             Nothing playing yet.
           </p>
         )}

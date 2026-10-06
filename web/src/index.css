@@ -28,23 +28,23 @@
   --text-muted: var(--muted-foreground);
   --accent: var(--primary);
   --separator: var(--border);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --background: oklch(0.985 0.002 85);
+  --foreground: oklch(0.18 0.01 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.18 0.01 285);
+  --border: oklch(0.88 0.005 85);
+  --input: oklch(0.88 0.005 85);
+  --primary: oklch(0.52 0.18 155);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.96 0.005 85);
+  --secondary-foreground: oklch(0.18 0.01 285);
+  --muted: oklch(0.96 0.005 85);
+  --muted-foreground: oklch(0.55 0.015 285);
+  --accent: oklch(0.96 0.005 85);
+  --accent-foreground: oklch(0.18 0.01 285);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --ring: oklch(0.705 0.015 286.067);
+  --ring: oklch(0.52 0.18 155 / 0.4);
 }
 
 .dark {
@@ -54,23 +54,23 @@
   --text-muted: var(--muted-foreground);
   --accent: var(--primary);
   --separator: var(--border);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.12 0.01 285);
+  --foreground: oklch(0.96 0.005 85);
+  --card: oklch(0.18 0.01 285);
+  --card-foreground: oklch(0.96 0.005 85);
+  --border: oklch(0.28 0.01 285);
+  --input: oklch(0.28 0.01 285);
+  --primary: oklch(0.58 0.18 155);
+  --primary-foreground: oklch(0.1 0 0);
+  --secondary: oklch(0.25 0.01 285);
+  --secondary-foreground: oklch(0.96 0.005 85);
+  --muted: oklch(0.25 0.01 285);
+  --muted-foreground: oklch(0.65 0.015 285);
+  --accent: oklch(0.25 0.01 285);
+  --accent-foreground: oklch(0.96 0.005 85);
   --destructive: oklch(0.396 0.141 25.723);
   --destructive-foreground: oklch(0.985 0 0);
-  --ring: oklch(0.552 0.016 285.938);
+  --ring: oklch(0.58 0.18 155 / 0.5);
 }
 
 @layer base {
@@ -192,5 +192,25 @@
       transform: none;
       opacity: 1;
     }
+  }
+
+  /* Consistent focus ring for all interactive elements */
+  :focus-visible {
+    outline: none;
+    ring: 2px;
+    ring-color: var(--ring);
+    ring-offset: 2px;
+    ring-offset-color: var(--background);
+  }
+
+  /* Ensure focus ring works on custom elements without :focus-visible support */
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  a:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
   }
 }

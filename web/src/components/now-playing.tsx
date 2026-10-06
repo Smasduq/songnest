@@ -59,10 +59,10 @@ export function NowPlaying({
             <p className="truncate text-lg font-semibold text-foreground">
               {track.title}
             </p>
-            <p className="truncate text-sm text-foreground/60">
+            <p className="truncate text-sm text-muted-foreground">
               {track.artist} · {track.album}
             </p>
-            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-foreground/50">
+            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
               {formatTime(track.duration)}
             </p>
           </div>
@@ -93,18 +93,18 @@ export function NowPlaying({
           </div>
         </div>
       ) : (
-        <p className="text-sm text-foreground/50">
+        <p className="text-sm text-muted-foreground">
           Pick a song to start listening.
         </p>
       )}
 
       <div className="space-y-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold tracking-wide text-foreground/80">
+        <h3 className="flex items-center gap-2 text-sm font-semibold tracking-wide text-muted-foreground">
           <ListMusic className="h-4 w-4" />
           Up next
         </h3>
         {queue.length === 0 ? (
-          <p className="text-xs text-foreground/50">
+          <p className="text-xs text-muted-foreground">
             Queue is empty — use ⋯ → Add to queue on any song.
           </p>
         ) : (
@@ -120,14 +120,14 @@ export function NowPlaying({
                   transition={{ type: "spring", stiffness: 400, damping: 35 }}
                 className={`flex items-center gap-2 rounded-2xl border px-3 py-2 ${
                   t.id === activeQueueId
-                    ? "border-foreground/40 bg-foreground/[0.08]"
+                    ? "border-primary/40 bg-primary/10"
                     : "border-border/30 bg-background/50"
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => onPlayQueued(t.id)}
-                  className="min-w-0 flex-1 truncate text-left text-xs text-foreground/85"
+                  className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
                 >
                   {t.title} · {t.artist}
                 </button>
@@ -135,7 +135,7 @@ export function NowPlaying({
                   type="button"
                   aria-label={`Remove ${t.title}`}
                   onClick={() => onRemoveFromQueue(t.id)}
-                  className="text-foreground/40 hover:text-foreground"
+                  className="text-muted-foreground hover:text-foreground"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
