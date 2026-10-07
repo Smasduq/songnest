@@ -54,6 +54,8 @@ interface PlayerState {
   /** true while a yt-dlp resolve is in flight (Now Playing shows it). */
   resolving: boolean;
   resolvingDz: number | null;
+  /** true while the audio element is buffering a fresh stream. */
+  buffering: boolean;
   setLibrary: (tracks: Song[]) => void;
   playTrack: (song: Song) => void;
   playDz: (dz: number, hint?: Song, fresh?: boolean) => Promise<void>;
@@ -108,7 +110,7 @@ function loadAt(index: number) {
   const { queue, library } = usePlayer.getState();
   const track = combined(queue, library)[index];
   if (track === undefined) {
-    usePlayer.setState({ playing: false });
+    usePlayer.setState({ playing: false, buffering: false });
     return;
   }
   if (track.streamUrl === "") {
@@ -124,6 +126,8 @@ function loadAt(index: number) {
   usePlayer.setState({ index, error: null });
   if (audio.getAttribute("src") !== track.streamUrl) {
     audio.src = track.streamUrl;
+    // fresh stream: show "Getting the song ready…" until it plays
+    usePlayer.setState({ buffering: true });
   }
   playCurrentElement();
 }
@@ -146,10 +150,16 @@ function recoverStream() {
   };
   audio.addEventListener("loadedmetadata", onMeta);
   audio.load();
+  usePlayer.setState({ buffering: true });
 }
 
 audio.addEventListener("play", () => usePlayer.setState({ playing: true }));
-audio.addEventListener("pause", () => usePlayer.setState({ playing: false }));
+audio.addEventListener("pause", () =>
+  usePlayer.setState({ playing: false, buffering: false })
+);
+audio.addEventListener("waiting", () =>
+  usePlayer.setState({ buffering: true })
+);
 audio.addEventListener("ended", () => {
   const s = usePlayer.getState();
   if (s.repeat === "one") {
@@ -165,7 +175,10 @@ audio.addEventListener("stalled", () => {
   // transient stalls are normal while buffering; only recover if stuck
   stallTimer = window.setTimeout(() => recoverStream(), 15000);
 });
-audio.addEventListener("playing", () => window.clearTimeout(stallTimer));
+audio.addEventListener("playing", () => {
+  window.clearTimeout(stallTimer);
+  usePlayer.setState({ buffering: false });
+});
 audio.addEventListener("timeupdate", () => {
   window.clearTimeout(stallTimer);
   useTime.setState({ currentTime: audio.currentTime });
@@ -186,6 +199,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   error: null,
   resolving: false,
   resolvingDz: null,
+  buffering: false,
 
   setLibrary: (tracks) => {
     const { queue, index } = get();
@@ -248,6 +262,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       usePlayer.setState({
         resolving: false,
         resolvingDz: null,
+        buffering: false,
         error: e instanceof Error ? e.message : "Couldn't play that track.",
       });
       return;
@@ -289,7 +304,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
-      set({ queue: next, index: 0, playing: false });
+      set({ queue: next, index: 0, playing: false, buffering: false });
       return;
     }
     set({ queue: next });

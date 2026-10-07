@@ -31,6 +31,7 @@ export function NowPlayingSheet({
 }) {
   const track = useCurrentTrack();
   const resolving = usePlayer((s) => s.resolving);
+  const buffering = usePlayer((s) => s.buffering);
   const playing = usePlayer((s) => s.playing);
   const repeat = usePlayer((s) => s.repeat);
   const shuffle = usePlayer((s) => s.shuffle);
@@ -161,7 +162,7 @@ export function NowPlayingSheet({
                 text={`${track.artist} · ${track.album}`}
                 className="text-center text-base text-muted-foreground"
               />
-              {resolving ? (
+              {resolving || buffering ? (
                 <p
                   role="status"
                   className="mt-1 flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground"
@@ -170,7 +171,7 @@ export function NowPlayingSheet({
                     className="h-3.5 w-3.5 animate-spin"
                     aria-hidden
                   />
-                  Finding the song…
+                  {resolving ? "Finding the song…" : "Getting the song ready…"}
                 </p>
               ) : (
                 dzOf(track) !== null && (

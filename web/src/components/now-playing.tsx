@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "framer-motion";
 interface Props {
   track: Song | undefined;
   resolving: boolean;
+  buffering: boolean;
   liked: boolean;
   downloadable: boolean;
   downloading: boolean;
@@ -25,6 +26,7 @@ interface Props {
 export function NowPlaying({
   track,
   resolving,
+  buffering,
   liked,
   downloadable,
   downloading,
@@ -70,13 +72,13 @@ export function NowPlaying({
               text={`${track.artist} · ${track.album}`}
               className="text-sm text-muted-foreground"
             />
-            {resolving ? (
+            {resolving || buffering ? (
               <p
                 role="status"
                 className="mt-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
               >
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                Finding the song…
+                {resolving ? "Finding the song…" : "Getting the song ready…"}
               </p>
             ) : (
               <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">

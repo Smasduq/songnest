@@ -150,6 +150,7 @@ export default function App() {
   const library = usePlayer((s) => s.library);
   const index = usePlayer((s) => s.index);
   const resolving = usePlayer((s) => s.resolving);
+  const buffering = usePlayer((s) => s.buffering);
   const resolvingDz = usePlayer((s) => s.resolvingDz);
   const activeTrack = useCurrentTrack();
   // playback actions (stable refs from the store — safe to call anywhere)
@@ -854,6 +855,7 @@ return (
           <NowPlaying
             track={activeTrack}
             resolving={resolving}
+            buffering={buffering}
             liked={
               activeTrack !== undefined &&
               (() => {

@@ -9,6 +9,7 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const track = useCurrentTrack();
   const playing = usePlayer((s) => s.playing);
   const resolving = usePlayer((s) => s.resolving);
+  const buffering = usePlayer((s) => s.buffering);
   if (track === undefined) return null;
   const st = usePlayer.getState();
 
@@ -45,13 +46,13 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
             text={track.title}
             className="text-sm font-semibold text-foreground"
           />
-          {resolving ? (
+          {resolving || buffering ? (
             <span
               role="status"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground"
             >
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              Finding the song…
+              {resolving ? "Finding the song…" : "Getting the song ready…"}
             </span>
           ) : (
             <Marquee
