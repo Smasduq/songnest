@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: General feedback
+    url: https://github.com/Smasduq/songnest/issues
+    about: Anything that isn't a bug or a feature idea — thoughts, questions, or just saying hi.

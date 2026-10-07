@@ -1,35 +1,26 @@
 name: Feature request
-description: Suggest something for Songnest.
-labels: [enhancement]
+description: Tell us what you'd like Songnest to do (a quick look at open issues first avoids duplicates)
+title: "[Feature] "
+labels: ["enhancement"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Out of scope: features whose purpose is to circumvent DRM,
-        paywalls, or access controls, and third-party branding.
-        Such requests will be closed.
   - type: textarea
     id: problem
     attributes:
-      label: What problem does this solve?
-      description: Who hits it and when.
-      validations:
-        required: true
+      label: What problem are you trying to solve?
+      description: What were you trying to do when you felt something was missing?
+    validations:
+      required: true
   - type: textarea
-    id: proposal
+    id: idea
     attributes:
-      label: What do you propose?
-      description: Short description of the change.
-      validations:
-        required: true
-  - type: dropdown
-    id: area
+      label: What would you like Songnest to do?
+      description: Describe your idea the way you'd explain it to a friend.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
     attributes:
-      label: Area
-      options:
-        - Backend (Rust server)
-        - Web frontend
-        - Desktop app
-        - Android build
-        - Docs / repo
-        - Not sure
+      label: Alternatives you've considered
+      description: Anything else that would solve it for you, even partly.
+    validations:
+      required: false
