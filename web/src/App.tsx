@@ -12,6 +12,8 @@ import { Header, useTheme } from "@/components/header";
 import { MobileHeader } from "@/components/mobile-header";
 import { MobileNav } from "@/components/mobile-nav";
 import { PlayerBar } from "@/components/player-bar";
+import { EmptyState, OfflineState } from "@/components/empty-state";
+import { Disc3, Heart, Library, SearchX } from "lucide-react";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
 import {
@@ -84,6 +86,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const [suggestions, setSuggestions] = useState<SearchHit[]>([]);
   const [likes, setLikes] = useState<Set<string>>(new Set());
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
@@ -144,6 +147,8 @@ export default function App() {
   const queue = usePlayer((s) => s.queue);
   const library = usePlayer((s) => s.library);
   const index = usePlayer((s) => s.index);
+  const resolving = usePlayer((s) => s.resolving);
+  const resolvingDz = usePlayer((s) => s.resolvingDz);
   const activeTrack = useCurrentTrack();
   // playback actions (stable refs from the store — safe to call anywhere)
   const store = usePlayer;
@@ -264,15 +269,21 @@ export default function App() {
     setSearching(true);
     try {
       setHits(await searchSongs(q));
+      setSearchFailed(false);
     } catch {
       setHits([]);
+      setSearchFailed(true);
     } finally {
       setSearching(false);
     }
   }, [query]);
 
   async function playHit(hit: SearchHit) {
-    await store.getState().playDz(hit.dz);
+    // Optimistic: Now Playing updates on the tapped metadata instantly;
+    // yt-dlp resolves the stream in the background (see store.playDz).
+    // The sheet stays closed — it opens from the mini-player.
+    const hint = hitToSong(hit);
+    void store.getState().playDz(hit.dz, hint);
     setHits([]);
     setQuery("");
   }
@@ -284,10 +295,20 @@ export default function App() {
     }
     const dz = dzOf(song);
     if (dz !== null) {
-      void store.getState().playDz(dz);
+      void store.getState().playDz(dz, song);
     } else {
       store.getState().playTrack(song);
     }
+  }
+
+  /** Wrong song? Force a fresh YouTube search and swap the stream in place. */
+  async function retryMatch() {
+    const t = store.getState();
+    const cur = [...t.queue, ...t.library][t.index];
+    const dz = cur !== undefined ? dzOf(cur) : null;
+    if (dz === null || cur === undefined) return;
+    showToast("Searching for a better match…");
+    await store.getState().playDz(dz, cur, true);
   }
 
   function addToQueue(song: Song) {
@@ -443,6 +464,11 @@ export default function App() {
         dl={d.state}
         dlProgress={d.progress}
         active={active}
+        resolving={
+          resolving &&
+          resolvingDz !== null &&
+          song.id === `dz-${resolvingDz}`
+        }
         swipeLeft={swipe}
         onToggleLike={() => toggleLike(song)}
         onDownload={onDownloadNow}
@@ -503,6 +529,7 @@ return (
         onClearSearch={() => {
           setQuery("");
           setHits([]);
+          setSearchFailed(false);
         }}
         serverUrl={getServerUrl()}
         onSaveServerUrl={(url) => {
@@ -536,6 +563,7 @@ return (
         onClearSearch={() => {
           setQuery("");
           setHits([]);
+          setSearchFailed(false);
         }}
         onOpenSettings={() => go("diagnostics")}
         onOpenSearch={() => {
@@ -609,15 +637,36 @@ return (
           )}
           {page === "search" && (
             <section className="space-y-3 md:mx-4">
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                Results
-              </h2>
               {searching ? (
-                <p className="text-sm text-muted-foreground">Searching…</p>
+                <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                </div>
               ) : hits.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Search for a song or artist.
-                </p>
+                searchFailed || health === null ? (
+                  <OfflineState
+                    detail={
+                      query.trim() === ""
+                        ? undefined
+                        : `No reply for “${query.trim()}”.`
+                    }
+                    onRetry={() => runSearch()}
+                  />
+                ) : query.trim() === "" ? (
+                  <EmptyState
+                    icon={SearchX}
+                    variant="inline"
+                    title="Search for a song or artist"
+                    body="Results land here — try a title, artist, or album."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={SearchX}
+                    variant="inline"
+                    title="No results"
+                    body={`Nothing matched “${query.trim()}” — check the spelling or try another song.`}
+                  />
+                )
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
@@ -654,15 +703,30 @@ return (
             >
           {page === "home" && (
             <section className="space-y-3 md:mx-4">
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                Suggested for you
-              </h2>
               {loading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
+                <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                </div>
               ) : suggestions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No suggestions right now — is the server reachable?
-                </p>
+                loadError !== null || health === null ? (
+                  <OfflineState
+                    detail={loadError ?? undefined}
+                    onRetry={() => {
+                      refreshLibrary();
+                      fetchHealth()
+                        .then(setHealth)
+                        .catch(() => setHealth(null));
+                    }}
+                  />
+                ) : (
+                  <EmptyState
+                    icon={Disc3}
+                    variant="inline"
+                    title="Nothing suggested yet"
+                    body="New picks appear here once the server responds."
+                  />
+                )
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
@@ -690,16 +754,28 @@ return (
 
           {page === "library" && (
             <section className="space-y-3 md:mx-4">
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                Your Library
-              </h2>
               {loading ? (
-                <p className="text-sm text-muted-foreground">Loading library…</p>
+                <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+                </div>
+              ) : loadError !== null ? (
+                <OfflineState
+                  detail={loadError}
+                  onRetry={() => {
+                    refreshLibrary();
+                    fetchHealth()
+                      .then(setHealth)
+                      .catch(() => setHealth(null));
+                  }}
+                />
               ) : library.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nothing downloaded yet — pick a song below or search above,
-                  then ⋯ → Download.
-                </p>
+                <EmptyState
+                  icon={Library}
+                  variant="inline"
+                  title="Your library is empty"
+                  body="Nothing downloaded yet — pick a song below or search above, then ⋯ → Download."
+                />
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
@@ -718,23 +794,18 @@ return (
                   </AnimatePresence>
                 </div>
               )}
-              {loadError !== null && (
-                <p className="text-sm text-muted-foreground">
-                  Library unreachable ({loadError}) — is the server on :8787?
-                </p>
-              )}
             </section>
           )}
 
           {page === "liked" && (
             <section className="space-y-3 md:mx-4">
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                Liked Songs
-              </h2>
               {likedSongs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nothing liked yet — use ⋯ → Like on any song.
-                </p>
+                <EmptyState
+                  icon={Heart}
+                  variant="inline"
+                  title="Nothing liked yet"
+                  body="Use ⋯ → Like on any song and it lands here."
+                />
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
@@ -772,6 +843,7 @@ return (
         <div className="hidden xl:block">
           <NowPlaying
             track={activeTrack}
+            resolving={resolving}
             liked={
               activeTrack !== undefined &&
               (() => {
@@ -786,6 +858,7 @@ return (
             onToggleLike={() => {
               if (activeTrack !== undefined) toggleLike(activeTrack);
             }}
+            onRetryMatch={() => void retryMatch()}
             onDownload={() => {
               if (activeTrack !== undefined) {
                 const dz = dzOf(activeTrack);
@@ -822,7 +895,12 @@ return (
       </div>
 
       <AnimatePresence>
-        {sheetOpen && <NowPlayingSheet onClose={() => setSheetOpen(false)} />}
+        {sheetOpen && (
+          <NowPlayingSheet
+            onClose={() => setSheetOpen(false)}
+            onRetryMatch={() => void retryMatch()}
+          />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>

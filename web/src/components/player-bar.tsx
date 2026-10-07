@@ -3,8 +3,11 @@ import { motion } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
 import { formatTime } from "@/lib/api";
+import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
 import {
+  Loader2,
+  Music,
   Pause,
   Play,
   Repeat,
@@ -19,6 +22,7 @@ import {
 export function PlayerBar({ className }: { className?: string }) {
   const track = useCurrentTrack();
   const playing = usePlayer((s) => s.playing);
+  const resolving = usePlayer((s) => s.resolving);
   const volume = usePlayer((s) => s.volume);
   const muted = usePlayer((s) => s.muted);
   const repeat = usePlayer((s) => s.repeat);
@@ -105,17 +109,35 @@ export function PlayerBar({ className }: { className?: string }) {
               alt=""
               className="h-11 w-11 flex-shrink-0 rounded-xl border border-border/40 object-cover sm:h-14 sm:w-14"
             />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground">
-                {track.title}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {track.artist}
-              </p>
+            <div className="min-w-0 flex-1">
+              <Marquee
+                text={track.title}
+                className="text-sm font-semibold text-foreground"
+              />
+              {resolving ? (
+                <span
+                  role="status"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                >
+                  <Loader2
+                    className="h-3 w-3 animate-spin"
+                    aria-hidden
+                  />
+                  Finding the song…
+                </span>
+              ) : (
+                <Marquee
+                  text={track.artist}
+                  className="text-xs text-muted-foreground"
+                />
+              )}
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">Nothing playing</p>
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Music className="h-4 w-4 shrink-0" aria-hidden />
+            Nothing playing
+          </p>
         )}
       </motion.div>
 
@@ -200,7 +222,7 @@ export function PlayerBar({ className }: { className?: string }) {
           onClick={() => toggleMute()}
           className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
         >
-          {muted ? (
+          {muted || volume === 0 ? (
             <VolumeX className="h-4 w-4" />
           ) : (
             <Volume2 className="h-4 w-4" />

@@ -88,7 +88,7 @@
     overscroll-behavior: none;
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
       sans-serif;
     -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
@@ -152,6 +152,34 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Spotify-style marquee for long track titles: transform-only scroll with
+   a rest at each end, then a jump-back loop. Distance and duration are set
+   inline per measured overflow (see marquee.tsx). */
+@keyframes songnest-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  85%,
+  100% {
+    transform: translateX(calc(var(--marquee-distance, 0px) * -1));
+  }
+}
+.marquee-inner {
+  animation-name: songnest-marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee-inner {
+    animation: none;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* mobile only: keep last items reachable above the fixed bottom stack */

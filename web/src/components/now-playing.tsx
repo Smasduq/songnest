@@ -1,14 +1,18 @@
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/empty-state";
 import { formatTime, type Song } from "@/lib/api";
-import { Download, Heart, ListMusic, X } from "lucide-react";
+import { Marquee } from "@/components/marquee";
+import { Download, Heart, ListMusic, Loader2, Music, RefreshCw, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 interface Props {
   track: Song | undefined;
+  resolving: boolean;
   liked: boolean;
   downloadable: boolean;
   downloading: boolean;
   onToggleLike: () => void;
+  onRetryMatch: () => void;
   onDownload: () => void;
   queue: Song[];
   activeQueueId: string | null;
@@ -20,10 +24,12 @@ interface Props {
 
 export function NowPlaying({
   track,
+  resolving,
   liked,
   downloadable,
   downloading,
   onToggleLike,
+  onRetryMatch,
   onDownload,
   queue,
   activeQueueId,
@@ -56,15 +62,27 @@ export function NowPlaying({
             <div className="aspect-square w-full rounded-2xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
           )}
           <div>
-            <p className="truncate text-lg font-semibold text-foreground">
-              {track.title}
-            </p>
-            <p className="truncate text-sm text-muted-foreground">
-              {track.artist} · {track.album}
-            </p>
-            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              {formatTime(track.duration)}
-            </p>
+            <Marquee
+              text={track.title}
+              className="text-lg font-semibold text-foreground"
+            />
+            <Marquee
+              text={`${track.artist} · ${track.album}`}
+              className="text-sm text-muted-foreground"
+            />
+            {resolving ? (
+              <p
+                role="status"
+                className="mt-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Finding the song…
+              </p>
+            ) : (
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                {formatTime(track.duration)}
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <Button
@@ -91,11 +109,23 @@ export function NowPlaying({
               </Button>
             )}
           </div>
+          {downloadable && !resolving && (
+            <button
+              type="button"
+              onClick={onRetryMatch}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+              Not the right song? Try another match
+            </button>
+          )}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Pick a song to start listening.
-        </p>
+        <EmptyState
+          icon={Music}
+          variant="inline"
+          title="Pick a song to start listening"
+        />
       )}
 
       <div className="space-y-2">
@@ -104,9 +134,12 @@ export function NowPlaying({
           Up next
         </h3>
         {queue.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            Queue is empty — use ⋯ → Add to queue on any song.
-          </p>
+          <EmptyState
+            icon={ListMusic}
+            variant="inline"
+            title="Queue is empty"
+            body="Use ⋯ → Add to queue on any song."
+          />
         ) : (
           <ul className="space-y-1.5">
             <AnimatePresence initial={false}>

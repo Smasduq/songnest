@@ -49,7 +49,7 @@ export function MobileHeader({
             onSubmitSearch();
           }}
         >
-          <div className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 px-3 pr-1 backdrop-blur focus-within:outline-none focus-within:ring-2 focus-within:ring-primary/40">
+          <div className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 px-3 pr-1 backdrop-blur focus-within:outline-none">
             <input
               id="mobile-songnest-search"
               type="search"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { OfflineState } from "@/components/empty-state";
 import {
   fetchCookiesStatus,
   fetchDownloader,
@@ -149,12 +150,19 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
           </Button>
         </div>
       </div>
-      {error !== null && (
-        <p className="text-sm text-muted-foreground">Error: {error}</p>
-      )}
-      {status === null ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+      {error !== null && status === null ? (
+        <OfflineState detail={error} onRetry={() => refresh()} />
       ) : (
+        <>
+          {error !== null && (
+            <p className="text-sm text-muted-foreground">Error: {error}</p>
+          )}
+          {status === null ? (
+            <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
+              <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+              <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
+            </div>
+          ) : (
         <>
           <dl className="divide-y divide-border/40 rounded-3xl border border-border/40 bg-background/60 px-4 backdrop-blur-xl">
             {row("Binary", `${status.binary_source} (${status.path || "—"})`)}
@@ -261,6 +269,8 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
               {cookiesBusy ? "Saving…" : "Save cookies"}
             </Button>
           </div>
+        </>
+      )}
         </>
       )}
     </section>

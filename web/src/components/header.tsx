@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-import { Check, Monitor, Moon, Search, Settings, Sun, Wrench, X } from "lucide-react";
+import { Check, Monitor, Moon, Search, Settings, Sun, WifiOff, Wrench, X } from "lucide-react";
 import type { DeviceCode, Health } from "@/lib/api";
 import { logoutAuth, pollAuthStatus, requestDeviceCode } from "@/lib/api";
 
@@ -281,7 +281,7 @@ export function Header({
                 ? { duration: 0 }
                 : { type: "spring", stiffness: 400, damping: 35 }
             }
-            className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none focus-within:ring-2 focus-within:ring-foreground/40"
+            className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none"
             style={{ zIndex: 10 }}
           >
             <input
@@ -463,8 +463,9 @@ export function Header({
               Downloader diagnostics
             </button>
             {server === null ? (
-              <p className="px-2 text-xs text-foreground/60">
-                Unreachable — is the backend on :8787?
+              <p className="flex items-center gap-2 px-2 text-xs text-muted-foreground">
+                <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
+                <span>Offline</span>
               </p>
             ) : (
               <dl className="space-y-1 px-2 text-xs text-muted-foreground">
