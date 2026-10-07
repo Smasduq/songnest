@@ -18,13 +18,15 @@ val tauriProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 37
+    // compile/target 36 = latest stable platform (37 is a preview not on
+    // the public SDK repo, so CI cannot install it).
+    compileSdk = 36
     namespace = "com.songnest.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.songnest.app"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
         ndk {
