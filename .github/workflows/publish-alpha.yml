@@ -24,7 +24,9 @@ jobs:
           - platform: 'ubuntu-22.04'
             args: ''
           - platform: 'windows-latest'
-            args: ''
+            # MSI rejects the alpha prerelease tag (must be numeric-only),
+            # so ship NSIS only for pre-releases.
+            args: '-b nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:
