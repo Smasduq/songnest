@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import { resolveTrack, type Song } from "@/lib/api";
 
+export type { Song };
+
 export type RepeatMode = "off" | "all" | "one";
 
 /**
@@ -61,6 +63,8 @@ interface PlayerState {
   playDz: (dz: number, hint?: Song, fresh?: boolean) => Promise<void>;
   enqueue: (song: Song) => void;
   removeFromQueue: (id: string) => void;
+  /** drag-reorder the queue; the playing index follows its track. */
+  setQueueOrder: (next: Song[]) => void;
   toggle: () => void;
   next: (manual: boolean) => void;
   prev: () => void;
@@ -287,6 +291,18 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const { queue } = get();
     if (queue.some((t) => t.id === song.id)) return;
     set({ queue: [...queue, song] });
+  },
+
+  setQueueOrder: (next) => {
+    const { queue, index } = get();
+    const cur = queue[index];
+    set({ queue: next });
+    // same length: library positions are unaffected; only follow the
+    // track when the now-playing one lives inside the queue
+    if (cur !== undefined) {
+      const at = next.findIndex((t) => t.id === cur.id);
+      if (at >= 0) set({ index: at });
+    }
   },
 
   removeFromQueue: (id) => {

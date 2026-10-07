@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { QueueList } from "@/components/queue-list";
 import { formatTime, type Song } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
-import { Download, Heart, ListMusic, Loader2, Music, RefreshCw, X } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { Download, Heart, ListMusic, Loader2, Music, RefreshCw } from "lucide-react";
+import { motion } from "framer-motion";
 
 interface Props {
   track: Song | undefined;
@@ -135,50 +136,12 @@ export function NowPlaying({
           <ListMusic className="h-4 w-4" />
           Up next
         </h3>
-        {queue.length === 0 ? (
-          <EmptyState
-            icon={ListMusic}
-            variant="inline"
-            title="Queue is empty"
-            body="Use ⋯ → Add to queue on any song."
-          />
-        ) : (
-          <ul className="space-y-1.5">
-            <AnimatePresence initial={false}>
-              {queue.map((t) => (
-                <motion.li
-                  key={t.id}
-                  layout
-                  initial={{ opacity: 0, x: 24 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 24 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 35 }}
-                className={`flex items-center gap-2 rounded-2xl border px-3 py-2 ${
-                  t.id === activeQueueId
-                    ? "border-primary/40 bg-primary/10"
-                    : "border-border/30 bg-background/50"
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onPlayQueued(t.id)}
-                  className="min-w-0 flex-1 truncate text-left text-xs text-foreground"
-                >
-                  {t.title} · {t.artist}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${t.title}`}
-                  onClick={() => onRemoveFromQueue(t.id)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
-        )}
+        <QueueList
+          queue={queue}
+          activeId={activeQueueId}
+          onPlay={onPlayQueued}
+          onRemove={onRemoveFromQueue}
+        />
       </div>
     </aside>
   );

@@ -3,6 +3,7 @@ import { motion, useDragControls } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { QueueList } from "@/components/queue-list";
 import { SeekBar } from "@/components/seek-bar";
 import { dzOf, formatTime } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
@@ -20,7 +21,6 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
-  X,
 } from "lucide-react";
 
 export function NowPlayingSheet({
@@ -265,44 +265,16 @@ export function NowPlayingSheet({
             </div>
 
             {showQueue && (
-              <div data-no-dismiss-drag className="scroller min-h-0 flex-1 space-y-1.5 pb-4">
-                {queue.length === 0 ? (
-                  <EmptyState
-                    icon={ListMusic}
-                    variant="inline"
-                    title="Queue is empty"
-                    body="Swipe a song right or use ⋯ → Add to queue."
-                  />
-                ) : (
-                  <ul className="space-y-1.5">
-                    {queue.map((t, i) => (
-                      <li
-                        key={t.id}
-                        className={`flex items-center gap-2 rounded-2xl border px-3 py-2 ${
-                          i === index
-                            ? "border-primary/40 bg-primary/10"
-                            : "border-border/30 bg-background/50"
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => st.playTrack(t)}
-                          className="min-w-0 flex-1 truncate text-left text-sm text-foreground"
-                        >
-                          {t.title} · {t.artist}
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Remove ${t.title}`}
-                          onClick={() => st.removeFromQueue(t.id)}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+              <div data-no-dismiss-drag className="scroller min-h-0 flex-1 pb-4">
+                <QueueList
+                  queue={queue}
+                  activeId={index < queue.length ? queue[index].id : null}
+                  onPlay={(id) => {
+                    const found = queue.find((t) => t.id === id);
+                    if (found) st.playTrack(found);
+                  }}
+                  onRemove={(id) => st.removeFromQueue(id)}
+                />
               </div>
             )}
           </>
