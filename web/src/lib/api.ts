@@ -266,6 +266,32 @@ export async function logoutAuth(): Promise<void> {
   if (!r.ok) throw new Error(`logout: ${r.status}`);
 }
 
+/** Whether a cookies.txt is installed on the server. */
+export async function fetchCookiesStatus(): Promise<boolean> {
+  const r = await fetch(`${apiBase()}/api/cookies`);
+  if (!r.ok) throw new Error(`cookies: ${r.status}`);
+  return ((await r.json()) as { present: boolean }).present;
+}
+
+/**
+ * Install a cookies.txt on the server (same file the desktop reads from
+ * its data dir). Paste a Netscape-format export taken while logged into
+ * YouTube — that is what stops the source throttling downloads after a
+ * few anonymous fetches. The backend picks it up without a restart.
+ */
+export async function postCookies(content: string): Promise<void> {
+  const r = await fetch(`${apiBase()}/api/cookies`, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: content,
+  });
+  if (r.status === 400) {
+    const msg = await r.text();
+    throw new Error(msg === "" ? "not a cookie export" : msg);
+  }
+  if (!r.ok) throw new Error(`cookies: ${r.status}`);
+}
+
 export interface JsRuntimeInfo {
   name: string;
   version: string;

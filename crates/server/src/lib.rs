@@ -1593,6 +1593,48 @@ async fn api_auth_logout(State(_s): State<AppState>) -> impl IntoResponse {
     (StatusCode::GONE, "device sign-in went away with rustypipe").into_response()
 }
 
+/// GET /api/cookies — whether a cookies.txt is installed.
+async fn api_cookies_status() -> impl IntoResponse {
+    let present = std::fs::metadata("cookies.txt")
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    Json(serde_json::json!({ "present": present }))
+}
+
+/// POST /api/cookies — install a cookies.txt (same file the desktop reads
+/// from its data dir). Body is the raw Netscape-format export: paste it
+/// from the browser extension while logged into YouTube. Validated
+/// strictly — yt-dlp ignores malformed jars silently, which looks exactly
+/// like being throttled.
+async fn api_cookies_install(body: String) -> impl IntoResponse {
+    if body.len() > 1024 * 1024 {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "cookies file too large").into_response();
+    }
+    let mut lines = body.lines().filter(|l| !l.trim().is_empty());
+    let header = lines.next().unwrap_or("");
+    let ok_header =
+        header.starts_with("# Netscape HTTP Cookie File") || header.starts_with("# HTTP Cookie File");
+    let ok_body = body.contains("youtube.com") && body.lines().any(|l| {
+        let l = l.trim();
+        !l.starts_with('#') && l.split('\t').count() >= 6
+    });
+    if !(ok_header && ok_body) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "not a Netscape cookie export (need the '# Netscape HTTP Cookie File' header and youtube.com rows)",
+        )
+            .into_response();
+    }
+    if std::fs::write("cookies.txt", body).is_err() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not write cookies.txt",
+        )
+            .into_response();
+    }
+    Json(serde_json::json!({ "ok": true, "cookies": true })).into_response()
+}
+
 /// JSON API for the React frontend.
 async fn api_library(State(s): State<AppState>) -> impl IntoResponse {
     let rows: Vec<serde_json::Value> = s
@@ -2320,6 +2362,7 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/auth/device", post(api_auth_device))
         .route("/api/auth/status", get(api_auth_status))
         .route("/api/auth/logout", post(api_auth_logout))
+        .route("/api/cookies", get(api_cookies_status).post(api_cookies_install))
         .route("/api/library", get(api_library))
         .route("/api/search", get(api_search))
         .route("/api/resolve", get(api_resolve))

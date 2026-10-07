@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  fetchCookiesStatus,
   fetchDownloader,
+  postCookies,
   postDownloaderRecheck,
   postDownloaderRuntime,
   postDownloaderUpdate,
@@ -20,6 +22,49 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
   const [status, setStatus] = useState<DownloaderStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cookiesPresent, setCookiesPresent] = useState<boolean | null>(null);
+  const [cookiesDraft, setCookiesDraft] = useState("");
+  const [cookiesBusy, setCookiesBusy] = useState(false);
+
+  const refreshCookies = useCallback(async () => {
+    try {
+      setCookiesPresent(await fetchCookiesStatus());
+    } catch {
+      setCookiesPresent(null);
+    }
+  }, []);
+
+  // fetch-on-mount without a setState-in-effect lint hit: deferred work
+  useEffect(() => {
+    let alive = true;
+    fetchCookiesStatus().then(
+      (v) => {
+        if (alive) setCookiesPresent(v);
+      },
+      () => {
+        if (alive) setCookiesPresent(null);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function saveCookies() {
+    const content = cookiesDraft.trim();
+    if (content === "") return;
+    setCookiesBusy(true);
+    try {
+      await postCookies(content);
+      setCookiesDraft("");
+      await refreshCookies();
+      onToast("Cookies saved — throttling should ease off");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "cookies save failed");
+    } finally {
+      setCookiesBusy(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -180,6 +225,41 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
                 </li>
               )}
             </ul>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-muted-foreground">
+              YouTube cookies
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {cookiesPresent === null
+                ? "Status unknown."
+                : cookiesPresent
+                  ? "Installed — downloads and streams run authenticated."
+                  : "Not installed — after a few anonymous fetches the source throttles and downloads stall."}{" "}
+              Export a Netscape-format cookie file while logged into YouTube
+              (browser extension, youtube.com open) and paste it below. Same
+              file the desktop reads as cookies.txt; refresh it every few
+              weeks.
+            </p>
+            <textarea
+              value={cookiesDraft}
+              onChange={(e) => setCookiesDraft(e.target.value)}
+              placeholder={"# Netscape HTTP Cookie File\n# https://curl.se/docs/http-cookies.html\n…paste export here…"}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              rows={4}
+              aria-label="Cookie file contents"
+              className="w-full rounded-2xl border border-border/40 bg-background/60 px-4 py-3 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <Button
+              size="sm"
+              disabled={cookiesBusy || cookiesDraft.trim() === ""}
+              onClick={saveCookies}
+              className="h-9 rounded-full px-4"
+            >
+              {cookiesBusy ? "Saving…" : "Save cookies"}
+            </Button>
           </div>
         </>
       )}

@@ -14,18 +14,22 @@
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 
 use async_trait::async_trait;
 
 use crate::{url_expiry, Candidate, Extractor, Stream};
 
+/// Fingerprint of the cookies file the interpreter was told about.
+type CookieState = Option<(u64, Option<std::time::SystemTime>)>;
+
 #[derive(Clone, Debug)]
 pub struct SongnestPyExtractor {
     /// `<data_dir>/cookies.txt`, handed to yt-dlp when present.
     cookies: Option<String>,
     configured: Arc<AtomicBool>,
+    last_cookies: Arc<Mutex<CookieState>>,
 }
 
 impl SongnestPyExtractor {
@@ -35,6 +39,7 @@ impl SongnestPyExtractor {
         Self {
             cookies,
             configured: Arc::new(AtomicBool::new(false)),
+            last_cookies: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -47,10 +52,25 @@ impl SongnestPyExtractor {
             .unwrap_or(false)
     }
 
-    /// Hand the cookies path to the interpreter once (idempotent).
+    fn cookie_state(&self) -> CookieState {
+        self.cookies.as_ref().and_then(|p| {
+            std::fs::metadata(p)
+                .ok()
+                .filter(|m| m.len() > 0)
+                .map(|m| (m.len(), m.modified().ok()))
+        })
+    }
+
+    /// Hand the cookies path to the interpreter, re-sending whenever the
+    /// file appears, disappears, or changes (a late-added cookies.txt must
+    /// take effect without restarting the app).
     async fn ensure_configured(&self) -> anyhow::Result<()> {
-        if self.configured.load(Ordering::Relaxed) {
-            return Ok(());
+        let state = self.cookie_state();
+        {
+            let last = self.last_cookies.lock().unwrap();
+            if self.configured.load(Ordering::Relaxed) && *last == state {
+                return Ok(());
+            }
         }
         let cfg = serde_json::json!({ "cookies": self.cookies }).to_string();
         let me = self.clone();
@@ -61,6 +81,7 @@ impl SongnestPyExtractor {
             if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
                 anyhow::bail!("songnestpy configure: {err}");
             }
+            *me.last_cookies.lock().unwrap() = state;
             me.configured.store(true, Ordering::Relaxed);
             Ok(())
         })
