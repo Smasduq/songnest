@@ -55,6 +55,14 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
     // otherwise the constraints spring it back automatically
   }
 
+  // swipe-down anywhere except controls, seek bar, and the queue list
+  // starts the dismiss drag (buttons still tap fine when nothing moves)
+  function maybeStartDismiss(e: React.PointerEvent) {
+    const t = e.target as HTMLElement | null;
+    if (t !== null && t.closest("button, input, a, [data-no-dismiss-drag]") !== null) return;
+    controls.start(e);
+  }
+
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -79,13 +87,11 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
         dragConstraints={{ top: 0, bottom: 0 }}
         dragElastic={0.3}
         onDragEnd={dismiss}
+        onPointerDown={maybeStartDismiss}
         className="fixed inset-x-0 bottom-0 top-10 z-[90] flex flex-col gap-4 overflow-hidden rounded-t-3xl border border-border/40 bg-background/95 px-6 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] backdrop-blur-2xl"
       >
-        {/* drag handle: only this strip starts the dismiss gesture */}
-        <div
-          onPointerDown={(e) => controls.start(e)}
-          className="flex cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing"
-        >
+        {/* drag handle (section-level swipe handles it too) */}
+        <div className="flex cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing">
           <span className="h-1.5 w-12 rounded-full bg-muted" />
         </div>
 
@@ -135,6 +141,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
               </div>
               <div
                 ref={barRef}
+                data-no-dismiss-drag
                 onClick={(e) => seek(e.clientX)}
                 className="h-2 w-full cursor-pointer rounded-full bg-muted"
               >
@@ -219,7 +226,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
             </div>
 
             {showQueue && (
-              <div className="scroller min-h-0 flex-1 space-y-1.5 pb-4">
+              <div data-no-dismiss-drag className="scroller min-h-0 flex-1 space-y-1.5 pb-4">
                 {queue.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Queue is empty — swipe a song right or use ⋯ → Add to
