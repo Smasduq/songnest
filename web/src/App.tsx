@@ -894,12 +894,27 @@ return (
 
       {/* Mobile bottom stack */}
       <div id="bottom-stack" className="fixed inset-x-0 bottom-0 z-40 md:hidden">
-        <div className="glass-bar relative flex flex-col rounded-t-3xl border-t border-border/40 pb-[env(safe-area-inset-bottom)]">
-          <div className="flex items-center px-3 py-1.5">
-            <MiniPlayer onOpen={() => setSheetOpen(true)} />
+        <div className="glass-bar relative flex flex-col overflow-hidden rounded-t-3xl border-t border-border/40 pb-[env(safe-area-inset-bottom)]">
+          {/* ambient: blurred cover glow, track follows now playing */}
+          {activeTrack !== undefined && activeTrack.coverUrl !== "" && (
+            <div aria-hidden className="pointer-events-none absolute inset-0">
+              <img
+                key={activeTrack.coverUrl}
+                src={activeTrack.coverUrl}
+                alt=""
+                draggable={false}
+                className="h-full w-full scale-125 object-cover opacity-40 blur-2xl saturate-150"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/70 via-background/30 to-transparent" />
+            </div>
+          )}
+          <div className="relative z-10 flex flex-col">
+            <div className="flex items-center px-3 py-1.5">
+              <MiniPlayer onOpen={() => setSheetOpen(true)} />
+            </div>
+            <MobileSeekBar />
+            <MobileNav page={page} onNavigate={go} />
           </div>
-          <MobileSeekBar />
-          <MobileNav page={page} onNavigate={go} />
         </div>
       </div>
 
