@@ -1,8 +1,11 @@
-//! Extractor spike: YouTube search/resolve/download behind a trait.
+//! Extractor spike: YouTube search/resolve behind a trait.
 //!
-//! The production paths still use yt-dlp; this crate only ADDS an
-//! alternative for experiments (notably: running on Android/iOS where no
-//! Python/yt-dlp exists). Enable with `--features rustypipe`.
+//! Two backends implement it: the desktop `yt-dlp` subprocess (in
+//! `songnest-server`) and SongnestPy — yt-dlp running on the embedded
+//! CPython interpreter (Chaquopy) inside the Android app, reached over JNI.
+//! Enable the on-device backend with `--features songnestpy` (plus an
+//! Android target for the real bridge; other targets get a stub that errors
+//! cleanly so desktop builds stay light).
 
 use async_trait::async_trait;
 
@@ -51,12 +54,44 @@ pub enum AuthStatus {
     Expired,
 }
 
-#[cfg(feature = "rustypipe")]
-pub mod rustypipe_impl;
+#[cfg(feature = "songnestpy")]
+pub mod songnestpy;
 
-#[cfg(feature = "rustypipe")]
-pub use rustypipe_impl::RustyPipeExtractor;
+#[cfg(feature = "songnestpy")]
+pub use songnestpy::SongnestPyExtractor;
 
-/// Re-exported so callers can pick per-client resolve order.
-#[cfg(feature = "rustypipe")]
-pub use rustypipe::client::{ClientType, RustyPipe};
+/// Pull `expire`/`exp` out of a googlevideo URL for expires_at.
+pub fn url_expiry(url: &str) -> Option<i64> {
+    for key in ["expire=", "exp="] {
+        if let Some(i) = url.find(key) {
+            let rest = &url[i + key.len()..];
+            let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(v) = num.parse::<i64>() {
+                if v > 1_000_000_000 {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::url_expiry;
+
+    #[test]
+    fn expiry_parses_googlevideo_params() {
+        assert_eq!(
+            url_expiry("https://x.googlevideo.com/v?expire=1791028558&x=1"),
+            Some(1791028558)
+        );
+        assert_eq!(
+            url_expiry("https://x.googlevideo.com/v?exp=1791028558&x=1"),
+            Some(1791028558)
+        );
+        assert_eq!(url_expiry("https://x.googlevideo.com/v?n=1"), None);
+        // tiny numbers are not unix timestamps
+        assert_eq!(url_expiry("https://x.example/?expire=42"), None);
+    }
+}

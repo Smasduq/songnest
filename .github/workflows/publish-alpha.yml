@@ -73,7 +73,7 @@ jobs:
           tagName: v0.1.0-alpha.1
           releaseName: 'Songnest v0.1.0-alpha.1'
           releaseBody: |
-            Alpha release — expect rough edges. See errors.md in the repo for known issues (YouTube sign-in untested, rustypipe throttling/deobf).
+            Alpha release — expect rough edges. See errors.md in the repo for known issues (YouTube sign-in untested, on-device yt-dlp throttling).
             Desktop bundles for macOS (arm64 + x64), Linux, Windows.
           releaseDraft: false
           prerelease: true
@@ -112,21 +112,29 @@ jobs:
         working-directory: web
         run: npm ci
 
-      # In-process backend (android-backend feature, no sidecar, no yt-dlp on device).
+      # In-process backend (android-backend feature: SongnestPy, yt-dlp on
+      # embedded CPython — no sidecar, no subprocess on device).
+      # Chaquopy needs a host Python matching the device version (3.11).
+      - name: setup Python 3.11 (Chaquopy host)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
         with:
           projectPath: web
           tagName: v0.1.0-alpha.1
           releaseName: 'Songnest v0.1.0-alpha.1'
           releaseBody: |
-            Alpha release — Android APK (in-process rustypipe backend).
+            Alpha release — Android APK (on-device yt-dlp via SongnestPy).
           releaseDraft: false
           prerelease: true
           retryAttempts: 2
           mobile: 'android'
-          args: '--apk true'
+          args: '--apk true -f android-backend'
 
   publish-ios:
     # Best-effort: no Apple signing configured, so the .ipa is unsigned

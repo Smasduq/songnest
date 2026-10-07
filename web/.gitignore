@@ -25,4 +25,31 @@ dist-ssr
 src-tauri/target/
 src-tauri/icons/source.png
 bin/
-src-tauri/gen/
+src-tauri/gen/*
+# ...except the SongnestPy sources: the Chaquopy setup (Gradle plugin +
+# pinned yt-dlp), the songnestpy bridge module, and MainActivity init are
+# hand-maintained inputs to the Android build, not regenerable outputs.
+# (Keep the `/*` contents-ignore form: excluding a directory itself would
+# make every negation below it a no-op.)
+!src-tauri/gen/android/
+src-tauri/gen/android/*
+!src-tauri/gen/android/app/
+!src-tauri/gen/android/gradle.properties
+src-tauri/gen/android/app/*
+!src-tauri/gen/android/app/build.gradle.kts
+!src-tauri/gen/android/app/src/
+src-tauri/gen/android/app/src/*
+!src-tauri/gen/android/app/src/main/
+src-tauri/gen/android/app/src/main/*
+!src-tauri/gen/android/app/src/main/python/
+!src-tauri/gen/android/app/src/main/java/
+src-tauri/gen/android/app/src/main/python/*
+!src-tauri/gen/android/app/src/main/python/songnestpy.py
+src-tauri/gen/android/app/src/main/java/*
+!src-tauri/gen/android/app/src/main/java/com/
+src-tauri/gen/android/app/src/main/java/com/*
+!src-tauri/gen/android/app/src/main/java/com/songnest/
+src-tauri/gen/android/app/src/main/java/com/songnest/*
+!src-tauri/gen/android/app/src/main/java/com/songnest/app/
+src-tauri/gen/android/app/src/main/java/com/songnest/app/*
+!src-tauri/gen/android/app/src/main/java/com/songnest/app/MainActivity.kt

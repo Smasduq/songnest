@@ -5,10 +5,13 @@ workspace default-feature tree on 2026-10-05. Crates are listed with
 version and license expression as reported by the tool.
 
 Scope note: this covers the DEFAULT build only. Enabling the optional
-`rp` / `songnest-server/rustypipe` / Tauri `android-backend` features
-additionally pulls in `rustypipe` (GPL-3.0) plus `rquickjs-sys` (MIT,
-build-time bindgen). See the release notes / README for the current
-status of those features.
+`songnestpy` / `songnest-server/songnestpy` / Tauri `android-backend`
+features additionally pulls in `jni` (MIT) and `ndk-context` (MIT/Apache-2.0)
+for the on-device bridge, plus — outside Cargo — yt-dlp (Unlicense,
+pip-installed into the APK by the Chaquopy Gradle plugin) running on
+embedded CPython. The former `rp`/`rustypipe` stack (GPL-3.0) was removed
+2026-10-07; see the release notes / README for the current status of
+these features.
 
 ---
 adler2: 2.0.1, "0BSD OR Apache-2.0 OR MIT",

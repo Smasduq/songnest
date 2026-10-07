@@ -9,12 +9,9 @@ edition = "2024"
 
 [features]
 default = []
-# Server + extractor spike with the pure-Rust YouTube backend.
-rp = ["songnest-server/rustypipe", "songnest-extract/rustypipe"]
 
 [dependencies]
 songnest-server = { path = "../server" }
-songnest-extract = { path = "../extract" }
 tokio.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true

@@ -64,9 +64,10 @@ fn spawn_backend(app: &tauri::AppHandle, slot: &ChildSlot) {
     }
 }
 
-/// On-device backend (phone): run songnest-server in-process with the
-/// rustypipe backend — no Python/yt-dlp/ffmpeg exists on Android. Serves
-/// 127.0.0.1:8787, the UI's default API base, with data in the app data dir.
+/// On-device backend (phone): run songnest-server in-process with
+/// SongnestPy — yt-dlp on the embedded CPython interpreter (Chaquopy),
+/// reached over JNI. Serves 127.0.0.1:8787, the UI's default API base,
+/// with data in the app data dir.
 #[cfg(all(mobile, feature = "android-backend"))]
 fn spawn_phone_server(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -81,16 +82,16 @@ fn spawn_phone_server(app: &tauri::AppHandle) {
         eprintln!("songnest: cannot create {}: {e}", data_dir.display());
         return;
     }
-    // absolute cache path: the backend is built before run() chdirs.
-    let cache = data_dir.join(".rustypipe");
-    let backend = match songnest_server::backend_rustypipe(&cache.to_string_lossy()) {
+    // absolute data dir: the backend is built before run() chdirs. yt-dlp
+    // picks up <data_dir>/cookies.txt here when present (else anonymous).
+    let dir = data_dir.to_string_lossy().into_owned();
+    let backend = match songnest_server::backend_songnestpy(&dir) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("songnest: phone backend init failed: {e}");
             return;
         }
     };
-    let dir = data_dir.to_string_lossy().into_owned();
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -119,15 +120,15 @@ fn builder() {
             spawn_backend(&app.handle(), &slot);
             #[cfg(not(desktop))]
             let _ = (&app, &slot);
-            // Phone: the backend runs in-process (no sidecar, no yt-dlp on
-            // Android) on 127.0.0.1:8787 — the UI's default API base.
+            // Phone: the backend runs in-process (no sidecar, no subprocess
+            // yt-dlp on Android) on 127.0.0.1:8787 — the UI's default API base.
             #[cfg(all(mobile, feature = "android-backend"))]
             spawn_phone_server(&app.handle());
             #[cfg(all(mobile, not(feature = "android-backend")))]
             eprintln!(
                 "songnest: phone build without the android-backend feature: \
                  no on-device server, so /api/resolve has no full-song backend. \
-                 Rebuild with the on-device rustypipe server: \
+                 Rebuild with the on-device SongnestPy server: \
                  npm run android:dev (or android:build)"
             );
             Ok(())

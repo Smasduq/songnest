@@ -3,22 +3,13 @@
 //! - `cli serve [--data-dir DIR]` (env: SONGNEST_DATA_DIR, SONGNEST_BACKEND,
 //!   SONGNEST_PORT): run the HTTP server + queue workers.
 //! - `cli <query>`: single-shot Deezer search -> download -> tag.
-//! - `cli extract|search|extract-compare ...` (`rp` feature): extractor spike.
-
-#[cfg(feature = "rp")]
-mod extract_cli;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let arg = args.get(1).expect("usage: cli <query> | serve [--data-dir DIR]");
-    #[cfg(feature = "rp")]
     if arg == "extract" || arg == "extract-compare" || arg == "search" {
-        return extract_cli::extract_cli(&args).await;
-    }
-    #[cfg(not(feature = "rp"))]
-    if arg == "extract" || arg == "extract-compare" || arg == "search" {
-        anyhow::bail!("rebuild with --features rp for the extractor spike");
+        anyhow::bail!("the extractor spike was removed with rustypipe; use serve");
     }
     if arg == "serve" {
         // desktop mode: keep library.db/music/cookies.txt in the app data dir

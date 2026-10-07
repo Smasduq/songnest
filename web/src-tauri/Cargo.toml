@@ -21,6 +21,7 @@ tauri-plugin-opener = "2"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-# Phone backend: in-process songnest-server with the pure-Rust YouTube
-# extractor (no yt-dlp on Android). Desktop builds skip this.
-android-backend = ["songnest-server/rustypipe"]
+# Phone backend: in-process songnest-server with SongnestPy — yt-dlp on the
+# embedded CPython interpreter (Chaquopy), reached over JNI. There is no
+# subprocess yt-dlp on Android. Desktop builds skip this.
+android-backend = ["songnest-server/songnestpy"]

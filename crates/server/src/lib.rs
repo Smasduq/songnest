@@ -2,53 +2,47 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::RwLock;
 
-#[cfg(feature = "rustypipe")]
-use songnest_extract::{Extractor, RustyPipeExtractor};
+#[cfg(feature = "songnestpy")]
+use songnest_extract::{Extractor, SongnestPyExtractor};
 
-/// YouTube backend: yt-dlp subprocess (default) or pure-Rust rustypipe
-/// (`SONGNEST_BACKEND=rustypipe`, needs the `rp` feature). The phone build
-/// uses rustypipe — no Python/yt-dlp/ffmpeg exists on Android.
+/// YouTube backend: yt-dlp subprocess (default) or SongnestPy — yt-dlp
+/// running on the embedded CPython interpreter (Chaquopy) inside the
+/// Android app, reached over JNI. The phone build uses SongnestPy: there is
+/// no subprocess yt-dlp on Android.
 #[derive(Clone)]
 pub enum Backend {
     YtDlp,
-    #[cfg(feature = "rustypipe")]
-    RustyPipe(RustyPipeExtractor),
+    #[cfg(feature = "songnestpy")]
+    SongnestPy(SongnestPyExtractor),
 }
 
 impl Backend {
     fn name(&self) -> &'static str {
         match self {
             Backend::YtDlp => "ytdlp",
-            #[cfg(feature = "rustypipe")]
-            Backend::RustyPipe(_) => "rustypipe",
+            #[cfg(feature = "songnestpy")]
+            Backend::SongnestPy(_) => "songnestpy",
         }
     }
 }
 
-/// Build the pure-Rust backend directly (phone embedder; no env needed).
-/// `storage_dir` holds the rustypipe visitor-data/PO-token cache.
-#[cfg(feature = "rustypipe")]
-pub fn backend_rustypipe(storage_dir: &str) -> anyhow::Result<Backend> {
-    let ex = RustyPipeExtractor::new(storage_dir)
-        .map_err(|e| anyhow::anyhow!("rustypipe init: {e}"))?;
-    Ok(Backend::RustyPipe(ex))
+/// Build the on-device backend directly (phone embedder; no env needed).
+/// `data_dir` is the app data dir: `<data_dir>/cookies.txt` is handed to
+/// yt-dlp when present, anonymous otherwise.
+#[cfg(feature = "songnestpy")]
+pub fn backend_songnestpy(data_dir: &str) -> anyhow::Result<Backend> {
+    Ok(Backend::SongnestPy(SongnestPyExtractor::new(data_dir)))
 }
 
-/// Pick the YouTube backend. Must run with cwd = data dir: the rustypipe
-/// cache (`.rustypipe`) lands there next to library.db/music/cookies.txt.
+/// Pick the YouTube backend. Desktop only has the yt-dlp subprocess; the
+/// phone builds its SongnestPy backend directly (see backend_songnestpy)
+/// because the interpreter lives inside the app process.
 pub fn backend_from_env() -> anyhow::Result<Backend> {
     let want = std::env::var("SONGNEST_BACKEND").unwrap_or_else(|_| "ytdlp".to_string());
-    if want == "rustypipe" {
-        #[cfg(feature = "rustypipe")]
-        {
-            return backend_rustypipe(".rustypipe");
-        }
-        #[cfg(not(feature = "rustypipe"))]
-        {
-            anyhow::bail!("SONGNEST_BACKEND=rustypipe needs the rustypipe feature");
-        }
+    if want == "ytdlp" {
+        return Ok(Backend::YtDlp);
     }
-    Ok(Backend::YtDlp)
+    anyhow::bail!("unknown SONGNEST_BACKEND={want} (only ytdlp on desktop)");
 }
 
 #[derive(Deserialize)]
@@ -871,10 +865,10 @@ fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
 }
 
 /// Match a Deezer track to a YouTube video id (cached). yt-dlp runs
-/// `ytsearch5`; rustypipe searches in-process and reuses the same scorer.
+/// `ytsearch5`; SongnestPy searches via on-device yt-dlp and reuses the same scorer.
 async fn youtube_match(
     dl: &DownloaderState,
-    #[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))] backend: &Backend,
+    #[cfg_attr(not(feature = "songnestpy"), allow(unused_variables))] backend: &Backend,
     db: &Db,
     t: &DzTrack,
     fresh: bool,
@@ -884,8 +878,8 @@ async fn youtube_match(
             return Some(hit);
         }
     }
-    #[cfg(feature = "rustypipe")]
-    if let Backend::RustyPipe(ex) = backend {
+    #[cfg(feature = "songnestpy")]
+    if let Backend::SongnestPy(ex) = backend {
         let hits = ex
             .search_music(&format!("{} {}", t.artist.name, t.title))
             .await
@@ -1082,8 +1076,11 @@ async fn paced_media_get(
     media_request(&s.http, url, range).send().await
 }
 
-#[cfg(feature = "rustypipe")]
-async fn download_rustypipe(
+/// Backend-agnostic direct fetch: the URL comes from whichever extractor
+/// resolved it (yt-dlp `-g` on desktop, SongnestPy resolve on phone).
+/// Only the on-device backend downloads this way today, hence the gate.
+#[cfg(feature = "songnestpy")]
+async fn download_direct(
     s: &AppState,
     video_id: &str,
     out_dir: &str,
@@ -1126,7 +1123,7 @@ async fn download_rustypipe(
         if !(status.is_success() || status.as_u16() == 206) {
             let _ = tokio::fs::remove_file(&tmp).await;
             let host = url.split('/').nth(2).unwrap_or("?");
-            eprintln!("rustypipe download: {status} host={host} start={start}");
+            eprintln!("direct download: {status} host={host} start={start}");
             return Err(format!("audio fetch HTTP {status}"));
         }
         if total == 0 {
@@ -1208,7 +1205,7 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
             rusqlite::params![video_id, job_id],
         )
         .ok();
-    // 3. download with progress (yt-dlp subprocess, or direct fetch on rustypipe)
+    // 3. download with progress (yt-dlp subprocess, or direct fetch on songnestpy)
     let dl_result: Result<String, String> = match &s.backend {
         Backend::YtDlp => {
             let db2 = s.db.clone();
@@ -1225,10 +1222,10 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
             .await
             .unwrap_or(Err("download task failed".to_string()))
         }
-        #[cfg(feature = "rustypipe")]
-        Backend::RustyPipe(_) => {
+        #[cfg(feature = "songnestpy")]
+        Backend::SongnestPy(_) => {
             let db2 = s.db.clone();
-            download_rustypipe(s, &video_id, "music", &|p| {
+            download_direct(s, &video_id, "music", &|p| {
                 let _ = db2.lock().unwrap().execute(
                     "UPDATE downloads SET progress=?1, updated_at=strftime('%s','now') WHERE id=?2",
                     rusqlite::params![p as i64, job_id],
@@ -1574,77 +1571,26 @@ async fn api_delete_track(
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// POST /api/auth/device — begin TV device-code login. Show `user_code`
-/// to the user with `verification_url` (google.com/device); poll
-/// /api/auth/status until logged_in. Rustypipe backend only.
-#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
-async fn api_auth_device(State(s): State<AppState>) -> impl IntoResponse {
-    #[cfg(feature = "rustypipe")]
-    if let Backend::RustyPipe(ex) = &s.backend {
-        return match ex.auth_begin().await {
-            Ok(code) => Json(
-                serde_json::json!({
-                    "user_code": code.user_code,
-                    "verification_url": code.verification_url,
-                    "expires_in": code.expires_in,
-                    "interval": code.interval,
-                }),
-            )
-            .into_response(),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                format!("device code failed: {e}"),
-            )
-                .into_response(),
-        };
-    }
+/// POST /api/auth/device — removed with rustypipe (it owned the OAuth
+/// device flow). SongnestPy authenticates via `<data_dir>/cookies.txt`,
+/// so there is nothing to begin here: always 409, like a backend without
+/// the feature. Kept as a route so older frontends fail cleanly.
+async fn api_auth_device(State(_s): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::CONFLICT,
-        "sign-in needs the rustypipe backend",
+        "device sign-in went away with rustypipe; songnestpy uses cookies.txt",
     )
         .into_response()
 }
 
-/// GET /api/auth/status — poll a pending login once.
-#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
-async fn api_auth_status(State(s): State<AppState>) -> impl IntoResponse {
-    #[cfg(feature = "rustypipe")]
-    if let Backend::RustyPipe(ex) = &s.backend {
-        return match ex.auth_poll().await {
-            Ok(status) => Json(serde_json::json!({ "status": status })).into_response(),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                format!("login poll failed: {e}"),
-            )
-                .into_response(),
-        };
-    }
-    (
-        StatusCode::CONFLICT,
-        "sign-in needs the rustypipe backend",
-    )
-        .into_response()
+/// GET /api/auth/status — removed with rustypipe; always 410 Gone.
+async fn api_auth_status(State(_s): State<AppState>) -> impl IntoResponse {
+    (StatusCode::GONE, "device sign-in went away with rustypipe").into_response()
 }
 
-/// POST /api/auth/logout — revoke the token, drop back to anonymous.
-#[cfg_attr(not(feature = "rustypipe"), allow(unused_variables))]
-async fn api_auth_logout(State(s): State<AppState>) -> impl IntoResponse {
-    #[cfg(feature = "rustypipe")]
-    if let Backend::RustyPipe(ex) = &s.backend {
-        return match ex.auth_logout().await {
-            Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-            Err(e) => (
-                StatusCode::BAD_GATEWAY,
-                format!("logout failed: {e}"),
-            )
-                .into_response(),
-        };
-    }
-    (
-        StatusCode::CONFLICT,
-        "sign-in needs the rustypipe backend",
-    )
-        .into_response()
+/// POST /api/auth/logout — removed with rustypipe; always 410 Gone.
+async fn api_auth_logout(State(_s): State<AppState>) -> impl IntoResponse {
+    (StatusCode::GONE, "device sign-in went away with rustypipe").into_response()
 }
 
 /// JSON API for the React frontend.
@@ -1801,7 +1747,7 @@ async fn api_downloader_update(State(s): State<AppState>) -> impl IntoResponse {
     if !matches!(s.backend, Backend::YtDlp) {
         return (
             StatusCode::CONFLICT,
-            "rustypipe backend: no binary to update",
+            "songnestpy backend: no binary to update",
         )
             .into_response();
     }
@@ -1880,9 +1826,11 @@ async fn health(State(s): State<AppState>) -> impl IntoResponse {
             |r| r.get(0),
         )
         .unwrap_or(0);
-    #[cfg(feature = "rustypipe")]
-    let authed = matches!(&s.backend, Backend::RustyPipe(ex) if ex.is_logged_in());
-    #[cfg(not(feature = "rustypipe"))]
+    // "Signed in" == a cookies.txt is present (songnestpy hands it to
+    // yt-dlp); desktop yt-dlp reads its own cookie args the same way.
+    #[cfg(feature = "songnestpy")]
+    let authed = matches!(&s.backend, Backend::SongnestPy(ex) if ex.is_logged_in());
+    #[cfg(not(feature = "songnestpy"))]
     let authed = false;
     Json(serde_json::json!({
         "backend": s.backend.name(),
@@ -2171,7 +2119,7 @@ async fn fetch_latest_tag(http: &reqwest::Client) -> Option<String> {
 /// Order: offline -> rate_limited -> js_runtime_missing -> outdated.
 /// Only Outdated triggers an update attempt (then exactly one re-check).
 /// Backend-agnostic health probe: fetch a playable URL for the stable test
-/// video. yt-dlp runs `-g`; rustypipe resolves in-process.
+/// video. yt-dlp runs `-g`; SongnestPy resolves on-device.
 async fn probe_fetch(s: &AppState) -> anyhow::Result<String> {
     match &s.backend {
         Backend::YtDlp => {
@@ -2191,13 +2139,13 @@ async fn probe_fetch(s: &AppState) -> anyhow::Result<String> {
             anyhow::ensure!(!url.is_empty(), "yt-dlp probe returned empty url");
             Ok(url)
         }
-        #[cfg(feature = "rustypipe")]
-        Backend::RustyPipe(ex) => {
+        #[cfg(feature = "songnestpy")]
+        Backend::SongnestPy(ex) => {
             let st = ex
                 .resolve("jNQXAC9IVRw")
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
-            anyhow::ensure!(!st.url.is_empty(), "rustypipe probe returned empty url");
+            anyhow::ensure!(!st.url.is_empty(), "songnestpy probe returned empty url");
             Ok(st.url)
         }
     }
@@ -2205,7 +2153,7 @@ async fn probe_fetch(s: &AppState) -> anyhow::Result<String> {
 
 async fn health_check(s: &AppState) {
     // fast path: no runtime at all and none configured (yt-dlp only —
-    // rustypipe solves challenges in-process and needs no JS runtime)
+    // songnestpy runs yt-dlp on-device and needs no JS runtime)
     let runtimes_empty = matches!(s.backend, Backend::YtDlp)
         && s.downloader.read(|d| {
             d.runtimes.iter().all(|r| !r.supported)
@@ -2338,11 +2286,12 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
     // two queue workers = max 2 concurrent downloads, ever
     tokio::spawn(download_worker(state.clone()));
     tokio::spawn(download_worker(state.clone()));
-    // a cached OAuth session (if any) flips queries to authenticated
-    #[cfg(feature = "rustypipe")]
-    if let Backend::RustyPipe(ex) = &state.backend {
-        if ex.check_login().await {
-            eprintln!("songnest: YouTube session active");
+    // cookies.txt (when pushed to the data dir) flips yt-dlp to
+    // authenticated requests — log it so logcat shows the mode.
+    #[cfg(feature = "songnestpy")]
+    if let Backend::SongnestPy(ex) = &state.backend {
+        if ex.is_logged_in() {
+            eprintln!("songnest: cookies.txt active, yt-dlp runs authenticated");
         }
     }
     // downloader updater loop + health checks are spawned by run_downloader_tasks()
@@ -2729,9 +2678,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// File extension for a resolved audio mime. yt-dlp always yields m4a
-/// (transcoded); rustypipe yields m4a (AAC) or webm (opus) depending on
+/// (transcoded); SongnestPy yields m4a (AAC) or webm (opus) depending on
 /// what the client offers.
-#[cfg(feature = "rustypipe")]
+#[cfg(feature = "songnestpy")]
 fn audio_ext(mime: &str) -> &'static str {
     if mime.contains("mp4") {
         "m4a"
@@ -2741,7 +2690,7 @@ fn audio_ext(mime: &str) -> &'static str {
 }
 
 /// Resolved stream: playable URL + mime. yt-dlp prints a `-g` URL (always
-/// m4a); rustypipe resolves in-process (m4a or opus/webm).
+/// m4a); SongnestPy resolves on-device (m4a or opus/webm, no transcode).
 struct FetchedStream {
     url: String,
     mime: String,
@@ -2774,10 +2723,10 @@ async fn fetch_stream(s: &AppState, id: &str) -> anyhow::Result<FetchedStream> {
                 mime: "audio/mp4".to_string(),
             })
         }
-        #[cfg(feature = "rustypipe")]
-        Backend::RustyPipe(ex) => {
+        #[cfg(feature = "songnestpy")]
+        Backend::SongnestPy(ex) => {
             let st = ex.resolve(id).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-            anyhow::ensure!(!st.url.is_empty(), "rustypipe returned empty url");
+            anyhow::ensure!(!st.url.is_empty(), "songnestpy returned empty url");
             Ok(FetchedStream {
                 url: st.url,
                 mime: st.mime,
@@ -2818,7 +2767,7 @@ async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<Stri
 }
 
 /// Mime of the cached resolve, if any (set by resolve_url).
-#[cfg(feature = "rustypipe")]
+#[cfg(feature = "songnestpy")]
 fn cached_mime(s: &AppState, id: &str) -> Option<String> {
     s.urls
         .lock()
@@ -2947,63 +2896,6 @@ pub async fn single_shot(query: &str) -> anyhow::Result<()> {
 mod downloader_tests {
     use super::*;
     use std::cmp::Ordering;
-
-    /// Diagnostic probe (ignored by default): resolve one video with every
-    /// rustypipe client and range-fetch two chunks per URL. Shows which
-    /// clients yield usable media from the current network.
-    /// Run: cargo test -p songnest-server --features rustypipe probe_clients -- --ignored --nocapture
-    #[tokio::test]
-    #[ignore]
-    #[cfg(feature = "rustypipe")]
-    async fn probe_clients() {
-        use songnest_extract::{ClientType, RustyPipe};
-        let rp = RustyPipe::builder()
-            .storage_dir("/tmp/sn-rp-probe")
-            .build()
-            .unwrap();
-        let c = reqwest::Client::new();
-        for ct in [
-            ClientType::Tv,
-            ClientType::Mobile,
-            ClientType::DesktopMusic,
-            ClientType::Android,
-            ClientType::Ios,
-        ] {
-            let player = match rp.query().player_from_client("5NV6Rdv1a3I", ct).await {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("{ct:?}: resolve ERR {e}");
-                    continue;
-                }
-            };
-            let audio = match player.audio_streams.iter().max_by_key(|a| a.bitrate) {
-                Some(a) => a,
-                None => {
-                    eprintln!("{ct:?}: no audio");
-                    continue;
-                }
-            };
-            let r = c
-                .get(&audio.url)
-                .header("Range", "bytes=0-1048575")
-                .send()
-                .await
-                .unwrap();
-            eprintln!(
-                "{ct:?}: {} {}kbps chunk1={}",
-                audio.mime,
-                audio.bitrate / 1000,
-                r.status()
-            );
-            let r2 = c
-                .get(&audio.url)
-                .header("Range", "bytes=1048576-2097151")
-                .send()
-                .await
-                .unwrap();
-            eprintln!("{ct:?}: chunk2={}", r2.status());
-        }
-    }
 
     #[test]
     fn date_versions_compare_numerically() {

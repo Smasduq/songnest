@@ -9,9 +9,9 @@ edition = "2024"
 
 [features]
 default = []
-# Pure-Rust YouTube backend (rustypipe). The phone build enables this;
-# desktop defaults to yt-dlp without it.
-rustypipe = ["songnest-extract/rustypipe"]
+# On-device yt-dlp backend (SongnestPy: embedded CPython on Android,
+# reached over JNI). The phone build enables this; desktop is yt-dlp only.
+songnestpy = ["songnest-extract/songnestpy"]
 
 [dependencies]
 songnest-extract = { path = "../extract" }
