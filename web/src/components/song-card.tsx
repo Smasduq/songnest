@@ -67,6 +67,9 @@ export function SongCard({
   onPlay,
 }: Props) {
   const [open, setOpen] = useState(false);
+  // "button": opened from ⋯ (anchor under it); "cursor": right-click /
+  // long-press (positioned at the pointer by openAt, never re-anchored)
+  const [anchor, setAnchor] = useState<"button" | "cursor">("button");
   const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({
     top: 0,
     right: 0,
@@ -116,9 +119,10 @@ export function SongCard({
     function place() {
       const r = btnRef.current?.getBoundingClientRect();
       if (r === undefined) return;
-      setPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+      setPos({ top: r.bottom + 8, right: window.innerWidth - r.right, left: undefined });
     }
-    place();
+    // ⋯ opens anchor under the button; cursor opens keep openAt's position
+    if (anchor === "button") place();
     function close(e: MouseEvent) {
       if (Date.now() - lastTouchEnd.current < 500) return;
       const t = e.target as Node;
@@ -141,18 +145,29 @@ export function SongCard({
       window.removeEventListener("scroll", dismiss, true);
       window.removeEventListener("resize", dismiss);
     };
-  }, [open ]);
+  }, [open, anchor]);
 
   function pick(fn: () => void) {
     setOpen(false);
     fn();
   }
 
-  function openAt(clientX: number, clientY: number) {
+  // w-48 menu (192px) + margins; height varies with actions, 260 covers it
+  function openAt(clientX: number, clientY: number, fromTouch = false) {
+    const W = 200;
+    const H = 260;
+    const maxLeft = Math.max(8, window.innerWidth - W);
+    const maxTop = Math.max(8, window.innerHeight - H);
+    // mouse (Win/Mac/Linux incl. Ctrl+click): top-left at the cursor,
+    // flipped inside when near an edge. touch: open above the finger
+    // so it stays visible instead of under it.
+    const top = fromTouch ? clientY - H : clientY;
     setPos({
-      top: Math.min(clientY, window.innerHeight - 220),
-      left: Math.max(8, Math.min(clientX - 96, window.innerWidth - 200)),
+      top: Math.max(8, Math.min(top, maxTop)),
+      left: Math.max(8, Math.min(clientX, maxLeft)),
+      right: undefined,
     });
+    setAnchor("cursor");
     setOpen(true);
   }
 
@@ -164,7 +179,7 @@ export function SongCard({
     const sx = t.clientX;
     const sy = t.clientY;
     window.clearTimeout(pressTimer.current);
-    pressTimer.current = window.setTimeout(() => openAt(sx, sy), 400);
+    pressTimer.current = window.setTimeout(() => openAt(sx, sy, true), 400);
     const cancel = (ev: TouchEvent) => {
       const m = ev.touches[0];
       if (m !== undefined && Math.hypot(m.clientX - sx, m.clientY - sy) > 10) {
@@ -185,7 +200,12 @@ export function SongCard({
     <div
       className="relative"
       onTouchStart={onTouchStart}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        // supported on Win/Mac/Linux browsers + Tauri webviews
+        // (macOS Ctrl+click synthesizes this event)
+        e.preventDefault();
+        openAt(e.clientX, e.clientY);
+      }}
     >
       {/* revealed while swiping right — add-to-queue action */}
       <motion.div
@@ -341,7 +361,10 @@ export function SongCard({
           type="button"
           aria-label="More actions"
           aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setAnchor("button");
+            setOpen((o) => !o);
+          }}
           className={`flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:h-9 sm:w-9 ${
             open
               ? "border border-border/40 bg-background/60 backdrop-blur"
