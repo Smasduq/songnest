@@ -163,8 +163,9 @@ function loadAt(index: number) {
   usePlayer.setState({ index, error: null });
   if (audio.getAttribute("src") !== track.streamUrl) {
     audio.src = track.streamUrl;
-    // fresh stream: show "Getting the song ready…" until it plays
-    usePlayer.setState({ buffering: true });
+    // streams buffer over the network; downloaded tracks play off disk,
+    // so they never raise the "getting ready" state (a stale one clears)
+    usePlayer.setState({ buffering: !track.id.startsWith("db-") });
   }
   playCurrentElement();
   pruneTransient();
