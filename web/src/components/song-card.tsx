@@ -242,10 +242,10 @@ export function SongCard({
             onSwipeLeft();
           }
         }}
-        className={`relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border bg-background/85 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+        className={`relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
-            ? "border-foreground/40 bg-foreground/[0.08]"
-            : "border-border/40 bg-background/60"
+            ? "border border-foreground/40 bg-foreground/[0.08]"
+            : "border border-transparent bg-transparent hover:border-border/40 hover:bg-background/60"
         }`}
       ><button
         type="button"

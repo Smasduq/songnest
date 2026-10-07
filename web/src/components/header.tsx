@@ -124,8 +124,8 @@ export function Header({
 
   function measure(): { rest: number; expanded: number } {
     const slot = slotRef.current?.clientWidth ?? 0;
-    // wordmark slot (68px) + header gap (12px) reclaimed on expand
-    return { rest: slot, expanded: slot + 68 + 12 };
+    // wordmark slot (104px) + header gap (12px) reclaimed on expand
+    return { rest: slot, expanded: slot + 104 + 12 };
   }
 
   function expand() {
@@ -229,11 +229,11 @@ export function Header({
   return (
     <header
       id="app-header"
-      className="glass-bar relative z-50 flex h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 max-md:fixed max-md:inset-x-3 max-md:top-[calc(0.75rem+env(safe-area-inset-top))]"
+      className="glass-bar relative z-50 hidden h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 md:flex"
     >
-      <span className="w-[68px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
+      <span className="w-[104px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
         <motion.span
-          className="block text-sm font-semibold tracking-tight text-foreground"
+          className="flex items-center gap-1.5 text-sm font-semibold tracking-tight text-foreground"
           initial={false}
           animate={overlaid ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
           transition={
@@ -243,6 +243,11 @@ export function Header({
           }
           style={{ pointerEvents: overlaid ? "none" : "auto" }}
         >
+          <img
+            src="/songnest-logo.png"
+            alt="Songnest"
+            className="h-6 w-6 flex-shrink-0 rounded-full object-cover"
+          />
           Songnest
         </motion.span>
       </span>

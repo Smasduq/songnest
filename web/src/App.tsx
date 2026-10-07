@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-motion";
 
-import { ChevronLeft, Mic } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { NowPlaying } from "@/components/now-playing";
 import { NowPlayingSheet } from "@/components/now-playing-sheet";
@@ -601,6 +601,49 @@ return (
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Results
               </h2>
+              {/* mobile has no header pill: type queries here (16px: no iOS zoom) */}
+              <form
+                className="md:hidden"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  runSearch();
+                  (document.activeElement as HTMLElement | null)?.blur?.();
+                }}
+              >
+                <div className="flex items-center gap-1 rounded-full border border-border/60 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none focus-within:ring-2 focus-within:ring-foreground/40">
+                  <input
+                    type="search"
+                    enterKeyHint="search"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search artist or song"
+                    aria-label="Search artist or song"
+                    className="h-10 min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-base text-foreground placeholder:text-foreground/40 focus:outline-none"
+                  />
+                  {query !== "" && (
+                    <button
+                      type="button"
+                      aria-label="Clear search"
+                      onClick={() => {
+                        setQuery("");
+                        setHits([]);
+                      }}
+                      className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-foreground/50 hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    aria-label="Search"
+                    className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-foreground text-background hover:bg-foreground/90"
+                  >
+                    <Search className="h-4 w-4" />
+                  </button>
+                </div>
+              </form>
               {searching ? (
                 <p className="text-sm text-muted-foreground">Searching…</p>
               ) : hits.length === 0 ? (
