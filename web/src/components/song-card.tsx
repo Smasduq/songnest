@@ -44,7 +44,6 @@ interface Props {
   onSwipeLeft: () => void;
   onAddToQueue: () => void;
   onPlay: () => void;
-  variant?: SongCardVariant;
 }
 
 export function SongCard({
@@ -61,9 +60,7 @@ export function SongCard({
   onSwipeLeft,
   onAddToQueue,
   onPlay,
-  variant = "card",
 }: Props) {
-  const isList = variant === "list";
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left?: number; right?: number }>({
     top: 0,

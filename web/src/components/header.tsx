@@ -52,6 +52,8 @@ export function Header({
   onOpenDiagnostics,
   authed,
   onAuthChange,
+  className,
+  page,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
@@ -65,6 +67,8 @@ export function Header({
   onOpenDiagnostics: () => void;
   authed: boolean;
   onAuthChange: () => void;
+  className?: string;
+  page?: "home" | "search" | "library" | "liked" | "diagnostics";
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -229,28 +233,30 @@ export function Header({
   return (
     <header
       id="app-header"
-      className="glass-bar relative z-50 hidden h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 md:flex"
+      className={`glass-bar relative z-50 hidden h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 md:flex ${className ?? ""}`}
     >
-      <span className="w-[104px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
-        <motion.span
-          className="flex items-center gap-1.5 text-sm font-semibold tracking-tight text-foreground"
-          initial={false}
-          animate={overlaid ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
-          transition={
-            reduceMotion
-              ? { duration: 0 }
-              : { type: "spring", stiffness: 400, damping: 35 }
-          }
-          style={{ pointerEvents: overlaid ? "none" : "auto" }}
-        >
-          <img
-            src="/songnest-logo.png"
-            alt="Songnest"
-            className="h-6 w-6 flex-shrink-0 rounded-full object-cover"
-          />
-          Songnest
-        </motion.span>
-      </span>
+      {page !== "search" && (
+        <span className="w-[104px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>
+          <motion.span
+            className="flex items-center gap-1.5 text-sm font-semibold tracking-tight text-foreground"
+            initial={false}
+            animate={overlaid ? { opacity: 0, x: -8 } : { opacity: 1, x: 0 }}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { type: "spring", stiffness: 400, damping: 35 }
+            }
+            style={{ pointerEvents: overlaid ? "none" : "auto" }}
+          >
+            <img
+              src="/songnest-logo.png"
+              alt="Songnest"
+              className="logo-mark h-8 w-8 flex-shrink-0 rounded-full object-cover"
+            />
+            Songnest
+          </motion.span>
+        </span>
+      )}
       <form
         ref={slotRef}
         className="relative h-10 min-w-0 flex-1 self-center md:mx-auto md:max-w-[480px]"
@@ -312,33 +318,34 @@ export function Header({
           </motion.div>
         </div>
       </form>
-      <div ref={menuRef} className="relative ml-auto flex-shrink-0">
-        <button
-          type="button"
-          aria-label="Open settings"
-          aria-expanded={open}
-          onClick={() => {
-            setServerDraft(serverUrl);
-            setOpen((o) => !o);
-          }}
-          className={`flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur transition-colors ${
-            open
-              ? "border-foreground/40 bg-foreground/5 text-foreground"
-              : "border-border/40 bg-background/60 text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
-        <AnimatePresence>
-          {open && (
-            <motion.div
-              key="settings-menu"
-              initial={{ opacity: 0, scale: 0.96, y: -4 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 400, damping: 35 }}
-              className="absolute right-0 top-11 z-30 w-64 overflow-hidden rounded-3xl border border-border/50 bg-background/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
-            >
+      {page !== "search" && (
+        <div ref={menuRef} className="relative ml-auto flex-shrink-0">
+          <button
+            type="button"
+            aria-label="Open settings"
+            aria-expanded={open}
+            onClick={() => {
+              setServerDraft(serverUrl);
+              setOpen((o) => !o);
+            }}
+            className={`flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur transition-colors ${
+              open
+                ? "border-foreground/40 bg-foreground/5 text-foreground"
+                : "border-border/40 bg-background/60 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+          <AnimatePresence>
+            {open && (
+              <motion.div
+                key="settings-menu"
+                initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 400, damping: 35 }}
+                className="absolute right-0 top-11 z-30 w-64 overflow-hidden rounded-3xl border border-border/50 bg-background/95 p-3 shadow-[0_20px_60px_rgba(15,23,42,0.35)] backdrop-blur-2xl"
+              >
             <p className="px-2 pb-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Appearance
             </p>
@@ -483,6 +490,7 @@ export function Header({
           )}
         </AnimatePresence>
       </div>
+      )}
     </header>
   );
 }

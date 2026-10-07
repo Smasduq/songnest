@@ -95,7 +95,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
           <span className="h-1.5 w-12 rounded-full bg-muted" />
         </div>
 
-        <div className="flex items-center justify-between">
+        <div className="flex touch-none select-none items-center justify-between">
           <Button
             variant="ghost"
             size="icon"
@@ -119,13 +119,14 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 alt={`${track.album} cover`}
                 width={640}
                 height={640}
-                className="mx-auto aspect-square w-full max-w-sm flex-shrink rounded-3xl border border-border/40 object-cover"
+                draggable={false}
+                className="mx-auto aspect-square w-full max-w-sm flex-shrink touch-none select-none rounded-3xl border border-border/40 object-cover"
               />
             ) : (
-              <div className="mx-auto aspect-square w-full max-w-sm rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
+              <div className="mx-auto aspect-square w-full max-w-sm touch-none select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
             )}
 
-            <div className="text-center">
+            <div className="touch-none select-none text-center">
               <h2 className="truncate text-2xl font-semibold tracking-tight text-foreground">
                 {track.title}
               </h2>

@@ -45,7 +45,7 @@ export function MobileHeader({
         <img
           src="/songnest-logo.png"
           alt="Songnest"
-          className="h-7 w-7 flex-shrink-0 rounded-full object-cover"
+          className="logo-mark h-8 w-8 flex-shrink-0 rounded-full object-cover"
         />
       )}
       <span className="flex min-w-0 flex-1 truncate text-base font-semibold text-foreground">

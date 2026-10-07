@@ -522,6 +522,7 @@ return (
             .catch(() => setHealth(null));
         }}
         className="hidden md:flex"
+        page={page}
       />
 
       {/* Mobile header */}
