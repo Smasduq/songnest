@@ -100,8 +100,22 @@ export function NowPlayingSheet({
         dragElastic={0.3}
         onDragEnd={dismiss}
         onPointerDown={maybeStartDismiss}
-        className="fixed inset-x-0 bottom-0 top-10 z-[90] flex flex-col gap-4 overflow-hidden rounded-t-3xl border border-border/40 bg-background/95 px-6 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] backdrop-blur-2xl"
+        className="fixed inset-x-0 bottom-0 top-10 z-[90] flex flex-col overflow-hidden rounded-t-3xl border border-border/40 bg-background/80 backdrop-blur-2xl"
       >
+        {/* ambient: blurred cover glow behind the content (static, art-only) */}
+        {track !== undefined && track.coverUrl !== "" && (
+          <div aria-hidden className="pointer-events-none absolute inset-0">
+            <img
+              key={track.coverUrl}
+              src={track.coverUrl}
+              alt=""
+              draggable={false}
+              className="h-full w-full scale-125 object-cover blur-3xl saturate-150"
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/70 to-background" />
+          </div>
+        )}
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]">
         {/* drag handle (section-level swipe handles it too) */}
         <div className="flex cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing">
           <span className="h-1.5 w-12 rounded-full bg-muted" />
@@ -311,6 +325,7 @@ export function NowPlayingSheet({
             body="Pick a song and it shows up here."
           />
         )}
+        </div>
       </motion.section>
     </>
   );
