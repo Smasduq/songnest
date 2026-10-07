@@ -27,6 +27,7 @@ import {
   fetchLikedRows,
   fetchLikes,
   fetchSuggestions,
+  refreshArtists,
   getServerUrl,
   likeKeyFor,
   resolveTrack,
@@ -179,6 +180,14 @@ export default function App() {
       .then(setSuggestions)
       .catch(() => setSuggestions([]));
     refreshLikes();
+    // self-heal rows stored before full artist credits shipped, then
+    // reload whatever changed so cards + now playing show every artist
+    refreshArtists()
+      .then(({ tracks_updated, likes_updated }) => {
+        if (tracks_updated > 0) refreshLibrary();
+        if (likes_updated > 0) refreshLikes();
+      })
+      .catch(() => {});
     fetchHealth()
       .then(setHealth)
       .catch(() => setHealth(null));

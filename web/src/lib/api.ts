@@ -178,6 +178,18 @@ export async function fetchLikedRows(): Promise<LikedRow[]> {
   return (await r.json()) as LikedRow[];
 }
 
+/** One-time self-heal: refresh stale single-artist rows to full credits. */
+export async function refreshArtists(): Promise<{
+  tracks_updated: number;
+  likes_updated: number;
+}> {
+  const r = await fetch(`${apiBase()}/api/library/refresh-artists`, {
+    method: "POST",
+  });
+  if (!r.ok) throw new Error(`refresh-artists: ${r.status}`);
+  return (await r.json()) as { tracks_updated: number; likes_updated: number };
+}
+
 export async function setLiked(
   song: Song,
   liked: boolean

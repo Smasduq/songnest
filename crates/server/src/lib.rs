@@ -156,6 +156,60 @@ fn artist_string(t: &DzTrack) -> String {
     names.join(" ")
 }
 
+/// Display version: comma-separated for song cards, player, tags, DB rows.
+fn display_artists(t: &DzTrack) -> String {
+    let mut names: Vec<String> = t
+        .contributors
+        .iter()
+        .map(|c| c.name.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        names.push(t.artist.name.clone());
+    }
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|n| seen.insert(n.to_lowercase()));
+    names.join(", ")
+}
+
+/// Search/chart payloads omit `contributors`, so featured artists would be
+/// lost on song cards. Fill them from the per-track endpoint (concurrent,
+/// best-effort with a short timeout — failures keep the main artist).
+async fn with_contributors(http: &reqwest::Client, mut tracks: Vec<DzTrack>) -> Vec<DzTrack> {
+    let mut set = tokio::task::JoinSet::new();
+    for (i, t) in tracks.iter().enumerate() {
+        if !t.contributors.is_empty() {
+            continue;
+        }
+        let http = http.clone();
+        let id = t.id;
+        set.spawn(async move {
+            let res = http
+                .get(format!("https://api.deezer.com/track/{id}"))
+                .timeout(std::time::Duration::from_secs(4))
+                .send()
+                .await;
+            let contributors = match res {
+                Ok(r) => r
+                    .json::<DzTrack>()
+                    .await
+                    .ok()
+                    .map(|full| full.contributors),
+                Err(_) => None,
+            };
+            (i, contributors)
+        });
+    }
+    while let Some(res) = set.join_next().await {
+        if let Ok((i, Some(contributors))) = res {
+            if !contributors.is_empty() {
+                tracks[i].contributors = contributors;
+            }
+        }
+    }
+    tracks
+}
+
 /// Short title first: "Treat U Right" beats "Treat U Right (Official Audio)".
 fn short_title(t: &DzTrack) -> &str {
     if t.title_short.trim().is_empty() {
@@ -904,7 +958,7 @@ fn tag_file(path: &str, t: &DzTrack, cover: &[u8]) -> anyhow::Result<()> {
         }
     };
     tag.set_title(t.title.clone());
-    tag.set_artist(t.artist.name.clone());
+    tag.set_artist(display_artists(t));
     tag.set_album(t.album.title.clone());
     tag.push_picture(Picture::new_unchecked(
         PictureType::CoverFront,
@@ -1431,7 +1485,7 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         }
     };
     let title = t.title.clone();
-    let artist = t.artist.name.clone();
+    let artist = display_artists(&t);
     let album = t.album.title.clone();
     let duration = t.duration;
     let cover_url = t.album.cover_big.clone();
@@ -1620,17 +1674,19 @@ async fn api_suggest(State(s): State<AppState>) -> impl IntoResponse {
     let Ok(chart): Result<Chart, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
+    let tracks = with_contributors(
+        &s.http,
+        chart.tracks.data.into_iter().take(10).collect(),
+    )
+    .await;
     Json(
-        chart
-            .tracks
-            .data
+        tracks
             .iter()
-            .take(10)
             .map(|t| {
                 serde_json::json!({
                     "dz": t.id,
                     "title": t.title,
-                    "artist": t.artist.name,
+                    "artist": display_artists(t),
                     "album": t.album.title,
                     "duration": t.duration,
                     "cover": t.album.cover_big,
@@ -1683,6 +1739,26 @@ async fn api_like(
     if b.key.trim().is_empty() || b.title.trim().is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    // Cards carry the search-time artist (main only); refresh full credits
+    // from the per-track endpoint so liked songs list every artist.
+    let mut artist = b.artist.clone();
+    if let Some(id) = b
+        .key
+        .strip_prefix("dz:")
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        if let Ok(resp) = s
+            .http
+            .get(format!("https://api.deezer.com/track/{id}"))
+            .timeout(std::time::Duration::from_secs(4))
+            .send()
+            .await
+        {
+            if let Ok(t) = resp.json::<DzTrack>().await {
+                artist = display_artists(&t);
+            }
+        }
+    }
     s.db
         .lock()
         .unwrap()
@@ -1692,7 +1768,7 @@ async fn api_like(
              ON CONFLICT(key) DO UPDATE SET
                title=excluded.title, artist=excluded.artist,
                album=excluded.album, cover=excluded.cover",
-            rusqlite::params![b.key, b.title, b.artist, b.album, b.cover],
+            rusqlite::params![b.key, b.title, artist, b.album, b.cover],
         )
         .ok();
     Json(serde_json::json!({"liked": true})).into_response()
@@ -1834,6 +1910,134 @@ async fn api_library(State(s): State<AppState>) -> impl IntoResponse {
     Json(rows)
 }
 
+/// One-time self-heal for rows stored before full artist credits shipped:
+/// refreshes library + liked artist strings from the per-track endpoint.
+/// Best-effort, concurrent; returns how many rows changed.
+async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
+    let tracks: Vec<(i64, String, i64)> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT id, artist, deezer_id FROM tracks WHERE deezer_id != 0")
+        .map(|mut st| {
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let liked: Vec<(String, String)> = s
+        .db
+        .lock()
+        .unwrap()
+        .prepare("SELECT key, artist FROM liked WHERE key LIKE 'dz:%'")
+        .map(|mut st| {
+            st.query_map([], |r| {
+                let key: String = r.get(0)?;
+                Ok((key, r.get(1)?))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        })
+        .unwrap_or_default();
+    enum Target {
+        Track(i64),
+        Like(String),
+    }
+    let mut set = tokio::task::JoinSet::new();
+    for (id, _stored, dz) in &tracks {
+        let http = s.http.clone();
+        let id = *id;
+        let dz = *dz as u64;
+        set.spawn(async move {
+            let res = http
+                .get(format!("https://api.deezer.com/track/{dz}"))
+                .timeout(std::time::Duration::from_secs(4))
+                .send()
+                .await;
+            let full = match res {
+                Ok(r) => r
+                    .json::<DzTrack>()
+                    .await
+                    .ok()
+                    .map(|t| display_artists(&t)),
+                Err(_) => None,
+            };
+            (Target::Track(id), full)
+        });
+    }
+    for (key, _stored) in &liked {
+        let http = s.http.clone();
+        let key = key.clone();
+        let dz = key
+            .strip_prefix("dz:")
+            .and_then(|v| v.parse::<u64>().ok());
+        let Some(dz) = dz else { continue };
+        set.spawn(async move {
+            let res = http
+                .get(format!("https://api.deezer.com/track/{dz}"))
+                .timeout(std::time::Duration::from_secs(4))
+                .send()
+                .await;
+            let full = match res {
+                Ok(r) => r
+                    .json::<DzTrack>()
+                    .await
+                    .ok()
+                    .map(|t| display_artists(&t)),
+                Err(_) => None,
+            };
+            (Target::Like(key), full)
+        });
+    }
+    let mut track_updates: Vec<(i64, String)> = Vec::new();
+    let mut like_updates: Vec<(String, String)> = Vec::new();
+    let stored_of = |t: &Target| -> Option<&str> {
+        match t {
+            Target::Track(id) => tracks
+                .iter()
+                .find(|(i, _, _)| i == id)
+                .map(|(_, a, _)| a.as_str()),
+            Target::Like(k) => liked
+                .iter()
+                .find(|(kk, _)| kk == k)
+                .map(|(_, a)| a.as_str()),
+        }
+    };
+    while let Some(res) = set.join_next().await {
+        let Ok((target, Some(full))) = res else { continue };
+        if stored_of(&target) != Some(full.as_str()) {
+            match target {
+                Target::Track(id) => track_updates.push((id, full)),
+                Target::Like(key) => like_updates.push((key, full)),
+            }
+        }
+    }
+    {
+        let db = s.db.lock().unwrap();
+        for (id, artist) in &track_updates {
+            db.execute(
+                "UPDATE tracks SET artist = ?1 WHERE id = ?2",
+                rusqlite::params![artist, id],
+            )
+            .ok();
+        }
+        for (key, artist) in &like_updates {
+            db.execute(
+                "UPDATE liked SET artist = ?1 WHERE key = ?2",
+                rusqlite::params![artist, key],
+            )
+            .ok();
+        }
+    }
+    Json(serde_json::json!({
+        "tracks_updated": track_updates.len(),
+        "likes_updated": like_updates.len(),
+    }))
+    .into_response()
+}
+
 async fn api_search(
     State(s): State<AppState>,
     Query(q): Query<HashMap<String, String>>,
@@ -1854,15 +2058,17 @@ async fn api_search(
     let Ok(res): Result<DzSearch, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
+    let tracks =
+        with_contributors(&s.http, res.data.into_iter().take(10).collect())
+            .await;
     Json(
-        res.data
+        tracks
             .iter()
-            .take(10)
             .map(|t| {
                 serde_json::json!({
                     "dz": t.id,
                     "title": t.title,
-                    "artist": t.artist.name,
+                    "artist": display_artists(t),
                     "album": t.album.title,
                     "duration": t.duration,
                     "cover": t.album.cover_big,
@@ -1918,7 +2124,7 @@ async fn api_resolve(
             Json(serde_json::json!({
                 "dz": t.id,
                 "title": t.title,
-                "artist": t.artist.name,
+                "artist": display_artists(&t),
                 "album": t.album.title,
                 "duration": t.duration,
                 "cover": t.album.cover_big,
@@ -2542,6 +2748,7 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/auth/logout", post(api_auth_logout))
         .route("/api/cookies", get(api_cookies_status).post(api_cookies_install))
         .route("/api/library", get(api_library))
+        .route("/api/library/refresh-artists", post(api_refresh_artists))
         .route("/api/search", get(api_search))
         .route("/api/resolve", get(api_resolve))
         .layer(CorsLayer::very_permissive())
@@ -3300,6 +3507,23 @@ mod downloader_tests {
         let t = dz_track("Fola", "Treat U Right", 180);
         assert!(title_coverage("Fola - Treat U Right", &t) >= 0.5);
         assert!(title_coverage("Fola - Alone", &t) < 0.5);
+    }
+
+    #[test]
+    fn display_artists_lists_every_credited_name() {
+        let mut t = dz_track("Fola", "Treat U Right", 180);
+        t.contributors = vec![
+            DzContributor {
+                name: "Fola".to_string(),
+            },
+            DzContributor {
+                name: "Young Jonn".to_string(),
+            },
+        ];
+        assert_eq!(display_artists(&t), "Fola, Young Jonn");
+        // no contributors: falls back to the main artist
+        let solo = dz_track("Asake", "Lonely At The Top", 180);
+        assert_eq!(display_artists(&solo), "Asake");
     }
 
     #[test]
