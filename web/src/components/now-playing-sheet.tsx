@@ -130,11 +130,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
         </div>
 
         {track !== undefined ? (
-          // scrolls only when the content is taller than the sheet
-          <div
-            data-no-dismiss-drag
-            className="scroller min-h-0 flex-1 space-y-4 pb-4"
-          >
+          <>
             {track.coverUrl !== "" ? (
               <img
                 src={track.coverUrl}
@@ -142,13 +138,13 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 width={640}
                 height={640}
                 draggable={false}
-                className="mx-auto aspect-square w-full max-w-sm flex-shrink select-none rounded-3xl border border-border/40 object-cover"
+                className="mx-auto aspect-square w-full max-w-sm flex-shrink touch-none select-none rounded-3xl border border-border/40 object-cover"
               />
             ) : (
-              <div className="mx-auto aspect-square w-full max-w-sm select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
+              <div className="mx-auto aspect-square w-full max-w-sm touch-none select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
             )}
 
-            <div className="select-none text-center">
+            <div className="touch-none select-none text-center">
               <h2 className="truncate text-2xl font-semibold tracking-tight text-foreground">
                 {track.title}
               </h2>
@@ -301,7 +297,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
             </div>
 
             {showQueue && (
-              <div className="space-y-1.5">
+              <div data-no-dismiss-drag className="scroller min-h-0 flex-1 space-y-1.5 pb-4">
                 {queue.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Queue is empty — swipe a song right or use ⋯ → Add to
@@ -339,7 +335,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             )}
-          </div>
+          </>
         ) : (
           <p className="py-16 text-center text-muted-foreground">
             Nothing playing yet.
