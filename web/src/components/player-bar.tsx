@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
+import { SeekBar } from "@/components/seek-bar";
 import { formatTime } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
@@ -29,7 +30,6 @@ export function PlayerBar({ className }: { className?: string }) {
   const repeat = usePlayer((s) => s.repeat);
   const error = usePlayer((s) => s.error);
   const { currentTime, duration } = useTime();
-  const barRef = useRef<HTMLDivElement>(null);
 
   const { toggle, next, prev, seekTo, setVolume, toggleMute, cycleRepeat } =
     usePlayer.getState();
@@ -71,13 +71,6 @@ export function PlayerBar({ className }: { className?: string }) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  function seek(clientX: number) {
-    const bar = barRef.current;
-    if (!bar || !duration) return;
-    const rect = bar.getBoundingClientRect();
-    seekTo(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
-  }
-
   const volRef = useRef<HTMLDivElement>(null);
 
   function setVol(clientX: number) {
@@ -88,7 +81,6 @@ export function PlayerBar({ className }: { className?: string }) {
     setVolume(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
   }
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volPct = (muted ? 0 : volume) * 100;
 
   return (
@@ -211,16 +203,13 @@ export function PlayerBar({ className }: { className?: string }) {
           <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
             {formatTime(currentTime)}
           </span>
-          <div
-            ref={barRef}
-            onClick={(e) => seek(e.clientX)}
-            className="h-1.5 flex-1 cursor-pointer rounded-full bg-muted"
-          >
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-primary to-primary/40"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          <SeekBar
+            value={duration > 0 ? currentTime / duration : 0}
+            duration={duration || track?.duration || 0}
+            onSeek={(r) => seekTo(r)}
+            className="flex-1"
+            barClassName="h-1.5"
+          />
           <span className="w-10 text-xs tabular-nums text-muted-foreground">
             {formatTime(duration || track?.duration || 0)}
           </span>

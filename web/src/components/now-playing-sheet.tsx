@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, useDragControls } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
+import { SeekBar } from "@/components/seek-bar";
 import { dzOf, formatTime } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
@@ -39,7 +40,6 @@ export function NowPlayingSheet({
   const index = usePlayer((s) => s.index);
   const { currentTime, duration } = useTime();
   const [showQueue, setShowQueue] = useState(false);
-  const barRef = useRef<HTMLDivElement>(null);
   const controls = useDragControls();
   const st = usePlayer.getState();
 
@@ -50,13 +50,6 @@ export function NowPlayingSheet({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  function seek(clientX: number) {
-    const bar = barRef.current;
-    if (!bar || !duration) return;
-    const rect = bar.getBoundingClientRect();
-    st.seekTo(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
-  }
 
   function dismiss(_: unknown, info: { offset: { y: number }; velocity: { y: number } }) {
     if (
@@ -75,8 +68,6 @@ export function NowPlayingSheet({
     if (t !== null && t.closest("button, input, a, [data-no-dismiss-drag]") !== null) return;
     controls.start(e);
   }
-
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
     <>
@@ -192,17 +183,13 @@ export function NowPlayingSheet({
                 <span>{formatTime(currentTime)}</span>
                 <span>{formatTime(duration || track.duration)}</span>
               </div>
-              <div
-                ref={barRef}
-                data-no-dismiss-drag
-                onClick={(e) => seek(e.clientX)}
-                className="h-2 w-full cursor-pointer rounded-full bg-muted"
-              >
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary to-primary/40 will-change-transform"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              <SeekBar
+                value={duration > 0 ? currentTime / duration : 0}
+                duration={duration || track.duration}
+                onSeek={(r) => st.seekTo(r)}
+                barClassName="h-2"
+                noDrag
+              />
             </div>
 
             <div className="flex items-center justify-center gap-3">
