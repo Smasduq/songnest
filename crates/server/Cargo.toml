@@ -14,7 +14,7 @@ default = []
 songnestpy = ["songnest-extract/songnestpy"]
 
 [dependencies]
-songnest-extract = { path = "../extract" }
+songnest-extract = { path = "../extract", version = "0.1.0-alpha.1" }
 tokio.workspace = true
 reqwest.workspace = true
 serde.workspace = true

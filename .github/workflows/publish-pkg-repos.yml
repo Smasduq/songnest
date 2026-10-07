@@ -1,0 +1,129 @@
+name: publish-pkg-repos
+
+# Builds self-hosted apt (Debian/Ubuntu) and dnf (Fedora/RHEL) repositories
+# from the .deb/.rpm bundles attached to a GitHub release, and pushes them to
+# the `pkg` branch. Served as plain files, zero setup required:
+#
+#   apt: deb [trusted=yes] https://raw.githubusercontent.com/Smasduq/songnest/pkg stable main
+#   dnf: baseurl=https://raw.githubusercontent.com/Smasduq/songnest/pkg/rpms
+#
+# Layout on the pkg branch:
+#   pool/*.deb                                  <- every .deb, all versions
+#   dists/stable/main/binary-amd64/{Packages,Packages.gz,Release[,InRelease,Release.gpg]}
+#   rpms/*.rpm + rpms/repodata/                 <- every .rpm, all versions
+#   key.asc                                     <- GPG public key (only when signing)
+#
+# Runs automatically when a release is published (idempotent: rebuilds the
+# full repo from every .deb/.rpm on the release, so re-runs are safe), or
+# manually with a tag input.
+#
+# Optional signing: set repo secret APT_GPG_PRIVATE_KEY to an ASCII-armored
+# private key and APT_GPG_KEY_ID to its key id. Without them the repo is
+# published unsigned (hence [trusted=yes] in the install instructions).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync packages from (e.g. v0.1.0-alpha.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release packages
+        run: |
+          mkdir -p fetch
+          gh release download "${{ steps.tag.outputs.value }}" \
+            --repo Smasduq/songnest \
+            --pattern '*.deb' --pattern '*.rpm' \
+            --dir fetch
+          ls -la fetch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check out pkg branch
+        uses: actions/checkout@v4
+        with:
+          ref: pkg
+          path: pkg-branch
+        continue-on-error: true
+
+      - name: Init pkg branch if missing
+        run: |
+          if [ ! -d pkg-branch/.git ]; then
+            mkdir -p pkg-branch
+            cd pkg-branch
+            git init -b pkg
+            git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Smasduq/songnest.git"
+          fi
+
+      - name: Install repo tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dpkg-dev createrepo-c gnupg
+
+      - name: Sync packages and rebuild metadata
+        run: |
+          set -e
+          cd pkg-branch
+          mkdir -p pool rpms dists/stable/main/binary-amd64
+
+          # Accumulate: never delete old versions (users can install any version).
+          cp -n ../fetch/*.deb pool/ 2>/dev/null || true
+          cp -n ../fetch/*.rpm rpms/ 2>/dev/null || true
+          rm -f rpms/repodata -r
+
+          # --- apt metadata ---
+          dpkg-scanpackages --arch amd64 pool /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages
+          ( cd dists/stable && apt-ftparchive release . > Release )
+
+          # --- dnf metadata ---
+          createrepo_c rpms/
+
+          # --- dnf .repo file (stable URL, served from the same branch) ---
+          cat > songnest.repo <<'EOF'
+          [songnest]
+          name=Songnest
+          baseurl=https://raw.githubusercontent.com/Smasduq/songnest/pkg/rpms
+          enabled=1
+          gpgcheck=0
+          EOF
+
+          # --- optional GPG signing ---
+          if [ -n "${{ secrets.APT_GPG_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.APT_GPG_PRIVATE_KEY }}" | gpg --batch --import
+            gpg --batch --yes --local-user "${{ secrets.APT_GPG_KEY_ID }}" \
+              --clearsign -o dists/stable/InRelease dists/stable/Release
+            gpg --batch --yes --local-user "${{ secrets.APT_GPG_KEY_ID }}" \
+              -abs -o dists/stable/Release.gpg dists/stable/Release
+            gpg --armor --export "${{ secrets.APT_GPG_KEY_ID }}" > key.asc
+          else
+            rm -f dists/stable/InRelease dists/stable/Release.gpg key.asc
+          fi
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "pkg repo already up to date"
+          else
+            git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+              commit -m "Sync packages from ${{ steps.tag.outputs.value }}"
+            git push -u origin pkg --force-with-lease
+          fi

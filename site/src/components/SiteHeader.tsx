@@ -27,6 +27,9 @@ export default function SiteHeader() {
           <a className="transition-opacity hover:text-white hover:opacity-90" href="#download">
             Download
           </a>
+          <a className="transition-opacity hover:text-white hover:opacity-90" href="#install">
+            Install
+          </a>
           <a className="transition-opacity hover:text-white hover:opacity-90" href="#releases">
             All releases
           </a>

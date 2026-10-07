@@ -1,0 +1,26 @@
+# Maintainer: Smasduq
+pkgname=songnest-bin
+# Arch pkgver cannot contain hyphens: 0.1.0-alpha.1 -> 0.1.0.alpha.1
+pkgver=0.1.0.alpha.1
+pkgrel=1
+pkgdesc="Music library and player with a pluggable source system (prebuilt binary)"
+arch=('x86_64')
+url="https://github.com/Smasduq/songnest"
+license=('MIT' 'Apache-2.0')
+depends=('webkit2gtk-4.1' 'libappindicator-gtk3' 'librsvg' 'openssl')
+optdepends=('yt-dlp: optional external resolver (never bundled)')
+provides=('songnest')
+conflicts=('songnest')
+# Upstream asset naming follows the Tauri v2 bundler convention:
+#   songnest_<upstream-version>_amd64.deb
+# If the first real release names it differently, run ./update.sh — it
+# detects the actual *_amd64.deb on the latest release automatically.
+_upstreamver=0.1.0-alpha.1
+source=("songnest_${_upstreamver}_amd64.deb::https://github.com/Smasduq/songnest/releases/download/v${_upstreamver}/songnest_${_upstreamver}_amd64.deb")
+# Filled in by ./update.sh once the first release (with real assets) exists.
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf "${srcdir}/songnest_${_upstreamver}_amd64.deb" -C "${srcdir}"
+  tar -xf "${srcdir}/data.tar."* -C "${pkgdir}"
+}

@@ -4,6 +4,7 @@ import Hero from './components/Hero.tsx'
 import Features from './components/Features.tsx'
 import HowItWorks from './components/HowItWorks.tsx'
 import DownloadLatest from './components/DownloadLatest.tsx'
+import PackageManagers from './components/PackageManagers.tsx'
 import Faq from './components/Faq.tsx'
 import SiteFooter from './components/SiteFooter.tsx'
 import { fetchReleases, type Release } from './lib/releases.ts'
@@ -47,6 +48,7 @@ export default function App() {
         <Features />
         <HowItWorks />
         <DownloadLatest latest={latest} loading={loading} error={error} />
+        <PackageManagers />
         <Suspense
           fallback={
             <div className="mx-auto max-w-6xl px-4 py-10" aria-label="Loading releases section">

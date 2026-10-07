@@ -11,7 +11,7 @@ edition = "2024"
 default = []
 
 [dependencies]
-songnest-server = { path = "../server" }
+songnest-server = { path = "../server", version = "0.1.0-alpha.1" }
 tokio.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
