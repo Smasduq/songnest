@@ -12,6 +12,7 @@ import { Header, useTheme } from "@/components/header";
 import { MobileHeader } from "@/components/mobile-header";
 import { MobileNav } from "@/components/mobile-nav";
 import { PlayerBar } from "@/components/player-bar";
+import { CustomScroller } from "@/components/custom-scroller";
 import { EmptyState, OfflineState } from "@/components/empty-state";
 import { Disc3, Heart, Library, SearchX } from "lucide-react";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
@@ -594,12 +595,12 @@ return (
         </div>
 
         {/* Main content */}
-        <main
-          ref={mainRef}
+        <CustomScroller
+          scrollRef={mainRef}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          className="scroller min-w-0 flex-1 space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)] pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
+          className="space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)] pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
         >
           {dlStatus?.health === "outdated" && (
             <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">
@@ -846,7 +847,7 @@ return (
           )}
             </motion.div>
           </AnimatePresence>
-        </main>
+        </CustomScroller>
 
         {/* Desktop now playing sidebar */}
         <div className="hidden xl:block">
