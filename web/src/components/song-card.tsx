@@ -18,6 +18,7 @@ import {
   ListPlus,
   Loader2,
   MoreVertical,
+  Play,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -243,7 +244,7 @@ export function SongCard({
             onSwipeLeft();
           }
         }}
-        className={`relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+        className={`group/card relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
             ? "border border-foreground/40 bg-foreground/[0.08]"
             : "border border-transparent bg-transparent hover:border-border/40 hover:bg-background/60"
@@ -251,6 +252,7 @@ export function SongCard({
       ><button
         type="button"
         onClick={onPlay}
+        aria-label={`Play ${song.title}`}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
         {song.coverUrl !== "" && (
@@ -261,6 +263,12 @@ export function SongCard({
             loading="lazy"
           />
         )}
+        <span
+          aria-hidden
+          className="absolute inset-0 flex items-center justify-center bg-background/50 opacity-0 transition-opacity duration-150 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
+        >
+          <Play className="h-5 w-5 fill-foreground text-foreground" />
+        </span>
         {resolving && (
           <span
             role="status"
