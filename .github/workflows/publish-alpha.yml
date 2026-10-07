@@ -100,8 +100,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # setup-android@v3 is broken against current cmdline-tools (it tries to
+      # install the long-removed `tools` package and dies), so drive
+      # sdkmanager directly. Versions mirror a known-good local SDK.
       - name: setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          TOOLS="$(ls -d /usr/local/lib/android/sdk/cmdline-tools/*/ | sort -V | tail -1)bin/sdkmanager"
+          yes | "$TOOLS" --licenses > /dev/null
+          "$TOOLS" "platform-tools" "platforms;android-37" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: install Rust stable + Android targets
         uses: dtolnay/rust-toolchain@stable
