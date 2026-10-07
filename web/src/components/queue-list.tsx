@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { motion, Reorder, useDragControls, useMotionValue } from "framer-motion";
 
 import { EmptyState } from "@/components/empty-state";
@@ -74,6 +75,10 @@ function QueueRow({
 }) {
   const controls = useDragControls();
   const x = useMotionValue(0);
+  const swipeCommitAt = useRef(0);
+  function tapGuard(): boolean {
+    return Date.now() - swipeCommitAt.current < 500;
+  }
 
   return (
     <Reorder.Item
@@ -92,7 +97,10 @@ function QueueRow({
         dragDirectionLock
         style={{ x }}
         onDragEnd={(_, info) => {
-          if (info.offset.x < -70 || info.velocity.x < -600) onRemove();
+          if (info.offset.x < -70 || info.velocity.x < -600) {
+            swipeCommitAt.current = Date.now();
+            onRemove();
+          }
         }}
         className={`relative flex touch-pan-y items-center gap-2 rounded-2xl border px-2 py-1.5 ${
           active
@@ -111,7 +119,9 @@ function QueueRow({
         </button>
         <button
           type="button"
-          onClick={onPlay}
+          onClick={() => {
+            if (!tapGuard()) onPlay();
+          }}
           className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent"
         >
           {song.coverUrl !== "" && (
@@ -134,7 +144,9 @@ function QueueRow({
         </button>
         <button
           type="button"
-          onClick={onPlay}
+          onClick={() => {
+            if (!tapGuard()) onPlay();
+          }}
           className="min-w-0 flex-1 text-left"
         >
           <p className="truncate text-sm font-semibold text-foreground">

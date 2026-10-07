@@ -84,6 +84,13 @@ export function SongCard({
   const rowRef = useRef<HTMLDivElement>(null);
   const crossedRef = useRef<"left" | "right" | null>(null);
   const edgeStartRef = useRef(false);
+  // tap right after a swipe-commit is the gesture's own click, not a press:
+  // ignore play/menu taps within this window so swiping to queue never
+  // also starts playback
+  const swipeCommitAt = useRef(0);
+  function tapGuard(): boolean {
+    return Date.now() - swipeCommitAt.current < 500;
+  }
   // swipe distances drive the action reveals; both sides mirror each other
   // (same 90px commit, same spring back) so left feels like swipe-to-queue
   const x = useMotionValue(0);
@@ -250,8 +257,10 @@ export function SongCard({
             return;
           }
           if (info.offset.x > 90 || info.velocity.x > 600) {
+            swipeCommitAt.current = Date.now();
             onAddToQueue();
           } else if (info.offset.x < -90 || info.velocity.x < -600) {
+            swipeCommitAt.current = Date.now();
             if (swipeLeft === "download") {
               // already have it (or busy): rubber-band bounce only
               if (
@@ -271,7 +280,9 @@ export function SongCard({
         }`}
       ><button
         type="button"
-        onClick={onPlay}
+        onClick={() => {
+          if (!tapGuard()) onPlay();
+        }}
         aria-label={`Play ${song.title}`}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
@@ -301,7 +312,9 @@ export function SongCard({
       </button>
       <button
         type="button"
-        onClick={onPlay}
+        onClick={() => {
+          if (!tapGuard()) onPlay();
+        }}
         className="min-w-0 flex-1 text-left"
       >
         <p className="truncate text-sm font-semibold text-foreground">
@@ -362,6 +375,7 @@ export function SongCard({
           aria-label="More actions"
           aria-expanded={open}
           onClick={() => {
+            if (tapGuard()) return;
             setAnchor("button");
             setOpen((o) => !o);
           }}
