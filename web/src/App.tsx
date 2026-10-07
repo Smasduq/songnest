@@ -328,6 +328,7 @@ export default function App() {
     // optimistic: visible in Up next immediately, even from other pages
     // while something else plays; streams resolve in the background
     st.enqueue(song);
+    if (!already) showToast("Added to queue");
     const dz = dzOf(song);
     if (dz === null || song.streamUrl !== "") return;
     resolveTrack(dz)
