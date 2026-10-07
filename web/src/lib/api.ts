@@ -116,8 +116,10 @@ export async function searchSongs(q: string): Promise<SearchHit[]> {
 }
 
 /** Resolve one exact Deezer track to playable audio (full song only). */
-export async function resolveTrack(dz: number): Promise<Song> {
-  const r = await fetch(`${apiBase()}/api/resolve?dz=${dz}`);
+export async function resolveTrack(dz: number, fresh = false): Promise<Song> {
+  const r = await fetch(
+    `${apiBase()}/api/resolve?dz=${dz}${fresh ? "&fresh=1" : ""}`
+  );
   if (r.status === 404)
     throw new Error("full track not found — try another song");
   if (r.status === 503)

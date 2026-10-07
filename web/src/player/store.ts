@@ -13,10 +13,16 @@ export const audio = new Audio();
 audio.preload = "metadata";
 
 const VOL_KEY = "songnest-volume";
-const MUTE_KEY = "songnest-muted";
+// Bumped (one-time reset): the old key could hold a stuck "1" latched by a
+// volume-slider mis-tap — volume-to-0 used to set the mute flag, so every
+// song after that started silent ("auto muted"). Everyone starts clean.
+const MUTE_KEY = "songnest-muted-v2";
 
 try {
-  const v = Number(localStorage.getItem(VOL_KEY));
+  // Missing key (fresh install) must keep the element default of 1:
+  // Number(null) is 0, which would otherwise start every new install silent.
+  const raw = localStorage.getItem(VOL_KEY);
+  const v = raw === null ? NaN : Number(raw);
   if (Number.isFinite(v)) audio.volume = Math.min(1, Math.max(0, v));
   audio.muted = localStorage.getItem(MUTE_KEY) === "1";
 } catch {
@@ -45,9 +51,12 @@ interface PlayerState {
   volume: number;
   muted: boolean;
   error: string | null;
+  /** true while a yt-dlp resolve is in flight (Now Playing shows it). */
+  resolving: boolean;
+  resolvingDz: number | null;
   setLibrary: (tracks: Song[]) => void;
   playTrack: (song: Song) => void;
-  playDz: (dz: number) => Promise<void>;
+  playDz: (dz: number, hint?: Song, fresh?: boolean) => Promise<void>;
   enqueue: (song: Song) => void;
   removeFromQueue: (id: string) => void;
   toggle: () => void;
@@ -103,7 +112,12 @@ function loadAt(index: number) {
     return;
   }
   if (track.streamUrl === "") {
-    usePlayer.setState({ error: "That track has no playable audio." });
+    const { resolving, resolvingDz } = usePlayer.getState();
+    if (resolving && track.id === `dz-${resolvingDz}`) {
+      usePlayer.setState({ error: "Finding the song… (resolving audio)" });
+    } else {
+      usePlayer.setState({ error: "That track has no playable audio." });
+    }
     return;
   }
   retriesLeft = 1;
@@ -170,6 +184,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   volume: audio.volume,
   muted: audio.muted,
   error: null,
+  resolving: false,
+  resolvingDz: null,
 
   setLibrary: (tracks) => {
     const { queue, index } = get();
@@ -192,20 +208,64 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     loadAt(queue.length); // appended at the end of the queue head
   },
 
-  playDz: async (dz) => {
+  playDz: async (dz, hint, fresh = false) => {
     const g = ++generation;
+    // Optimistic Now Playing: show the tapped song immediately (cover,
+    // title, artist) while yt-dlp resolves in the background. The previous
+    // audio keeps playing until the new stream is ready — no dead silence.
+    if (hint !== undefined) {
+      const st = get();
+      // Drop an older unresolved placeholder so spam-taps can't stack them.
+      let queue = st.queue;
+      if (
+        st.resolvingDz !== null &&
+        st.resolvingDz !== dz &&
+        queue.some(
+          (t) => t.id === `dz-${st.resolvingDz}` && t.streamUrl === ""
+        )
+      ) {
+        queue = queue.filter(
+          (t) => !(t.id === `dz-${st.resolvingDz}` && t.streamUrl === "")
+        );
+      }
+      const at = combined(queue, st.library).findIndex(
+        (t) => t.id === hint.id
+      );
+      if (at >= 0) {
+        set({ queue, index: at });
+      } else {
+        set({ queue: [...queue, hint], index: queue.length });
+      }
+      set({ resolving: true, resolvingDz: dz, error: null });
+    } else {
+      set({ resolving: true, resolvingDz: dz, error: null });
+    }
     let song: Song;
     try {
-      song = await resolveTrack(dz);
+      song = await resolveTrack(dz, fresh);
     } catch (e: unknown) {
       if (g !== generation) return; // a newer request already won
       usePlayer.setState({
+        resolving: false,
+        resolvingDz: null,
         error: e instanceof Error ? e.message : "Couldn't play that track.",
       });
       return;
     }
     if (g !== generation) return; // a newer request already won
-    get().playTrack(song);
+    // Swap the placeholder for the resolved stream in place, then play it.
+    const { queue, library } = get();
+    const at = combined(queue, library).findIndex((t) => t.id === song.id);
+    if (at >= 0) {
+      const next = [...queue];
+      const qi = queue.findIndex((t) => t.id === song.id);
+      if (qi >= 0) next[qi] = song;
+      set({ queue: next, resolving: false, resolvingDz: null });
+      loadAt(at);
+    } else {
+      set({ resolving: false, resolvingDz: null });
+      get().playTrack(song);
+    }
   },
 
   enqueue: (song) => {
@@ -293,9 +353,13 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   setVolume: (v) => {
     const clamped = Math.min(1, Math.max(0, v));
     audio.volume = clamped;
-    audio.muted = clamped === 0;
+    // Volume-up is an explicit want-to-hear: drop any mute. Volume-down to
+    // 0 just goes silent through the gain — it never sets the mute flag,
+    // so a slider mis-tap can't latch songs into silence.
+    const muted = clamped === 0 ? get().muted : false;
+    audio.muted = muted;
     persistVolume();
-    set({ volume: clamped, muted: clamped === 0 });
+    set({ volume: clamped, muted });
   },
 
   toggleMute: () => {

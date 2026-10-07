@@ -50,6 +50,11 @@ struct DzSearch {
     data: Vec<DzTrack>,
 }
 #[derive(Deserialize)]
+struct DzContributor {
+    #[serde(default)]
+    name: String,
+}
+#[derive(Deserialize)]
 struct DzTrack {
     id: u64,
     title: String,
@@ -58,6 +63,10 @@ struct DzTrack {
     album: DzAlbum,
     #[serde(default)]
     preview: String,
+    #[serde(default)]
+    contributors: Vec<DzContributor>,
+    #[serde(default)]
+    title_short: String,
 }
 #[derive(Deserialize)]
 struct DzArtist {
@@ -117,10 +126,94 @@ fn youtube_blocked(text: &str) -> bool {
         || text.contains("bot check")
 }
 
+/// Lowercase alphanumeric tokens, with YouTube/Deezer filler stripped.
+/// Single letters are kept ("treat u right" needs the "u").
+fn word_tokens(s: &str) -> Vec<String> {
+    const FILLER: &[&str] = &[
+        "official", "audio", "video", "music", "lyrics", "lyric", "visualizer",
+        "topic", "vevo", "records", "entertainment", "hq", "hd", "4k",
+    ];
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty() && !FILLER.contains(w))
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// "Fola, Young Jonn" style artist string: every credited name, deduped.
+fn artist_string(t: &DzTrack) -> String {
+    let mut names: Vec<String> = t
+        .contributors
+        .iter()
+        .map(|c| c.name.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        names.push(t.artist.name.clone());
+    }
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|n| seen.insert(n.to_lowercase()));
+    names.join(" ")
+}
+
+/// Short title first: "Treat U Right" beats "Treat U Right (Official Audio)".
+fn short_title(t: &DzTrack) -> &str {
+    if t.title_short.trim().is_empty() {
+        &t.title
+    } else {
+        &t.title_short
+    }
+}
+
+/// Queries tried in order until one scores a confident match.
+fn search_queries(t: &DzTrack) -> Vec<String> {
+    let artists = artist_string(t);
+    let title = short_title(t).trim();
+    let mut out = vec![
+        format!("{artists} - {title}"),
+        format!("{artists} {title} official audio"),
+        format!("{} {}", t.artist.name, title),
+    ];
+    out.iter_mut().for_each(|q| {
+        *q = q.split_whitespace().collect::<Vec<_>>().join(" ");
+    });
+    let mut seen = std::collections::HashSet::new();
+    out.into_iter()
+        .filter(|q| {
+            let k = q.to_lowercase();
+            seen.insert(k)
+        })
+        .collect()
+}
+
+/// Fraction of the track's title tokens present in the YouTube title.
+fn title_coverage(yt_title: &str, t: &DzTrack) -> f32 {
+    let want = word_tokens(short_title(t));
+    if want.is_empty() {
+        return 1.0;
+    }
+    let got = yt_title.to_lowercase();
+    let hit = want.iter().filter(|w| got.contains(w.as_str())).count();
+    hit as f32 / want.len() as f32
+}
+
 fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     let mut s = 0;
+    // duration: small gaps are pressing/rounding noise, big gaps are a
+    // different cut (remix, extended, compilation)
     if let Some(d) = e.duration {
-        s -= (d as i32 - t.duration as i32).abs() * 2;
+        let diff = (d as i32 - t.duration as i32).abs();
+        if diff <= 2 {
+            s += 10;
+        } else if diff <= 5 {
+            s += 5;
+        } else if diff <= 10 {
+            s += 0;
+        } else if diff > 45 {
+            s -= 60;
+        } else {
+            s -= (diff - 10) * 2;
+        }
     }
     if e.channel
         .as_deref()
@@ -139,23 +232,52 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         } else {
             s -= 25;
         }
-        let title = e.title.to_lowercase();
-        if title.contains(&artist) {
+        // every credited artist named in the video title is a strong signal
+        let yt = e.title.to_lowercase();
+        for name in artist_string(t)
+            .to_lowercase()
+            .split_whitespace()
+            .filter(|w| w.len() > 2)
+        {
+            if yt.contains(name) {
+                s += 8;
+            }
+        }
+        if yt.contains(&artist) {
             s += 10;
         }
     }
-    let title = e.title.to_lowercase();
-    if title.contains("official audio") {
+    // the title itself must match: each wanted word found scores up,
+    // each missing word scores down hard so a same-artist wrong song
+    // can never win (e.g. Fola "Treat U Right" vs Fola "Alone").
+    let want = word_tokens(short_title(t));
+    let yt = e.title.to_lowercase();
+    for w in &want {
+        if yt.contains(w) {
+            s += 12;
+        } else {
+            s -= 20;
+        }
+    }
+    if yt.contains("official audio") || yt.contains("official music video") {
         s += 10;
+    } else if yt.contains("official video") {
+        s += 8;
     }
     for bad in [
         "live", "cover", "remix", "lyrics", "karaoke", "slowed", "sped up",
+        "tiktok", "reverb", "8d",
     ] {
-        if title.contains(bad) {
-            s -= 15;
+        if yt.contains(bad) {
+            s -= 20;
         }
     }
     s
+}
+
+/// Confident match: decent score AND at least half the title words present.
+fn is_confident(e: &YtEntry, t: &DzTrack, s: i32) -> bool {
+    s >= 25 && title_coverage(&e.title, t) >= 0.5
 }
 
 // ---- downloader: yt-dlp binary, JS runtimes, health, updates ----
@@ -823,6 +945,13 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
         deezer_id INTEGER PRIMARY KEY, video_id TEXT NOT NULL,
         score INTEGER NOT NULL, matched_at INTEGER NOT NULL)",
     )?;
+    // match algo versioning: rows written by an older scorer/query set are
+    // ignored (re-searched once with the current ones) instead of replaying
+    // a wrong song forever. Bump MATCH_ALGO when the queries/scorer change.
+    let _ = db.execute(
+        "ALTER TABLE yt_match ADD COLUMN algo INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
     // download queue: bulk downloads go here, 2 at a time max
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS downloads (
@@ -841,13 +970,20 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Cached Deezer->YouTube match. `fresh=true` skips the cache.
+/// Bump when the search queries or scorer change: cached rows stamped with
+/// an older algo are ignored and re-searched once, so a wrong match made by
+/// a previous version can never stick around. Applies to both backends
+/// (desktop yt-dlp and on-device SongnestPy share this cache).
+const MATCH_ALGO: i64 = 1;
+
+/// Cached Deezer->YouTube match. `fresh=true` skips the cache, and rows
+/// stamped by an older algo are treated as a miss (re-searched below).
 fn get_match(db: &Db, deezer_id: u64) -> Option<(String, i32)> {
     db.lock()
         .unwrap()
         .query_row(
-            "SELECT video_id, score FROM yt_match WHERE deezer_id = ?1",
-            [deezer_id as i64],
+            "SELECT video_id, score FROM yt_match WHERE deezer_id = ?1 AND algo >= ?2",
+            rusqlite::params![deezer_id as i64, MATCH_ALGO],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok()
@@ -855,17 +991,20 @@ fn get_match(db: &Db, deezer_id: u64) -> Option<(String, i32)> {
 
 fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
     let _ = db.lock().unwrap().execute(
-        "INSERT INTO yt_match (deezer_id, video_id, score, matched_at)
-         VALUES (?1, ?2, ?3, strftime('%s','now'))
+        "INSERT INTO yt_match (deezer_id, video_id, score, matched_at, algo)
+         VALUES (?1, ?2, ?3, strftime('%s','now'), ?4)
          ON CONFLICT(deezer_id) DO UPDATE SET
            video_id = excluded.video_id, score = excluded.score,
-           matched_at = excluded.matched_at",
-        rusqlite::params![deezer_id as i64, video_id, score],
+           matched_at = excluded.matched_at, algo = excluded.algo",
+        rusqlite::params![deezer_id as i64, video_id, score, MATCH_ALGO],
     );
 }
 
 /// Match a Deezer track to a YouTube video id (cached). yt-dlp runs
-/// `ytsearch5`; SongnestPy searches via on-device yt-dlp and reuses the same scorer.
+/// `ytsearch10` over artist-aware queries — all credited artists plus the
+/// song title — trying each query until one scores a confident match;
+/// low-confidence bests are rejected (404) instead of playing a wrong song.
+/// SongnestPy searches via on-device yt-dlp and reuses the same scorer.
 async fn youtube_match(
     dl: &DownloaderState,
     #[cfg_attr(not(feature = "songnestpy"), allow(unused_variables))] backend: &Backend,
@@ -880,44 +1019,75 @@ async fn youtube_match(
     }
     #[cfg(feature = "songnestpy")]
     if let Backend::SongnestPy(ex) = backend {
-        let hits = ex
-            .search_music(&format!("{} {}", t.artist.name, t.title))
-            .await
-            .ok()?;
-        let best = hits
-            .iter()
-            .map(|c| YtEntry {
-                id: c.id.clone(),
-                title: c.title.clone(),
-                duration: c.duration_secs.map(|d| d as f64),
-                channel: c.channel.clone(),
-            })
-            .max_by_key(|e| score(e, t))?;
-        let id = best.id.clone();
-        let sc = score(&best, t);
+        // on-device search fans out over the same queries as desktop
+        let mut best: Option<(String, String, i32)> = None;
+        for q in search_queries(t) {
+            let hits = ex.search_music(&q).await.ok()?;
+            let top = hits
+                .iter()
+                .map(|c| YtEntry {
+                    id: c.id.clone(),
+                    title: c.title.clone(),
+                    duration: c.duration_secs.map(|d| d as f64),
+                    channel: c.channel.clone(),
+                })
+                .max_by_key(|e| score(e, t));
+            if let Some(e) = top {
+                let sc = score(&e, t);
+                let confident = is_confident(&e, t, sc);
+                if best.as_ref().map_or(true, |(_, _, b)| sc > *b) {
+                    best = Some((e.id.clone(), e.title.clone(), sc));
+                }
+                if confident {
+                    break;
+                }
+            }
+        }
+        let (id, title, sc) = best?;
+        if title_coverage(&title, t) < 0.5 || sc < 25 {
+            return None;
+        }
         put_match(db, t.id, &id, sc);
         return Some((id, sc));
     }
-    let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
-    let out = cmd
-        .args(cookie_args())
-        .args([
-            "-J",
-            "--flat-playlist",
-            &format!("ytsearch5:{} {}", t.artist.name, t.title),
-        ])
-        .output()
+    // desktop: up to 3 queries, 10 candidates each, 25s per search
+    let mut best: Option<(YtEntry, i32)> = None;
+    for q in search_queries(t) {
+        let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
+        let out = tokio::time::timeout(
+            Duration::from_secs(25),
+            cmd.args(cookie_args()).args([
+                "-J",
+                "--flat-playlist",
+                "--no-playlist",
+                &format!("ytsearch10:{q}"),
+            ])
+            .output(),
+        )
         .await
+        .ok()?
         .ok()?;
-    if !out.status.success() {
+        if !out.status.success() {
+            continue;
+        }
+        let list: YtList = serde_json::from_slice(&out.stdout).ok()?;
+        let top = list.entries.into_iter().max_by_key(|e| score(e, t));
+        if let Some(e) = top {
+            let sc = score(&e, t);
+            if best.as_ref().map_or(true, |(_, b)| sc > *b) {
+                best = Some((e, sc));
+            }
+            if best.as_ref().is_some_and(|(be, bs)| is_confident(be, t, *bs)) {
+                break;
+            }
+        }
+    }
+    let (entry, sc) = best?;
+    if !is_confident(&entry, t, sc) {
         return None;
     }
-    let list: YtList = serde_json::from_slice(&out.stdout).ok()?;
-    let best = list.entries.iter().max_by_key(|e| score(e, t))?;
-    let id = best.id.clone();
-    let sc = score(best, t);
-    put_match(db, t.id, &id, sc);
-    Some((id, sc))
+    put_match(db, t.id, &entry.id, sc);
+    Some((entry.id.clone(), sc))
 }
 
 async fn track(
@@ -1687,7 +1857,7 @@ async fn api_search(
     Json(
         res.data
             .iter()
-            .take(5)
+            .take(10)
             .map(|t| {
                 serde_json::json!({
                     "dz": t.id,
@@ -1736,17 +1906,27 @@ async fn api_resolve(
     // out the 30s Deezer preview. Previews don't play in the Android
     // WebView and the app promises full tracks, so never fall back to them.
     match youtube_match(&s.downloader, &s.backend, &s.db, &t, fresh).await {
-        Some((video_id, _)) => Json(serde_json::json!({
-            "dz": t.id,
-            "title": t.title,
-            "artist": t.artist.name,
-            "album": t.album.title,
-            "duration": t.duration,
-            "cover": t.album.cover_big,
-            "video_id": video_id,
-            "stream": format!("/stream/{video_id}"),
-        }))
-        .into_response(),
+        Some((video_id, _)) => {
+            // Warm the stream-URL cache now so the <audio> element's first
+            // /stream request hits cache instead of spawning its own yt-dlp
+            // `-g` (that second spawn was the slow-start users felt).
+            let warm = s.clone();
+            let warm_id = video_id.clone();
+            tokio::spawn(async move {
+                let _ = resolve_url(&warm, &warm_id, false).await;
+            });
+            Json(serde_json::json!({
+                "dz": t.id,
+                "title": t.title,
+                "artist": t.artist.name,
+                "album": t.album.title,
+                "duration": t.duration,
+                "cover": t.album.cover_big,
+                "video_id": video_id,
+                "stream": format!("/stream/{video_id}"),
+            }))
+            .into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -3075,6 +3255,90 @@ mod downloader_tests {
             assert_eq!(dl.read(|d| d.active), 1);
         }
         assert_eq!(dl.read(|d| d.active), 0);
+    }
+
+    fn dz_track(artist: &str, title: &str, duration: u32) -> DzTrack {
+        DzTrack {
+            id: 1,
+            title: title.to_string(),
+            duration,
+            artist: DzArtist {
+                name: artist.to_string(),
+            },
+            album: DzAlbum {
+                title: "Album".to_string(),
+                cover_big: String::new(),
+            },
+            preview: String::new(),
+            contributors: vec![],
+            title_short: String::new(),
+        }
+    }
+
+    #[test]
+    fn right_song_beats_same_artist_wrong_song() {
+        let t = dz_track("Fola", "Treat U Right", 180);
+        let good = YtEntry {
+            id: "a".to_string(),
+            title: "Fola - Treat U Right (Official Audio)".to_string(),
+            duration: Some(182.0),
+            channel: Some("Fola - Topic".to_string()),
+        };
+        let wrong = YtEntry {
+            id: "b".to_string(),
+            title: "Fola - Alone (Official Audio)".to_string(),
+            duration: Some(178.0),
+            channel: Some("Fola - Topic".to_string()),
+        };
+        assert!(score(&good, &t) > score(&wrong, &t));
+        assert!(is_confident(&good, &t, score(&good, &t)));
+        assert!(!is_confident(&wrong, &t, score(&wrong, &t)));
+    }
+
+    #[test]
+    fn title_coverage_gates_wrong_titles() {
+        let t = dz_track("Fola", "Treat U Right", 180);
+        assert!(title_coverage("Fola - Treat U Right", &t) >= 0.5);
+        assert!(title_coverage("Fola - Alone", &t) < 0.5);
+    }
+
+    #[test]
+    fn queries_lead_with_all_artists_and_title() {
+        let mut t = dz_track("Fola", "Treat U Right", 180);
+        t.contributors = vec![
+            DzContributor {
+                name: "Fola".to_string(),
+            },
+            DzContributor {
+                name: "Young Jonn".to_string(),
+            },
+        ];
+        let qs = search_queries(&t);
+        assert!(qs.len() >= 2);
+        assert!(qs[0].contains("Young Jonn") && qs[0].contains("Treat U Right"));
+    }
+
+    #[test]
+    fn stale_match_rows_are_ignored_until_researched() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        let db: Db = Arc::new(Mutex::new(conn));
+        // row written by the old scorer (no algo stamp -> 0): must miss
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO yt_match (deezer_id, video_id, score, matched_at)
+                 VALUES (123, 'wrong-video', 60, strftime('%s','now'))",
+                [],
+            )
+            .unwrap();
+        assert!(get_match(&db, 123).is_none());
+        // fresh match with the current algo: hits
+        put_match(&db, 123, "right-video", 80);
+        assert_eq!(
+            get_match(&db, 123),
+            Some(("right-video".to_string(), 80))
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ import {
   Download,
   Heart,
   ListPlus,
+  Loader2,
   MoreHorizontal,
   RotateCcw,
   Trash2,
@@ -37,6 +38,8 @@ interface Props {
   dl: DlState;
   dlProgress: number;
   active?: boolean;
+  /** yt-dlp is resolving this song's stream (shows a spinner on the art). */
+  resolving?: boolean;
   swipeLeft: SwipeLeftKind;
   onToggleLike: () => void;
   onDownload: () => void;
@@ -53,6 +56,7 @@ export function SongCard({
   dl,
   dlProgress,
   active = false,
+  resolving = false,
   swipeLeft,
   onToggleLike,
   onDownload,
@@ -256,6 +260,15 @@ export function SongCard({
             className="h-full w-full object-cover"
             loading="lazy"
           />
+        )}
+        {resolving && (
+          <span
+            role="status"
+            aria-label="Resolving audio"
+            className="absolute inset-0 flex items-center justify-center bg-background/60"
+          >
+            <Loader2 className="h-5 w-5 animate-spin text-foreground" />
+          </span>
         )}
       </button>
       <button
