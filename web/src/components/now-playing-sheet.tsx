@@ -37,6 +37,8 @@ export function NowPlayingSheet({
   const repeat = usePlayer((s) => s.repeat);
   const shuffle = usePlayer((s) => s.shuffle);
   const queue = usePlayer((s) => s.queue);
+  const transientIds = usePlayer((s) => s.transientIds);
+  const queuedCount = queue.filter((t) => !transientIds.includes(t.id)).length;
   const index = usePlayer((s) => s.index);
   const { currentTime, duration } = useTime();
   const [showQueue, setShowQueue] = useState(false);
@@ -260,7 +262,7 @@ export function NowPlayingSheet({
                 className="h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] text-muted-foreground"
               >
                 <ListMusic className="h-4 w-4" />
-                Queue ({queue.length})
+                Queue ({queuedCount})
               </Button>
             </div>
 

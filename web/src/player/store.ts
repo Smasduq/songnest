@@ -58,6 +58,12 @@ interface PlayerState {
   resolvingDz: number | null;
   /** true while the audio element is buffering a fresh stream. */
   buffering: boolean;
+  /**
+   * ids of play-now placeholders: tapped songs that were never explicitly
+   * queued. Hidden from Up next and dropped once superseded, so the queue
+   * only ever shows songs the user deliberately added.
+   */
+  transientIds: string[];
   setLibrary: (tracks: Song[]) => void;
   playTrack: (song: Song) => void;
   playDz: (dz: number, hint?: Song, fresh?: boolean) => Promise<void>;
@@ -101,6 +107,32 @@ function combined(queue: Song[], library: Song[]): Song[] {
   return [...queue, ...library];
 }
 
+/** Drop play-now placeholders that are no longer current. The playing
+ *  index follows its track; library offsets shift with the queue. */
+function pruneTransient() {
+  const s = usePlayer.getState();
+  if (s.transientIds.length === 0) return;
+  const cur = combined(s.queue, s.library)[s.index];
+  const nextQ = s.queue.filter(
+    (t) => !s.transientIds.includes(t.id) || t.id === cur?.id
+  );
+  if (nextQ.length === s.queue.length) return;
+  const keep = new Set(nextQ.map((t) => t.id));
+  let index: number;
+  if (cur !== undefined) {
+    const qi = nextQ.findIndex((t) => t.id === cur.id);
+    index = qi >= 0 ? qi : nextQ.length + (s.index - s.queue.length);
+  } else {
+    index = 0;
+  }
+  const total = nextQ.length + s.library.length;
+  usePlayer.setState({
+    queue: nextQ,
+    transientIds: s.transientIds.filter((id) => keep.has(id)),
+    index: total === 0 ? 0 : Math.min(Math.max(0, index), total - 1),
+  });
+}
+
 function playCurrentElement() {
   audio.play().catch((e: unknown) => {
     // Rapid track switches reject the earlier play(): normal, silent.
@@ -115,6 +147,7 @@ function loadAt(index: number) {
   const track = combined(queue, library)[index];
   if (track === undefined) {
     usePlayer.setState({ playing: false, buffering: false });
+    pruneTransient();
     return;
   }
   if (track.streamUrl === "") {
@@ -134,6 +167,7 @@ function loadAt(index: number) {
     usePlayer.setState({ buffering: true });
   }
   playCurrentElement();
+  pruneTransient();
 }
 
 /** Reload the current src once (expired proxy URL), resume where we were. */
@@ -204,6 +238,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   resolving: false,
   resolvingDz: null,
   buffering: false,
+  transientIds: [],
 
   setLibrary: (tracks) => {
     const { queue, index } = get();
@@ -216,14 +251,18 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
 
   playTrack: (song) => {
     generation++;
-    const { queue, library } = get();
+    const { queue, library, transientIds } = get();
     const idx = combined(queue, library).findIndex((t) => t.id === song.id);
     if (idx >= 0) {
       loadAt(idx);
       return;
     }
-    set({ queue: [...queue, song] });
-    loadAt(queue.length); // appended at the end of the queue head
+    // play-now without polluting Up next: transient head placeholder
+    set({
+      queue: [song, ...queue],
+      transientIds: [...transientIds, song.id],
+    });
+    loadAt(0);
   },
 
   playDz: async (dz, hint, fresh = false) => {
@@ -233,26 +272,30 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     // audio keeps playing until the new stream is ready — no dead silence.
     if (hint !== undefined) {
       const st = get();
-      // Drop an older unresolved placeholder so spam-taps can't stack them.
-      let queue = st.queue;
-      if (
-        st.resolvingDz !== null &&
-        st.resolvingDz !== dz &&
-        queue.some(
-          (t) => t.id === `dz-${st.resolvingDz}` && t.streamUrl === ""
-        )
-      ) {
-        queue = queue.filter(
-          (t) => !(t.id === `dz-${st.resolvingDz}` && t.streamUrl === "")
-        );
-      }
+      // Drop older unresolved placeholders so spam-taps can't stack them.
+      const queue = st.queue.filter(
+        (t) => t.streamUrl !== "" || !st.transientIds.includes(t.id)
+      );
+      const liveIds = new Set(queue.map((t) => t.id));
       const at = combined(queue, st.library).findIndex(
         (t) => t.id === hint.id
       );
       if (at >= 0) {
-        set({ queue, index: at });
+        set({
+          queue,
+          index: at,
+          transientIds: st.transientIds.filter((id) => liveIds.has(id)),
+        });
       } else {
-        set({ queue: [...queue, hint], index: queue.length });
+        // play-now placeholder: transient head, hidden from Up next
+        set({
+          queue: [hint, ...queue],
+          index: 0,
+          transientIds: [
+            ...st.transientIds.filter((id) => liveIds.has(id)),
+            hint.id,
+          ],
+        });
       }
       set({ resolving: true, resolvingDz: dz, error: null });
     } else {
@@ -263,7 +306,25 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       song = await resolveTrack(dz, fresh);
     } catch (e: unknown) {
       if (g !== generation) return; // a newer request already won
+      // drop our failed placeholder; keep the current track if it survives
+      const s = usePlayer.getState();
+      const pid = `dz-${dz}`;
+      const cur = combined(s.queue, s.library)[s.index];
+      const nextQ = s.queue.filter(
+        (t) => !(t.id === pid && s.transientIds.includes(t.id))
+      );
+      let index = s.index;
+      if (cur !== undefined) {
+        const qi = nextQ.findIndex((t) => t.id === cur.id);
+        index = qi >= 0 ? qi : nextQ.length + (s.index - s.queue.length);
+      } else {
+        index = 0;
+      }
+      const total = nextQ.length + s.library.length;
       usePlayer.setState({
+        queue: nextQ,
+        transientIds: s.transientIds.filter((id) => id !== pid),
+        index: total === 0 ? 0 : Math.min(Math.max(0, index), total - 1),
         resolving: false,
         resolvingDz: null,
         buffering: false,
@@ -288,14 +349,20 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   enqueue: (song) => {
-    const { queue } = get();
-    if (queue.some((t) => t.id === song.id)) return;
+    const { queue, transientIds } = get();
+    // explicit add: it belongs in Up next even if it was a placeholder
+    if (queue.some((t) => t.id === song.id)) {
+      if (transientIds.includes(song.id)) {
+        set({ transientIds: transientIds.filter((id) => id !== song.id) });
+      }
+      return;
+    }
     set({ queue: [...queue, song] });
   },
 
   setQueueOrder: (next) => {
-    const { queue, index } = get();
-    const cur = queue[index];
+    const { queue, library, index } = get();
+    const cur = combined(queue, library)[index];
     set({ queue: next });
     // same length: library positions are unaffected; only follow the
     // track when the now-playing one lives inside the queue
@@ -306,12 +373,17 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   removeFromQueue: (id) => {
-    const { queue, library, index } = get();
+    const { queue, library, index, transientIds } = get();
     const qi = queue.findIndex((t) => t.id === id);
     if (qi < 0) return;
     const next = queue.filter((t) => t.id !== id);
+    const live = transientIds.filter((t) => t !== id);
     if (qi !== index) {
-      set({ queue: next, index: qi < index ? Math.max(0, index - 1) : index });
+      set({
+        queue: next,
+        transientIds: live,
+        index: qi < index ? Math.max(0, index - 1) : index,
+      });
       return;
     }
     // removing what's playing: continue with whatever is now there
@@ -320,10 +392,10 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
-      set({ queue: next, index: 0, playing: false, buffering: false });
+      set({ queue: next, transientIds: live, index: 0, playing: false, buffering: false });
       return;
     }
-    set({ queue: next });
+    set({ queue: next, transientIds: live });
     loadAt(index);
   },
 
@@ -337,21 +409,51 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   next: (manual) => {
-    const { queue, library, index, repeat, shuffle } = get();
-    const total = queue.length + library.length;
-    if (total === 0) return;
-    if (!manual && repeat === "off" && index >= total - 1) {
-      audio.pause(); // stop at the end instead of wrapping
-      return;
-    }
-    if (shuffle && total > 1) {
+    const s0 = get();
+    const total0 = s0.queue.length + s0.library.length;
+    if (total0 === 0) return;
+    if (s0.shuffle && total0 > 1) {
       // random next, never the same track twice in a row
-      let j = index;
-      while (j === index) j = Math.floor(Math.random() * total);
+      let j = s0.index;
+      while (j === s0.index) j = Math.floor(Math.random() * total0);
       loadAt(j);
       return;
     }
-    loadAt((index + 1) % total);
+    const cur = combined(s0.queue, s0.library)[s0.index];
+    const curExplicit =
+      cur !== undefined &&
+      s0.queue.some((t) => t.id === cur.id) &&
+      !s0.transientIds.includes(cur.id);
+    // consume a played explicit so Up next drains forward instead of
+    // ping-ponging: manual skips always, auto-advance only when not looping
+    if (curExplicit && cur !== undefined && (manual || s0.repeat === "off")) {
+      const q = s0.queue.filter((t) => t.id !== cur.id);
+      set({
+        queue: q,
+        transientIds: s0.transientIds.filter((id) => id !== cur.id),
+        index: Math.min(s0.index, Math.max(0, q.length + s0.library.length - 1)),
+      });
+      if (q.length + s0.library.length === 0) {
+        audio.pause();
+        return;
+      }
+    }
+    const s = get();
+    const now = combined(s.queue, s.library)[s.index];
+    // explicit queue first: earliest added song that isn't playing now
+    const expIdx = s.queue.findIndex(
+      (t) => !s.transientIds.includes(t.id) && t.id !== now?.id
+    );
+    if (expIdx >= 0) {
+      loadAt(expIdx);
+      return;
+    }
+    const total = s.queue.length + s.library.length;
+    if (!manual && s.repeat === "off" && s.index >= total - 1) {
+      audio.pause(); // stop at the end instead of wrapping
+      return;
+    }
+    loadAt((s.index + 1) % total);
   },
 
   prev: () => {

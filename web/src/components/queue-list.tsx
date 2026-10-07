@@ -21,8 +21,11 @@ export function QueueList({
   onRemove: (id: string) => void;
 }) {
   const reorder = usePlayer((s) => s.setQueueOrder);
+  const transientIds = usePlayer((s) => s.transientIds);
+  // play-now placeholders never appear: only explicitly added songs do
+  const visible = queue.filter((t) => !transientIds.includes(t.id));
 
-  if (queue.length === 0) {
+  if (visible.length === 0) {
     return (
       <EmptyState
         icon={ListMusic}
@@ -37,11 +40,15 @@ export function QueueList({
     <Reorder.Group
       as="ul"
       axis="y"
-      values={queue}
-      onReorder={reorder}
+      values={visible}
+      onReorder={(v) => {
+        // keep placeholders pinned at the head, reorder the rest
+        const pinned = queue.filter((t) => transientIds.includes(t.id));
+        reorder([...pinned, ...v]);
+      }}
       className="space-y-1.5"
     >
-      {queue.map((t) => (
+      {visible.map((t) => (
         <QueueRow
           key={t.id}
           song={t}
