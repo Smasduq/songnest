@@ -241,12 +241,17 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   transientIds: [],
 
   setLibrary: (tracks) => {
-    const { queue, index } = get();
+    const { queue, library, index } = get();
+    // pin Now Playing to its track: library refreshes (download finished,
+    // track deleted) shift positions, so follow the id instead of the slot
+    const cur = [...queue, ...library][index];
     const total = queue.length + tracks.length;
-    set({
-      library: tracks,
-      index: total === 0 ? 0 : Math.min(index, total - 1),
-    });
+    let nextIndex = total === 0 ? 0 : Math.min(index, total - 1);
+    if (cur !== undefined) {
+      const at = [...queue, ...tracks].findIndex((t) => t.id === cur.id);
+      if (at >= 0) nextIndex = at;
+    }
+    set({ library: tracks, index: nextIndex });
   },
 
   playTrack: (song) => {
@@ -409,51 +414,24 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   next: (manual) => {
-    const s0 = get();
-    const total0 = s0.queue.length + s0.library.length;
-    if (total0 === 0) return;
-    if (s0.shuffle && total0 > 1) {
-      // random next, never the same track twice in a row
-      let j = s0.index;
-      while (j === s0.index) j = Math.floor(Math.random() * total0);
-      loadAt(j);
-      return;
-    }
-    const cur = combined(s0.queue, s0.library)[s0.index];
-    const curExplicit =
-      cur !== undefined &&
-      s0.queue.some((t) => t.id === cur.id) &&
-      !s0.transientIds.includes(cur.id);
-    // consume a played explicit so Up next drains forward instead of
-    // ping-ponging: manual skips always, auto-advance only when not looping
-    if (curExplicit && cur !== undefined && (manual || s0.repeat === "off")) {
-      const q = s0.queue.filter((t) => t.id !== cur.id);
-      set({
-        queue: q,
-        transientIds: s0.transientIds.filter((id) => id !== cur.id),
-        index: Math.min(s0.index, Math.max(0, q.length + s0.library.length - 1)),
-      });
-      if (q.length + s0.library.length === 0) {
-        audio.pause();
-        return;
-      }
-    }
-    const s = get();
-    const now = combined(s.queue, s.library)[s.index];
-    // explicit queue first: earliest added song that isn't playing now
-    const expIdx = s.queue.findIndex(
-      (t) => !s.transientIds.includes(t.id) && t.id !== now?.id
-    );
-    if (expIdx >= 0) {
-      loadAt(expIdx);
-      return;
-    }
-    const total = s.queue.length + s.library.length;
-    if (!manual && s.repeat === "off" && s.index >= total - 1) {
+    const { queue, library, index, repeat, shuffle } = get();
+    const total = queue.length + library.length;
+    if (total === 0) return;
+    if (!manual && repeat === "off" && index >= total - 1) {
       audio.pause(); // stop at the end instead of wrapping
       return;
     }
-    loadAt((s.index + 1) % total);
+    if (shuffle && total > 1) {
+      // random next, never the same track twice in a row
+      let j = index;
+      while (j === index) j = Math.floor(Math.random() * total);
+      loadAt(j);
+      return;
+    }
+    // strictly sequential: the next song in order, never a jump.
+    // queued songs still come first whenever they sit ahead of
+    // the current position (tapped songs land at the head).
+    loadAt((index + 1) % total);
   },
 
   prev: () => {
