@@ -22,7 +22,7 @@ server URL is a build default overridable in Settings (stored locally).
 
 ## Desktop/mobile (`web/src-tauri`)
 
-Desktop spawns `songnest-cli serve` as a sidecar with the app data dir
+Desktop spawns `songnest serve` as a sidecar with the app data dir
 and kills it on exit. Mobile can run the same server in-process on
 device localhost (feature-gated); otherwise the app talks to a server
 on the local network.

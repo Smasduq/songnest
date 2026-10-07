@@ -5,8 +5,9 @@ use tauri::{Manager, RunEvent};
 
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
 
-/// Locate the songnest-cli backend binary:
+/// Locate the songnest backend binary:
 /// 1. $SONGNEST_SIDECAR override, 2. bundled resources, 3. workspace target (dev).
+/// (Legacy `songnest-cli` names kept as fallback for older installs.)
 fn sidecar_path(app: &tauri::AppHandle) -> std::path::PathBuf {
     if let Ok(p) = std::env::var("SONGNEST_SIDECAR") {
         let p = std::path::PathBuf::from(p);
@@ -15,7 +16,7 @@ fn sidecar_path(app: &tauri::AppHandle) -> std::path::PathBuf {
         }
     }
     if let Ok(res) = app.path().resource_dir() {
-        for name in ["bin/songnest-cli", "songnest-cli"] {
+        for name in ["bin/songnest", "songnest", "bin/songnest-cli", "songnest-cli"] {
             let p = res.join(name);
             if p.exists() {
                 return p;
@@ -23,10 +24,10 @@ fn sidecar_path(app: &tauri::AppHandle) -> std::path::PathBuf {
         }
     }
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/debug/songnest-cli")
+        .join("../../target/debug/songnest")
 }
 
-/// Spawn `songnest-cli serve --data-dir <app-data>`; the UI talks to it on :8787.
+/// Spawn `songnest serve --data-dir <app-data>`; the UI talks to it on :8787.
 /// On mobile there is no sidecar binary (see spawn_phone_server below),
 /// so this is desktop-only.
 #[cfg(desktop)]

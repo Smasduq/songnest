@@ -38,7 +38,7 @@ Node.js 22+) for source challenge-solving.
 
 ```sh
 # backend API + queue workers (http://127.0.0.1:8787)
-cargo run -p songnest-cli -- serve
+cargo run -p songnest -- serve
 
 # web frontend (dev)
 cd web

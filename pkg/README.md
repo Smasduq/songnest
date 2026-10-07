@@ -42,19 +42,19 @@ Any version: `sudo dnf install songnest-0.1.0-alpha.1`.
 Binary package (repacks the official `.deb`):
 
 ```sh
-yay -S songnest-bin
-# or: paru -S songnest-bin
+yay -S songnest
+# or: paru -S songnest
 ```
 
-The AUR package is maintained from `aur/songnest-bin/` in this repo.
+The AUR package is maintained from `aur/songnest/` in this repo.
 
 ## Rust (cargo)
 
-Installs the `songnest-cli` backend/server binary:
+Installs the `songnest` backend/server binary:
 
 ```sh
-cargo install songnest-cli
-songnest-cli serve   # backend API + queue workers (http://127.0.0.1:8787)
+cargo install songnest
+songnest serve   # backend API + queue workers (http://127.0.0.1:8787)
 ```
 
-Check available versions: `cargo search songnest-cli`.
+Check available versions: `cargo search songnest`.

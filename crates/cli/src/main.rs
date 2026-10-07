@@ -1,4 +1,4 @@
-//! songnest-cli: thin CLI over songnest-server.
+//! songnest: thin CLI over songnest-server.
 //!
 //! - `cli serve [--data-dir DIR]` (env: SONGNEST_DATA_DIR, SONGNEST_BACKEND,
 //!   SONGNEST_PORT): run the HTTP server + queue workers.

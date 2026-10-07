@@ -3,7 +3,7 @@
 # Finds the actual *_amd64.deb asset (no naming assumptions), updates
 # pkgver/_upstreamver/source URL, downloads the .deb, and recomputes sums.
 set -euo pipefail
-cd "$(dirname "$0")/songnest-bin"
+cd "$(dirname "$0")/songnest"
 
 TAG=$(gh release list --repo Smasduq/songnest --limit 1 --json tagName -q '.[0].tagName')
 echo "latest tag: $TAG"

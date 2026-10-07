@@ -21,12 +21,12 @@ const MANAGERS: { title: string; hint: string; commands: string[] }[] = [
   {
     title: 'Arch Linux',
     hint: 'AUR binary package',
-    commands: ['yay -S songnest-bin'],
+    commands: ['yay -S songnest'],
   },
   {
     title: 'Rust',
     hint: 'crates.io backend binary',
-    commands: ['cargo install songnest-cli'],
+    commands: ['cargo install songnest'],
   },
 ]
 

@@ -10,7 +10,7 @@ for the default build; `yt-dlp` and a JavaScript runtime are optional and,
 if you use them, are installed and configured by you (never bundled).
 
 ```sh
-cargo run -p songnest-cli -- serve   # backend on :8787
+cargo run -p songnest -- serve   # backend on :8787
 cd web && npm install && npm run dev -- --port 1420 --strictPort
 ```
 

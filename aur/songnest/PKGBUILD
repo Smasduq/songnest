@@ -1,5 +1,5 @@
 # Maintainer: Smasduq
-pkgname=songnest-bin
+pkgname=songnest
 # Arch pkgver cannot contain hyphens: 0.1.0-alpha.1 -> 0.1.0.alpha.1
 pkgver=0.1.0.alpha.1
 pkgrel=1
@@ -9,8 +9,8 @@ url="https://github.com/Smasduq/songnest"
 license=('MIT' 'Apache-2.0')
 depends=('webkit2gtk-4.1' 'libappindicator-gtk3' 'librsvg' 'openssl')
 optdepends=('yt-dlp: optional external resolver (never bundled)')
-provides=('songnest')
-conflicts=('songnest')
+conflicts=('songnest-bin')
+replaces=('songnest-bin')
 # Upstream asset naming follows the Tauri v2 bundler convention:
 #   songnest_<upstream-version>_amd64.deb
 # If the first real release names it differently, run ./update.sh — it

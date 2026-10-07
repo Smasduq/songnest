@@ -1,5 +1,5 @@
 [package]
-name = "songnest-cli"
+name = "songnest"
 version = "0.1.0-alpha.1"
 license.workspace = true
 repository.workspace = true

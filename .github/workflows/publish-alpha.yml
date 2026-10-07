@@ -56,16 +56,16 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: build sidecar (songnest-cli)
+      - name: build sidecar (songnest)
         shell: bash
         run: |
-          cargo build --release -p songnest-cli
+          cargo build --release -p songnest
           mkdir -p web/src-tauri/bin
-          if [ -f target/release/songnest-cli.exe ]; then
-            cp target/release/songnest-cli.exe web/src-tauri/bin/songnest-cli.exe
-            cp target/release/songnest-cli.exe web/src-tauri/bin/songnest-cli
+          if [ -f target/release/songnest.exe ]; then
+            cp target/release/songnest.exe web/src-tauri/bin/songnest.exe
+            cp target/release/songnest.exe web/src-tauri/bin/songnest
           else
-            cp target/release/songnest-cli web/src-tauri/bin/songnest-cli
+            cp target/release/songnest web/src-tauri/bin/songnest
           fi
           ls -la web/src-tauri/bin
 
