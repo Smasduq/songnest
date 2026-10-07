@@ -133,6 +133,17 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Release signing: keystore.properties is gitignored and written here
+      # from secrets (Tauri docs "Android Code Signing"). Local builds
+      # without it stay unsigned, as before.
+      - name: setup Android signing
+        working-directory: web/src-tauri/gen/android
+        run: |
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
+          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
+          base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > "$RUNNER_TEMP/release.keystore"
+          echo "storeFile=$RUNNER_TEMP/release.keystore" >> keystore.properties
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
