@@ -17,7 +17,7 @@ import {
   Heart,
   ListPlus,
   Loader2,
-  MoreHorizontal,
+  MoreVertical,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -332,10 +332,15 @@ export function SongCard({
           ref={btnRef}
           type="button"
           aria-label="More actions"
+          aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/40 bg-background/60 text-muted-foreground backdrop-blur hover:text-foreground sm:h-9 sm:w-9"
+          className={`flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:h-9 sm:w-9 ${
+            open
+              ? "border border-border/40 bg-background/60 backdrop-blur"
+              : "border border-transparent bg-transparent hover:border-border/40 hover:bg-background/60 hover:backdrop-blur focus-visible:border-border/40 focus-visible:bg-background/60"
+          }`}
         >
-          <MoreHorizontal className="h-4 w-4" />
+          <MoreVertical className="h-4 w-4" />
         </button>
         {createPortal(
           <AnimatePresence>
