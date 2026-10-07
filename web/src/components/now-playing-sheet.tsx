@@ -134,14 +134,16 @@ export function NowPlayingSheet({
         {track !== undefined ? (
           <>
             {track.coverUrl !== "" ? (
-              <img
-                src={track.coverUrl}
-                alt={`${track.album} cover`}
-                width={640}
-                height={640}
-                draggable={false}
-                className="mx-auto aspect-square w-full max-w-sm flex-shrink touch-none select-none rounded-3xl border border-border/40 object-cover"
-              />
+              <div className="relative mx-auto w-full max-w-sm flex-shrink touch-none select-none">
+                <img
+                  src={track.coverUrl}
+                  alt={`${track.album} cover`}
+                  width={640}
+                  height={640}
+                  draggable={false}
+                  className="aspect-square w-full rounded-3xl border border-border/40 object-cover"
+                />
+              </div>
             ) : (
               <div className="mx-auto aspect-square w-full max-w-sm touch-none select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
             )}

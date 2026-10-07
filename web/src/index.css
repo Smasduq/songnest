@@ -172,6 +172,30 @@
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
+
+/* Playing indicator: equalizer bars bouncing up and down (transform-only).
+   Durations/delays vary per bar inline; paused state freezes via
+   animation-play-state. Static full bars under reduced motion. */
+@keyframes songnest-eq {
+  0% {
+    transform: scaleY(0.25);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+.eq-bar {
+  transform-origin: bottom;
+  animation-name: songnest-eq;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .eq-bar {
+    animation: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .marquee-inner {
     animation: none;

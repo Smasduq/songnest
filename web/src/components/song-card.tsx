@@ -9,7 +9,9 @@ import {
 } from "framer-motion";
 
 import { formatTime, type Song } from "@/lib/api";
+import { EqChip } from "@/components/eq-bars";
 import { haptic } from "@/native/haptics";
+import { usePlayer } from "@/player/store";
 import {
   Check,
   Clock,
@@ -77,6 +79,7 @@ export function SongCard({
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const pressTimer = useRef<number | undefined>(undefined);
+  const playing = usePlayer((s) => s.playing);
   // touchend is followed ~300ms later by a synthetic mousedown; without
   // this guard the long-press menu would close the instant it opens
   const lastTouchEnd = useRef(0);
@@ -305,12 +308,14 @@ export function SongCard({
             loading="lazy"
           />
         )}
-        <span
-          aria-hidden
-          className="absolute inset-0 flex items-center justify-center bg-background/50 opacity-0 transition-opacity duration-150 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
-        >
-          <Play className="h-5 w-5 fill-foreground text-foreground" />
-        </span>
+        {!active && (
+          <span
+            aria-hidden
+            className="absolute inset-0 flex items-center justify-center bg-background/50 opacity-0 transition-opacity duration-150 group-hover/card:opacity-100 group-focus-within/card:opacity-100"
+          >
+            <Play className="h-5 w-5 fill-foreground text-foreground" />
+          </span>
+        )}
         {resolving && (
           <span
             role="status"
@@ -320,6 +325,7 @@ export function SongCard({
             <Loader2 className="h-5 w-5 animate-spin text-foreground" />
           </span>
         )}
+        {active && !resolving && <EqChip playing={playing} />}
       </button>
       <button
         type="button"
