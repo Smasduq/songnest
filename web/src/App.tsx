@@ -212,14 +212,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Publish fixed-bar heights for mobile scroll padding. No-ops on
-  // desktop (stack is display:none there, so both read 0px).
+  // Publish fixed-bar heights for mobile scroll padding. Desktop header
+  // is display:none on mobile (and vice versa), so take whichever is live.
   // Also registers the passive touchstart iOS Safari needs for :active.
   useEffect(() => {
     const root = document.documentElement;
     function apply() {
       const bottom = document.getElementById("bottom-stack");
-      const top = document.getElementById("app-header");
+      const top =
+        document.getElementById("mobile-header") ??
+        document.getElementById("app-header");
       root.style.setProperty(
         "--bottom-bars-h",
         `${bottom?.offsetHeight ?? 0}px`
@@ -229,7 +231,9 @@ export default function App() {
     apply();
     const ro = new ResizeObserver(apply);
     const b = document.getElementById("bottom-stack");
-    const t = document.getElementById("app-header");
+    const t =
+      document.getElementById("mobile-header") ??
+      document.getElementById("app-header");
     if (b) ro.observe(b);
     if (t) ro.observe(t);
     document.addEventListener("touchstart", () => {}, { passive: true });
@@ -551,7 +555,7 @@ return (
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          className="scroller min-w-0 flex-1 space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
+          className="scroller min-w-0 flex-1 space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)] pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
         >
           {dlStatus?.health === "outdated" && (
             <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">
