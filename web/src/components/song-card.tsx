@@ -84,12 +84,20 @@ export function SongCard({
   const rowRef = useRef<HTMLDivElement>(null);
   const crossedRef = useRef<"left" | "right" | null>(null);
   const edgeStartRef = useRef(false);
-  // tap right after a swipe-commit is the gesture's own click, not a press:
-  // ignore play/menu taps within this window so swiping to queue never
-  // also starts playback
+  // tap right after a swipe-commit, or after the pointer traveled, is the
+  // gesture's own click, not a press: ignore play/menu taps so swiping to
+  // queue never also starts playback
   const swipeCommitAt = useRef(0);
-  function tapGuard(): boolean {
-    return Date.now() - swipeCommitAt.current < 500;
+  const downAt = useRef<{ x: number; y: number } | null>(null);
+  function tapGuard(e: { clientX: number; clientY: number }): boolean {
+    if (Date.now() - swipeCommitAt.current < 500) return true;
+    // the pointer traveled: this click belongs to a swipe, not a tap
+    if (downAt.current !== null) {
+      const dx = e.clientX - downAt.current.x;
+      const dy = e.clientY - downAt.current.y;
+      if (Math.hypot(dx, dy) > 12) return true;
+    }
+    return false;
   }
   // swipe distances drive the action reveals; both sides mirror each other
   // (same 90px commit, same spring back) so left feels like swipe-to-queue
@@ -247,6 +255,9 @@ export function SongCard({
         dragElastic={0.15}
         dragDirectionLock
         style={{ x }}
+        onPointerDown={(e) => {
+          downAt.current = { x: e.clientX, y: e.clientY };
+        }}
         onDragStart={() => {
           crossedRef.current = null;
         }}
@@ -280,8 +291,8 @@ export function SongCard({
         }`}
       ><button
         type="button"
-        onClick={() => {
-          if (!tapGuard()) onPlay();
+        onClick={(e) => {
+          if (!tapGuard(e)) onPlay();
         }}
         aria-label={`Play ${song.title}`}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
@@ -312,8 +323,8 @@ export function SongCard({
       </button>
       <button
         type="button"
-        onClick={() => {
-          if (!tapGuard()) onPlay();
+        onClick={(e) => {
+          if (!tapGuard(e)) onPlay();
         }}
         className="min-w-0 flex-1 text-left"
       >
@@ -374,8 +385,8 @@ export function SongCard({
           type="button"
           aria-label="More actions"
           aria-expanded={open}
-          onClick={() => {
-            if (tapGuard()) return;
+          onClick={(e) => {
+            if (tapGuard(e)) return;
             setAnchor("button");
             setOpen((o) => !o);
           }}

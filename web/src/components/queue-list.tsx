@@ -76,8 +76,15 @@ function QueueRow({
   const controls = useDragControls();
   const x = useMotionValue(0);
   const swipeCommitAt = useRef(0);
-  function tapGuard(): boolean {
-    return Date.now() - swipeCommitAt.current < 500;
+  const downAt = useRef<{ x: number; y: number } | null>(null);
+  function tapGuard(e: { clientX: number; clientY: number }): boolean {
+    if (Date.now() - swipeCommitAt.current < 500) return true;
+    if (downAt.current !== null) {
+      const dx = e.clientX - downAt.current.x;
+      const dy = e.clientY - downAt.current.y;
+      if (Math.hypot(dx, dy) > 12) return true;
+    }
+    return false;
   }
 
   return (
@@ -96,6 +103,9 @@ function QueueRow({
         dragElastic={0.15}
         dragDirectionLock
         style={{ x }}
+        onPointerDown={(e) => {
+          downAt.current = { x: e.clientX, y: e.clientY };
+        }}
         onDragEnd={(_, info) => {
           if (info.offset.x < -70 || info.velocity.x < -600) {
             swipeCommitAt.current = Date.now();
@@ -119,8 +129,8 @@ function QueueRow({
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (!tapGuard()) onPlay();
+          onClick={(e) => {
+            if (!tapGuard(e)) onPlay();
           }}
           className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent"
         >
@@ -144,8 +154,8 @@ function QueueRow({
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (!tapGuard()) onPlay();
+          onClick={(e) => {
+            if (!tapGuard(e)) onPlay();
           }}
           className="min-w-0 flex-1 text-left"
         >
