@@ -71,6 +71,8 @@ interface PlayerState {
   removeFromQueue: (id: string) => void;
   /** drag-reorder the queue; the playing index follows its track. */
   setQueueOrder: (next: Song[]) => void;
+  /** swap a queued placeholder for its resolved stream, in place. */
+  swapQueued: (id: string, song: Song) => void;
   toggle: () => void;
   next: (manual: boolean) => void;
   prev: () => void;
@@ -376,6 +378,15 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       const at = next.findIndex((t) => t.id === cur.id);
       if (at >= 0) set({ index: at });
     }
+  },
+
+  swapQueued: (id, song) => {
+    const { queue } = get();
+    const qi = queue.findIndex((t) => t.id === id);
+    if (qi < 0) return; // user removed it meanwhile
+    const next = [...queue];
+    next[qi] = song;
+    set({ queue: next });
   },
 
   removeFromQueue: (id) => {

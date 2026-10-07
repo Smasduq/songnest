@@ -323,14 +323,19 @@ export default function App() {
   }
 
   function addToQueue(song: Song) {
+    const st = store.getState();
+    const already = st.queue.some((t) => t.id === song.id);
+    // optimistic: visible in Up next immediately, even from other pages
+    // while something else plays; streams resolve in the background
+    st.enqueue(song);
     const dz = dzOf(song);
-    if (dz !== null && song.streamUrl === "") {
-      resolveTrack(dz)
-        .then((full) => store.getState().enqueue(full))
-        .catch(() => {});
-    } else {
-      store.getState().enqueue(song);
-    }
+    if (dz === null || song.streamUrl !== "") return;
+    resolveTrack(dz)
+      .then((full) => store.getState().swapQueued(song.id, full))
+      .catch(() => {
+        if (!already) store.getState().removeFromQueue(song.id);
+        showToast("Couldn't add to queue — try again");
+      });
   }
 
   async function toggleLike(song: Song) {

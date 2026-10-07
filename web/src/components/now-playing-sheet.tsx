@@ -42,6 +42,7 @@ export function NowPlayingSheet({
   const index = usePlayer((s) => s.index);
   const { currentTime, duration } = useTime();
   const [showQueue, setShowQueue] = useState(false);
+  const [full, setFull] = useState(false);
   const controls = useDragControls();
   const st = usePlayer.getState();
 
@@ -53,12 +54,16 @@ export function NowPlayingSheet({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  function dismiss(_: unknown, info: { offset: { y: number }; velocity: { y: number } }) {
-    if (
-      info.offset.y > window.innerHeight * 0.25 ||
-      info.velocity.y > 600
-    ) {
-      onClose();
+  // swipe up enters fullscreen (queue mode), swipe down steps back out:
+  // fullscreen -> normal -> dismissed
+  function snapDetent(_: unknown, info: { offset: { y: number }; velocity: { y: number } }) {
+    if (info.offset.y < -80 || info.velocity.y < -600) {
+      setFull(true);
+      return;
+    }
+    if (info.offset.y > 80 || info.velocity.y > 600) {
+      if (full) setFull(false);
+      else onClose();
     }
     // otherwise the constraints spring it back automatically
   }
@@ -92,9 +97,13 @@ export function NowPlayingSheet({
         dragControls={controls}
         dragConstraints={{ top: 0, bottom: 0 }}
         dragElastic={0.3}
-        onDragEnd={dismiss}
+        onDragEnd={snapDetent}
         onPointerDown={maybeStartDismiss}
-        className="fixed inset-x-0 bottom-0 top-10 z-[90] flex flex-col overflow-hidden rounded-t-3xl border border-border/40 bg-background/80 backdrop-blur-2xl"
+        className={`fixed bottom-0 z-[90] flex flex-col overflow-hidden border border-border/40 bg-background/80 backdrop-blur-2xl transition-[top,border-radius] duration-200 ease-out ${
+          full
+            ? "inset-x-0 top-0 rounded-none"
+            : "inset-x-0 top-10 rounded-t-3xl"
+        }`}
       >
         {/* ambient: blurred cover glow behind the content (static, art-only) */}
         {track !== undefined && track.coverUrl !== "" && (
@@ -119,68 +128,111 @@ export function NowPlayingSheet({
           <Button
             variant="ghost"
             size="icon"
-            onClick={onClose}
-            aria-label="Close player"
+            onClick={() => (full ? setFull(false) : onClose())}
+            aria-label={full ? "Exit fullscreen" : "Close player"}
             className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground"
           >
             <ChevronDown className="h-5 w-5" />
           </Button>
           <p className="text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground">
-            Now playing
+            {full ? "Queue" : "Now playing"}
           </p>
           <span className="w-9" />
         </div>
 
         {track !== undefined ? (
           <>
-            {track.coverUrl !== "" ? (
-              <div className="relative mx-auto w-full max-w-sm flex-shrink touch-none select-none">
-                <img
-                  src={track.coverUrl}
-                  alt={`${track.album} cover`}
-                  width={640}
-                  height={640}
-                  draggable={false}
-                  className="aspect-square w-full rounded-3xl border border-border/40 object-cover"
-                />
-              </div>
-            ) : (
-              <div className="mx-auto aspect-square w-full max-w-sm touch-none select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
+            {!full && (
+              <>
+                {track.coverUrl !== "" ? (
+                  <div className="relative mx-auto w-full max-w-sm flex-shrink touch-none select-none">
+                    <img
+                      src={track.coverUrl}
+                      alt={`${track.album} cover`}
+                      width={640}
+                      height={640}
+                      draggable={false}
+                      className="aspect-square w-full rounded-3xl border border-border/40 object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="mx-auto aspect-square w-full max-w-sm touch-none select-none rounded-3xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
+                )}
+              </>
             )}
 
-            <div className="touch-none select-none text-center">
-              <Marquee
-                text={track.title}
-                className="text-center text-2xl font-semibold tracking-tight text-foreground"
-              />
-              <Marquee
-                text={`${track.artist} · ${track.album}`}
-                className="text-center text-base text-muted-foreground"
-              />
-              {resolving || buffering ? (
-                <p
-                  role="status"
-                  className="mt-1 flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground"
-                >
-                  <Loader2
-                    className="h-3.5 w-3.5 animate-spin"
-                    aria-hidden
+            {full ? (
+              <div className="flex touch-none select-none items-center gap-3">
+                {track.coverUrl !== "" ? (
+                  <img
+                    src={track.coverUrl}
+                    alt={`${track.album} cover`}
+                    width={112}
+                    height={112}
+                    draggable={false}
+                    className="h-14 w-14 flex-shrink-0 rounded-2xl border border-border/40 object-cover"
                   />
-                  {resolving ? "Finding the song…" : "Getting the song ready…"}
-                </p>
-              ) : (
-                dzOf(track) !== null && (
-                  <button
-                    type="button"
-                    onClick={onRetryMatch}
-                    className="mx-auto mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                ) : (
+                  <div className="h-14 w-14 flex-shrink-0 rounded-2xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <Marquee
+                    text={track.title}
+                    className="text-base font-semibold tracking-tight text-foreground"
+                  />
+                  <Marquee
+                    text={`${track.artist} · ${track.album}`}
+                    className="text-sm text-muted-foreground"
+                  />
+                  {(resolving || buffering) && (
+                    <p
+                      role="status"
+                      className="mt-0.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
+                    >
+                      <Loader2
+                        className="h-3 w-3 animate-spin"
+                        aria-hidden
+                      />
+                      {resolving ? "Finding the song…" : "Getting the song ready…"}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="touch-none select-none text-center">
+                <Marquee
+                  text={track.title}
+                  className="text-center text-2xl font-semibold tracking-tight text-foreground"
+                />
+                <Marquee
+                  text={`${track.artist} · ${track.album}`}
+                  className="text-center text-base text-muted-foreground"
+                />
+                {resolving || buffering ? (
+                  <p
+                    role="status"
+                    className="mt-1 flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground"
                   >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                    Not the right song? Try another match
-                  </button>
-                )
-              )}
-            </div>
+                    <Loader2
+                      className="h-3.5 w-3.5 animate-spin"
+                      aria-hidden
+                    />
+                    {resolving ? "Finding the song…" : "Getting the song ready…"}
+                  </p>
+                ) : (
+                  dzOf(track) !== null && (
+                    <button
+                      type="button"
+                      onClick={onRetryMatch}
+                      className="mx-auto mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                      Not the right song? Try another match
+                    </button>
+                  )
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs tabular-nums text-muted-foreground">
@@ -256,19 +308,21 @@ export function NowPlayingSheet({
                 )}
               </Button>
             </div>
-            <div className="flex items-center justify-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowQueue((v) => !v)}
-                className="h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] text-muted-foreground"
-              >
-                <ListMusic className="h-4 w-4" />
-                Queue ({queuedCount})
-              </Button>
-            </div>
+            {!full && (
+              <div className="flex items-center justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowQueue((v) => !v)}
+                  className="h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] text-muted-foreground"
+                >
+                  <ListMusic className="h-4 w-4" />
+                  Queue ({queuedCount})
+                </Button>
+              </div>
+            )}
 
-            {showQueue && (
+            {(showQueue || full) && (
               <div data-no-dismiss-drag className="scroller min-h-0 flex-1 pb-4">
                 <QueueList
                   queue={queue}
