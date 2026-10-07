@@ -1571,26 +1571,24 @@ async fn api_delete_track(
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// POST /api/auth/device — removed with rustypipe (it owned the OAuth
-/// device flow). SongnestPy authenticates via `<data_dir>/cookies.txt`,
-/// so there is nothing to begin here: always 409, like a backend without
-/// the feature. Kept as a route so older frontends fail cleanly.
+/// POST /api/auth/device — retired (its OAuth device flow is gone; auth is
+/// via cookies.txt). Kept as a route so older frontends fail cleanly.
 async fn api_auth_device(State(_s): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::CONFLICT,
-        "device sign-in went away with rustypipe; songnestpy uses cookies.txt",
+        "device sign-in is retired; auth is via cookies.txt",
     )
         .into_response()
 }
 
-/// GET /api/auth/status — removed with rustypipe; always 410 Gone.
+/// GET /api/auth/status — retired; always 410 Gone.
 async fn api_auth_status(State(_s): State<AppState>) -> impl IntoResponse {
-    (StatusCode::GONE, "device sign-in went away with rustypipe").into_response()
+    (StatusCode::GONE, "device sign-in is retired").into_response()
 }
 
-/// POST /api/auth/logout — removed with rustypipe; always 410 Gone.
+/// POST /api/auth/logout — retired; always 410 Gone.
 async fn api_auth_logout(State(_s): State<AppState>) -> impl IntoResponse {
-    (StatusCode::GONE, "device sign-in went away with rustypipe").into_response()
+    (StatusCode::GONE, "device sign-in is retired").into_response()
 }
 
 /// GET /api/cookies — whether a cookies.txt is installed.

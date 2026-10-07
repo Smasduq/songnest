@@ -9,9 +9,9 @@ Scope note: this covers the DEFAULT build only. Enabling the optional
 features additionally pulls in `jni` (MIT) and `ndk-context` (MIT/Apache-2.0)
 for the on-device bridge, plus — outside Cargo — yt-dlp (Unlicense,
 pip-installed into the APK by the Chaquopy Gradle plugin) running on
-embedded CPython. The former `rp`/`rustypipe` stack (GPL-3.0) was removed
-2026-10-07; see the release notes / README for the current status of
-these features.
+embedded CPython. A previous pure-Rust extraction backend (GPL-3.0) was
+removed 2026-10-07; see the release notes / README for the current status
+of these features.
 
 ---
 adler2: 2.0.1, "0BSD OR Apache-2.0 OR MIT",

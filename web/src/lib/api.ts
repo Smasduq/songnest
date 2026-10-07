@@ -246,7 +246,7 @@ export interface DeviceCode {
 /** Begin TV device-code sign-in. Show user_code + verification_url. */
 export async function requestDeviceCode(): Promise<DeviceCode> {
   const r = await fetch(`${apiBase()}/api/auth/device`, { method: "POST" });
-  if (r.status === 409) throw new Error("sign-in needs the rustypipe backend");
+  if (r.status === 409) throw new Error("device sign-in is retired");
   if (!r.ok) throw new Error(`device code: ${r.status}`);
   return (await r.json()) as DeviceCode;
 }

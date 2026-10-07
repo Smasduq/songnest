@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let arg = args.get(1).expect("usage: cli <query> | serve [--data-dir DIR]");
     if arg == "extract" || arg == "extract-compare" || arg == "search" {
-        anyhow::bail!("the extractor spike was removed with rustypipe; use serve");
+        anyhow::bail!("the extractor spike was retired; use serve");
     }
     if arg == "serve" {
         // desktop mode: keep library.db/music/cookies.txt in the app data dir
