@@ -40,7 +40,7 @@ function PackageManagers() {
       <p className="mt-2 max-w-2xl text-[15px] text-[#aeaeae]">
         Prefer the terminal? Every published version stays installable — pin any version, e.g.{' '}
         <code className="rounded bg-[#262626] px-1.5 py-0.5 text-[13px] text-[#fefefe]">
-          sudo apt install songnest=0.1.0-alpha.1
+          sudo apt install songnest=0.1.0-alpha.2
         </code>
       </p>
       <div className="mt-6 grid gap-4 md:grid-cols-2">

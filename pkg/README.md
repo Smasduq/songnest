@@ -14,7 +14,7 @@ sudo apt install songnest
 Any version:
 
 ```sh
-sudo apt install songnest=0.1.0-alpha.1
+sudo apt install songnest=0.1.0-alpha.2
 apt list -a songnest   # all available versions
 ```
 
@@ -35,7 +35,7 @@ EOF
 sudo dnf install songnest
 ```
 
-Any version: `sudo dnf install songnest-0.1.0-alpha.1`.
+Any version: `sudo dnf install songnest-0.1.0-alpha.2`.
 
 ## Arch Linux (AUR)
 

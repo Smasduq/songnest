@@ -1,9 +1,25 @@
 # Changelog
 
 Songnest is a cross-platform music library and player built in Rust.
-Releases are cut from tags like `v0.1.0-alpha.1`.
+Releases are cut from tags like `v0.1.0-alpha.2`.
 
 ## Unreleased
+
+## v0.1.0-alpha.2 — 2026-10-07
+
+- Offline and empty states with big centered icons instead of
+  "is the server reachable" text, plus a startup backfill that refreshes
+  stale single-artist rows.
+- Every credited artist shown on songs (search, suggestions, library,
+  likes, downloads, file tags) — e.g. "FOLA, Ayra Starr".
+- Queue rework: Up next lists only explicitly added songs, drag up/down
+  to reorder, swipe to remove, optimistic add with toast, sequential
+  next/auto-advance, tap-guard so swipes never start playback.
+- Mobile now-playing sheet with fullscreen detent and queue view,
+  ambient cover glow on the sheet and bars, buffering
+  ("Getting the song ready…") state, drag-to-seek with hover preview.
+- Custom main-page scrollbar, right-click song menus, hover play buttons,
+  vertical card menus, theme-colored playing waves on song cards.
 
 - YouTube cookies can be installed from the app (Downloader diagnostics),
   same file the desktop reads — stops downloads stalling after a few

@@ -1,7 +1,7 @@
 # Maintainer: Smasduq
 pkgname=songnest
-# Arch pkgver cannot contain hyphens: 0.1.0-alpha.1 -> 0.1.0.alpha.1
-pkgver=0.1.0.alpha.1
+# Arch pkgver cannot contain hyphens: 0.1.0-alpha.2 -> 0.1.0.alpha.2
+pkgver=0.1.0.alpha.2
 pkgrel=1
 pkgdesc="Music library and player with a pluggable source system (prebuilt binary)"
 arch=('x86_64')
@@ -15,7 +15,7 @@ replaces=('songnest-bin')
 #   songnest_<upstream-version>_amd64.deb
 # If the first real release names it differently, run ./update.sh — it
 # detects the actual *_amd64.deb on the latest release automatically.
-_upstreamver=0.1.0-alpha.1
+_upstreamver=0.1.0-alpha.2
 source=("songnest_${_upstreamver}_amd64.deb::https://github.com/Smasduq/songnest/releases/download/v${_upstreamver}/songnest_${_upstreamver}_amd64.deb")
 # Filled in by ./update.sh once the first release (with real assets) exists.
 sha256sums=('SKIP')

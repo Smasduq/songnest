@@ -28,6 +28,6 @@ Notes:
 
 - `sha256sums=('SKIP')` until the first real release exists (there are no
   release assets yet, so checksums can't be computed). Run `./update.sh`
-  once `v0.1.0-alpha.1` assets are published, then submit.
+  once `v0.1.0-alpha.2` assets are published, then submit.
 - `_amd64.deb` naming follows the Tauri v2 bundler convention; `update.sh`
   detects the real name, so a mismatch self-heals on first run.

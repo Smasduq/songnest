@@ -1,6 +1,6 @@
 [package]
 name = "songnest-server"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 license.workspace = true
 repository.workspace = true
 description.workspace = true
@@ -14,7 +14,7 @@ default = []
 songnestpy = ["songnest-extract/songnestpy"]
 
 [dependencies]
-songnest-extract = { path = "../extract", version = "0.1.0-alpha.1" }
+songnest-extract = { path = "../extract", version = "0.1.0-alpha.2" }
 tokio.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "songnest"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 license.workspace = true
 repository.workspace = true
 description.workspace = true
@@ -11,7 +11,7 @@ edition = "2024"
 default = []
 
 [dependencies]
-songnest-server = { path = "../server", version = "0.1.0-alpha.1" }
+songnest-server = { path = "../server", version = "0.1.0-alpha.2" }
 tokio.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true

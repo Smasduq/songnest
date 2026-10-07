@@ -1,7 +1,7 @@
 name: 'publish-alpha'
 
-# Alpha release for Songnest v0.1.0-alpha.1
-# Triggers on tag push like `v0.1.0-alpha.1`, or manually via workflow_dispatch.
+# Alpha release for Songnest v0.1.0-alpha.2
+# Triggers on tag push like `v0.1.0-alpha.2`, or manually via workflow_dispatch.
 # All jobs upload to the SAME GitHub release (tauri-action finds it by tagName).
 on:
   push:
@@ -74,8 +74,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: web
-          tagName: v0.1.0-alpha.1
-          releaseName: 'Songnest v0.1.0-alpha.1'
+          tagName: v0.1.0-alpha.2
+          releaseName: 'Songnest v0.1.0-alpha.2'
           releaseBody: |
             Alpha release — expect rough edges. See errors.md in the repo for known issues (YouTube sign-in untested, on-device yt-dlp throttling).
             Desktop bundles for macOS (arm64 + x64), Linux, Windows.
@@ -150,8 +150,8 @@ jobs:
           SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
         with:
           projectPath: web
-          tagName: v0.1.0-alpha.1
-          releaseName: 'Songnest v0.1.0-alpha.1'
+          tagName: v0.1.0-alpha.2
+          releaseName: 'Songnest v0.1.0-alpha.2'
           releaseBody: |
             Alpha release — Android APK (on-device yt-dlp via SongnestPy).
           releaseDraft: false
