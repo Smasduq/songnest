@@ -1,0 +1,28 @@
+{
+  "name": "qiaomu-music-player-spotify",
+  "version": "1.0.0",
+  "description": "Claude Code skill for Spotify playback control + 5947 music genre database",
+  "bin": "./bin/install.mjs",
+  "files": [
+    "bin",
+    "SKILL.md",
+    "spotify.py",
+    "auth_setup.py",
+    ".env.example",
+    "references"
+  ],
+  "keywords": [
+    "claude-code",
+    "agent-skill",
+    "spotify",
+    "music",
+    "genre",
+    "music-player"
+  ],
+  "author": "joeseesun",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joeseesun/qiaomu-music-player-spotify"
+  }
+}
