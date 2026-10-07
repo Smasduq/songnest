@@ -40,6 +40,7 @@ interface PlayerState {
   /** position inside [...queue, ...library] */
   index: number;
   repeat: RepeatMode;
+  shuffle: boolean;
   playing: boolean;
   volume: number;
   muted: boolean;
@@ -57,6 +58,7 @@ interface PlayerState {
   setVolume: (v: number) => void;
   toggleMute: () => void;
   cycleRepeat: () => void;
+  toggleShuffle: () => void;
   clearError: () => void;
 }
 
@@ -163,6 +165,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   library: [],
   index: 0,
   repeat: "off",
+  shuffle: false,
   playing: false,
   volume: audio.volume,
   muted: audio.muted,
@@ -243,11 +246,18 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   next: (manual) => {
-    const { queue, library, index, repeat } = get();
+    const { queue, library, index, repeat, shuffle } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
     if (!manual && repeat === "off" && index >= total - 1) {
       audio.pause(); // stop at the end instead of wrapping
+      return;
+    }
+    if (shuffle && total > 1) {
+      // random next, never the same track twice in a row
+      let j = index;
+      while (j === index) j = Math.floor(Math.random() * total);
+      loadAt(j);
       return;
     }
     loadAt((index + 1) % total);
@@ -299,6 +309,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     set((s) => ({
       repeat: s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off",
     })),
+
+  toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
 
   clearError: () => set({ error: null }),
 }));

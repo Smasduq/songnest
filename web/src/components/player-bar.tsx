@@ -16,7 +16,7 @@ import {
   VolumeX,
 } from "lucide-react";
 
-export function PlayerBar() {
+export function PlayerBar({ className }: { className?: string }) {
   const track = useCurrentTrack();
   const playing = usePlayer((s) => s.playing);
   const volume = usePlayer((s) => s.volume);
@@ -87,7 +87,7 @@ export function PlayerBar() {
   const volPct = (muted ? 0 : volume) * 100;
 
   return (
-    <footer className="hidden h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5 md:flex">
+    <footer className={`hidden h-20 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5 md:flex ${className ?? ""}`}>
       <motion.div
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}

@@ -1,0 +1,176 @@
+name: 'publish-alpha'
+
+# Alpha release for Songnest v0.1.0-alpha.1
+# Triggers on tag push like `v0.1.0-alpha.1`, or manually via workflow_dispatch.
+# All jobs upload to the SAME GitHub release (tauri-action finds it by tagName).
+on:
+  push:
+    tags:
+      - 'v0.1.0-alpha.*'
+  workflow_dispatch: {}
+
+jobs:
+  publish-desktop:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest' # Arm (M1+)
+            args: '--target aarch64-apple-darwin'
+          - platform: 'macos-latest' # Intel
+            args: '--target x86_64-apple-darwin'
+          - platform: 'ubuntu-22.04'
+            args: ''
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: build sidecar (songnest-cli)
+        shell: bash
+        run: |
+          cargo build --release -p songnest-cli
+          mkdir -p web/src-tauri/bin
+          if [ -f target/release/songnest-cli.exe ]; then
+            cp target/release/songnest-cli.exe web/src-tauri/bin/songnest-cli.exe
+            cp target/release/songnest-cli.exe web/src-tauri/bin/songnest-cli
+          else
+            cp target/release/songnest-cli web/src-tauri/bin/songnest-cli
+          fi
+          ls -la web/src-tauri/bin
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: web
+          tagName: v0.1.0-alpha.1
+          releaseName: 'Songnest v0.1.0-alpha.1'
+          releaseBody: |
+            Alpha release — expect rough edges. See errors.md in the repo for known issues (YouTube sign-in untested, rustypipe throttling/deobf).
+            Desktop bundles for macOS (arm64 + x64), Linux, Windows.
+          releaseDraft: false
+          prerelease: true
+          retryAttempts: 2
+          args: ${{ matrix.args }}
+
+  publish-android:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: install Rust stable + Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      # In-process backend (android-backend feature, no sidecar, no yt-dlp on device).
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: web
+          tagName: v0.1.0-alpha.1
+          releaseName: 'Songnest v0.1.0-alpha.1'
+          releaseBody: |
+            Alpha release — Android APK (in-process rustypipe backend).
+          releaseDraft: false
+          prerelease: true
+          retryAttempts: 2
+          mobile: 'android'
+          args: '--apk true'
+
+  publish-ios:
+    # Best-effort: no Apple signing configured, so the .ipa is unsigned
+    # and only useful for local sideloading/testing. Does not fail the release.
+    permissions:
+      contents: write
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: install Rust stable + iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: init iOS project if missing
+        working-directory: web
+        run: |
+          if [ ! -d src-tauri/gen/ios ]; then
+            npx tauri ios init
+          fi
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: web
+          tagName: v0.1.0-alpha.1
+          releaseName: 'Songnest v0.1.0-alpha.1'
+          releaseBody: |
+            Alpha release — iOS (unsigned, best-effort).
+          releaseDraft: false
+          prerelease: true
+          retryAttempts: 2
+          mobile: 'ios'

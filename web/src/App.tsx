@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-motion";
 
-import { Heart, Home, Library, Search } from "lucide-react";
+import { ChevronLeft, Mic } from "lucide-react";
 
 import { NowPlaying } from "@/components/now-playing";
 import { NowPlayingSheet } from "@/components/now-playing-sheet";
 import { MiniPlayer } from "@/components/mini-player";
+import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
+import { MobileHeader } from "@/components/mobile-header";
+import { MobileNav } from "@/components/mobile-nav";
 import { PlayerBar } from "@/components/player-bar";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
@@ -481,9 +484,10 @@ export default function App() {
         )
   );
 
-  return (
+return (
     <MotionConfig reducedMotion="user">
-    <div className="flex h-dvh flex-col gap-3 overflow-hidden bg-background p-3">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      {/* Desktop header */}
       <Header
         theme={theme}
         onPickTheme={setTheme}
@@ -513,8 +517,25 @@ export default function App() {
             .then(setHealth)
             .catch(() => setHealth(null));
         }}
+        className="hidden md:flex"
       />
-      <div className="flex min-h-0 flex-1 gap-3 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem+env(safe-area-inset-top))]">
+
+      {/* Mobile header */}
+      <MobileHeader
+        theme={theme}
+        onPickTheme={setTheme}
+        page={page}
+        onNavigate={go}
+        onOpenSearch={() => {
+          runSearch();
+          go("search");
+        }}
+        onOpenSettings={() => go("diagnostics")}
+        className="md:hidden"
+      />
+
+      <div className="flex min-h-0 flex-1">
+        {/* Desktop sidebar */}
         <div className="hidden md:block">
           <Sidebar
             page={page}
@@ -524,15 +545,16 @@ export default function App() {
           />
         </div>
 
+        {/* Main content */}
         <main
           ref={mainRef}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          className="scroller min-w-0 flex-1 space-y-6 rounded-3xl border border-border/40 bg-background/40 p-4 backdrop-blur-xl sm:p-6"
+          className="scroller min-w-0 flex-1 space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
         >
           {dlStatus?.health === "outdated" && (
-            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl">
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">
               <span className="flex-1 text-muted-foreground">
                 Downloader needs an update.
               </span>
@@ -554,13 +576,13 @@ export default function App() {
             </div>
           )}
           {dlStatus?.health === "rate_limited" && (
-            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm text-muted-foreground backdrop-blur-xl">
+            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm text-muted-foreground backdrop-blur-xl md:mx-4">
               The source is rate limiting requests — streaming and downloads may
               fail. Please wait a few minutes and try again.
             </div>
           )}
           {dlStatus?.health === "js_runtime_missing" && (
-            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl">
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">
               <span className="flex-1 text-muted-foreground">
                 A JavaScript runtime is needed — install Deno or Node 22+, then
                 re-check.
@@ -575,7 +597,7 @@ export default function App() {
             </div>
           )}
           {page === "search" && (
-            <section className="space-y-3">
+            <section className="space-y-3 md:mx-4">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Results
               </h2>
@@ -586,26 +608,26 @@ export default function App() {
                   Search for a song or artist.
                 </p>
               ) : (
-              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
-                <AnimatePresence initial={false}>
-                  {hits.map((h) => {
-                    const s = hitToSong(h);
-                    const k = `hit-dz:${h.dz}`;
-                    return (
-                      <Anim key={k} id={k}>
-                        {cardFor(
-                          s,
-                          h.dz,
-                          k,
-                          () => playHit(h),
-                          false,
-                          isDownloaded(s, k) ? "like" : "download"
-                        )}
-                      </Anim>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
+                  <AnimatePresence initial={false}>
+                    {hits.map((h) => {
+                      const s = hitToSong(h);
+                      const k = `hit-dz:${h.dz}`;
+                      return (
+                        <Anim key={k} id={k}>
+                          {cardFor(
+                            s,
+                            h.dz,
+                            k,
+                            () => playHit(h),
+                            false,
+                            isDownloaded(s, k) ? "like" : "download"
+                          )}
+                        </Anim>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
               )}
             </section>
           )}
@@ -620,7 +642,7 @@ export default function App() {
               className="space-y-6"
             >
           {page === "home" && (
-            <section className="space-y-3">
+            <section className="space-y-3 md:mx-4">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Suggested for you
               </h2>
@@ -656,7 +678,7 @@ export default function App() {
           )}
 
           {page === "library" && (
-            <section className="space-y-3">
+            <section className="space-y-3 md:mx-4">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Your Library
               </h2>
@@ -694,7 +716,7 @@ export default function App() {
           )}
 
           {page === "liked" && (
-            <section className="space-y-3">
+            <section className="space-y-3 md:mx-4">
               <h2 className="text-xl font-semibold tracking-tight text-foreground">
                 Liked Songs
               </h2>
@@ -727,89 +749,64 @@ export default function App() {
           )}
 
           {page === "diagnostics" && (
-            <Diagnostics onToast={showToast} />
+            <div className="md:mx-4">
+              <Diagnostics onToast={showToast} />
+            </div>
           )}
             </motion.div>
           </AnimatePresence>
         </main>
 
-        <NowPlaying
-          track={activeTrack}
-          liked={
-            activeTrack !== undefined &&
-            (() => {
-              const k = likeKeyFor(activeTrack);
-              return k !== null && likes.has(k);
-            })()
-          }
-          downloadable={
-            activeTrack !== undefined && dzOf(activeTrack) !== null
-          }
-          downloading={false}
-          onToggleLike={() => {
-            if (activeTrack !== undefined) toggleLike(activeTrack);
-          }}
-          onDownload={() => {
-            if (activeTrack !== undefined) {
-              const dz = dzOf(activeTrack);
-              if (dz !== null) downloadSong(dz, `np-${activeTrack.id}`);
+        {/* Desktop now playing sidebar */}
+        <div className="hidden xl:block">
+          <NowPlaying
+            track={activeTrack}
+            liked={
+              activeTrack !== undefined &&
+              (() => {
+                const k = likeKeyFor(activeTrack);
+                return k !== null && likes.has(k);
+              })()
             }
-          }}
-          queue={queue}
-          activeQueueId={
-            index < queue.length ? queue[index].id : null
-          }
-          onRemoveFromQueue={(id) => store.getState().removeFromQueue(id)}
-          onPlayQueued={(id) => {
-            const found = queue.find((t) => t.id === id);
-            if (found) store.getState().playTrack(found);
-          }}
-          onNext={() => store.getState().next(true)}
-          onPrev={() => store.getState().prev()}
-        />
+            downloadable={
+              activeTrack !== undefined && dzOf(activeTrack) !== null
+            }
+            downloading={false}
+            onToggleLike={() => {
+              if (activeTrack !== undefined) toggleLike(activeTrack);
+            }}
+            onDownload={() => {
+              if (activeTrack !== undefined) {
+                const dz = dzOf(activeTrack);
+                if (dz !== null) downloadSong(dz, `np-${activeTrack.id}`);
+              }
+            }}
+            queue={queue}
+            activeQueueId={
+              index < queue.length ? queue[index].id : null
+            }
+            onRemoveFromQueue={(id) => store.getState().removeFromQueue(id)}
+            onPlayQueued={(id) => {
+              const found = queue.find((t) => t.id === id);
+              if (found) store.getState().playTrack(found);
+            }}
+            onNext={() => store.getState().next(true)}
+            onPrev={() => store.getState().prev()}
+          />
+        </div>
       </div>
 
-      <PlayerBar />
+      {/* Desktop player bar */}
+      <PlayerBar className="hidden md:flex" />
 
-      <div
-        id="bottom-stack"
-        className="fixed inset-x-3 bottom-3 z-40 md:hidden"
-      >
-        <div className="glass-bar space-y-1 rounded-3xl border border-border/40 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-          <MiniPlayer onOpen={() => setSheetOpen(true)} />
-          <nav className="flex items-center justify-around">
-        {(
-          [
-            { id: "home", label: "Home", icon: Home },
-            { id: "search", label: "Search", icon: Search },
-            { id: "library", label: "Library", icon: Library },
-            { id: "liked", label: "Liked", icon: Heart },
-          ] as const
-        ).map((item) => {
-          const Icon = item.icon;
-          const on = page === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                go(item.id);
-                if (item.id === "search") {
-                  requestAnimationFrame(() =>
-                    document.getElementById("songnest-search")?.focus()
-                  );
-                }
-              }}
-              className={`flex flex-col items-center gap-1.5 rounded-2xl px-4 py-3 text-xs font-medium ${
-                on ? "text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              <Icon className="h-5 w-5" />
-              {item.label}
-            </button>
-          );
-        })}
-          </nav>
+      {/* Mobile bottom stack */}
+      <div id="bottom-stack" className="fixed inset-x-0 bottom-0 z-40 md:hidden">
+        <div className="glass-bar relative flex flex-col rounded-t-3xl border-t border-border/40 pb-[env(safe-area-inset-bottom)]">
+          <div className="flex items-center px-3 py-1.5">
+            <MiniPlayer onOpen={() => setSheetOpen(true)} />
+          </div>
+          <MobileSeekBar />
+          <MobileNav page={page} onNavigate={go} />
         </div>
       </div>
 

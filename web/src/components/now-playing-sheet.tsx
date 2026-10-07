@@ -11,6 +11,7 @@ import {
   Play,
   Repeat,
   Repeat1,
+  Shuffle,
   SkipBack,
   SkipForward,
   X,
@@ -20,6 +21,7 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
   const track = useCurrentTrack();
   const playing = usePlayer((s) => s.playing);
   const repeat = usePlayer((s) => s.repeat);
+  const shuffle = usePlayer((s) => s.shuffle);
   const queue = usePlayer((s) => s.queue);
   const index = usePlayer((s) => s.index);
   const { currentTime, duration } = useTime();
@@ -172,15 +174,29 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
               </Button>
             </div>
 
-            <div className="flex items-center justify-center gap-2">
+            {/* PC player-bar style: icon toggles for shuffle + repeat */}
+            <div className="flex items-center justify-center gap-1">
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon"
+                onClick={() => st.toggleShuffle()}
+                title={shuffle ? "Shuffle on" : "Shuffle off"}
+                aria-label={shuffle ? "Shuffle on" : "Shuffle off"}
+                aria-pressed={shuffle}
+                className={`h-9 w-9 rounded-full hover:text-foreground ${
+                  shuffle ? "text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                <Shuffle className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => st.cycleRepeat()}
-                className={`h-9 rounded-full px-4 text-xs uppercase tracking-[0.2em] ${
-                  repeat === "off"
-                    ? "text-muted-foreground"
-                    : "text-foreground"
+                title={`Repeat: ${repeat}`}
+                aria-label={`Repeat: ${repeat}`}
+                className={`h-9 w-9 rounded-full hover:text-foreground ${
+                  repeat === "off" ? "text-muted-foreground" : "text-foreground"
                 }`}
               >
                 {repeat === "one" ? (
@@ -188,8 +204,9 @@ export function NowPlayingSheet({ onClose }: { onClose: () => void }) {
                 ) : (
                   <Repeat className="h-4 w-4" />
                 )}
-                {repeat === "off" ? "Repeat off" : `Repeat ${repeat}`}
               </Button>
+            </div>
+            <div className="flex items-center justify-center">
               <Button
                 variant="ghost"
                 size="sm"

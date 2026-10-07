@@ -4028,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "songnest"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -4041,7 +4041,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-extract"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4055,7 +4055,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-server"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
