@@ -7,6 +7,7 @@ import { NowPlayingSheet } from "@/components/now-playing-sheet";
 import { MiniPlayer } from "@/components/mini-player";
 import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
+import AuthPage from "@/pages/auth";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { MobileHeader } from "@/components/mobile-header";
@@ -215,10 +216,17 @@ export default function App() {
     };
   }, []);
 
-  // deep link: #diagnostics opens the diagnostics page
+  // deep link: #diagnostics opens the diagnostics page,
+  // #signin / #signup / #auth opens the sign-in/sign-up page
+  const [isAuthRoute, setIsAuthRoute] = useState(() =>
+    ["#signin", "#signup", "#auth"].includes(window.location.hash)
+  );
   useEffect(() => {
     function applyHash() {
       if (window.location.hash === "#diagnostics") go("diagnostics");
+      setIsAuthRoute(
+        ["#signin", "#signup", "#auth"].includes(window.location.hash)
+      );
     }
     applyHash();
     window.addEventListener("hashchange", applyHash);
@@ -528,6 +536,19 @@ export default function App() {
           }
         )
   );
+
+  if (isAuthRoute) {
+    return (
+      <MotionConfig reducedMotion="user">
+        <AuthPage
+          onBack={() => {
+            window.location.hash = "";
+            setIsAuthRoute(false);
+          }}
+        />
+      </MotionConfig>
+    );
+  }
 
 return (
     <MotionConfig reducedMotion="user">
