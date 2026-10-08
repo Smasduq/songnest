@@ -83,8 +83,17 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
   async function update() {
     setBusy(true);
     try {
-      setStatus(await postDownloaderUpdate());
-      onToast("Downloader updated");
+      const next = await postDownloaderUpdate();
+      setStatus(next);
+      if (next.update_outcome !== undefined && next.update_outcome !== null) {
+        onToast(next.update_outcome);
+      } else if (next.health === "ok" || next.health === "Ok") {
+        onToast("Downloader updated");
+      } else if (next.last_error !== "") {
+        onToast(next.last_error);
+      } else {
+        onToast(`Update finished — still ${next.health}`);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "update failed");
     } finally {

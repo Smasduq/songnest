@@ -359,6 +359,7 @@ const RUNTIME_BINS: &[&str] = &["deno", "node", "bun", "qjs", "quickjs-ng"];
 #[serde(rename_all = "lowercase")]
 enum Health {
     Ok,
+    #[serde(rename = "rate_limited")]
     RateLimited,
     Outdated,
     Offline,
@@ -2139,7 +2140,13 @@ async fn api_resolve(
 
 /// GET /api/downloader — full downloader status for diagnostics.
 async fn api_downloader(State(s): State<AppState>) -> impl IntoResponse {
-    let v = s.downloader.read(|d| {
+    Json(downloader_json(&s, None))
+}
+
+/// Shared status payload. `update_outcome` is only set by the update
+/// endpoint so the UI can report what the update actually did.
+fn downloader_json(s: &AppState, update_outcome: Option<&str>) -> serde_json::Value {
+    s.downloader.read(|d| {
         serde_json::json!({
             "backend": s.backend.name(),
             "binary_source": d.binary_source,
@@ -2157,9 +2164,9 @@ async fn api_downloader(State(s): State<AppState>) -> impl IntoResponse {
             "js_runtime_setting": d.runtime_setting,
             "ejs_available": d.ejs_available,
             "ejs_note": d.ejs_note,
+            "update_outcome": update_outcome,
         })
-    });
-    Json(v)
+    })
 }
 
 /// POST /api/downloader/recheck — run one health probe now, no update.
@@ -2180,8 +2187,19 @@ async fn api_downloader_update(State(s): State<AppState>) -> impl IntoResponse {
     let outcome = run_update(&s).await;
     // refresh health once after the attempt (no further side effects)
     health_check_once(&s).await;
-    let _ = outcome;
-    api_downloader(State(s)).await.into_response()
+    // Surface the update result: without this a failed update looked like
+    // success ("Downloader updated") and the real reason was lost when the
+    // re-check overwrote last_error. "already on the latest version" is a
+    // benign no-op, not an error.
+    if !outcome.starts_with("updated") && !outcome.starts_with("already on") {
+        let mut d = s.downloader.inner.write().unwrap();
+        if d.last_error.is_empty() {
+            d.last_error = outcome.clone();
+        } else if !outcome.starts_with("offline") {
+            d.last_error = format!("{} (update: {})", d.last_error, outcome);
+        }
+    }
+    Json(downloader_json(&s, Some(&outcome))).into_response()
 }
 
 #[derive(Deserialize)]
@@ -2374,6 +2392,20 @@ async fn run_update(s: &AppState) -> String {
             return "offline or GitHub unreachable".to_string();
         }
     };
+    // Nothing to do when the managed copy already matches the release:
+    // without this every manual "Update" re-downloaded + reinstalled the
+    // same binary and looked like it did nothing.
+    if let Some(tag) = rel.get("tag_name").and_then(|v| v.as_str()) {
+        let current = dl.read(|d| d.version.clone());
+        if !current.is_empty()
+            && cmp_date_version(
+                tag.trim_start_matches(|c: char| !c.is_ascii_alphanumeric()),
+                &current,
+            ) != std::cmp::Ordering::Greater
+        {
+            return format!("already on the latest version ({current})");
+        }
+    }
     let assets = rel
         .get("assets")
         .and_then(|a| a.as_array())
@@ -2555,7 +2587,20 @@ async fn probe_fetch(s: &AppState) -> anyhow::Result<String> {
                 .args(["-g", "https://youtube.com/watch?v=jNQXAC9IVRw"])
                 .output()
                 .await?;
-            anyhow::ensure!(out.status.success(), "yt-dlp probe failed");
+            if !out.status.success() {
+                // Keep stderr: classification (rate-limit vs outdated) depends
+                // on it. Without this every failure looked "outdated" and the
+                // UI offered an update that could never help.
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let tail: Vec<&str> = stderr.lines().rev().take(6).collect();
+                let tail: Vec<&str> = tail.into_iter().rev().collect();
+                let tail = tail.join("\n").trim().to_string();
+                if tail.is_empty() {
+                    anyhow::bail!("yt-dlp probe failed");
+                } else {
+                    anyhow::bail!("yt-dlp probe failed: {tail}");
+                }
+            }
             let url = String::from_utf8(out.stdout)?
                 .lines()
                 .next()
@@ -2614,14 +2659,21 @@ async fn health_check(s: &AppState) {
     }
     if health == Health::Outdated {
         let outcome = run_update(s).await;
-        {
-            let mut d = s.downloader.inner.write().unwrap();
-            if !outcome.starts_with("updated") && !outcome.starts_with("offline") {
-                d.last_error = outcome;
-            }
-        }
+        let failed = !outcome.starts_with("updated")
+            && !outcome.starts_with("already on")
+            && !outcome.starts_with("offline");
         // exactly one re-check after the attempt
         health_check_once(s).await;
+        if failed {
+            // keep the update failure visible: the re-check above overwrote
+            // last_error with the fresh probe error alone.
+            let mut d = s.downloader.inner.write().unwrap();
+            if d.last_error.is_empty() {
+                d.last_error = outcome;
+            } else {
+                d.last_error = format!("{} (update: {})", d.last_error, outcome);
+            }
+        }
     }
 }
 

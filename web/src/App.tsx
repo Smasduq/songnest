@@ -620,7 +620,15 @@ return (
                   try {
                     const s = await postDownloaderUpdate();
                     setDlStatus(s);
-                    showToast("Downloader updated");
+                    if (s.update_outcome !== undefined && s.update_outcome !== null) {
+                      showToast(s.update_outcome);
+                    } else if (s.health === "ok" || s.health === "Ok") {
+                      showToast("Downloader updated");
+                    } else if (s.last_error !== "") {
+                      showToast(s.last_error);
+                    } else {
+                      showToast(`Update finished — still ${s.health}`);
+                    }
                   } catch {
                     showToast("Update failed");
                   }

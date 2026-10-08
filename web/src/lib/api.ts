@@ -324,6 +324,8 @@ export interface DownloaderStatus {
   last_update_at: number | null;
   health: string;
   last_error: string;
+  /** Set only on POST /api/downloader/update: what the update did. */
+  update_outcome?: string | null;
   ffmpeg: string | null;
   js_runtimes: JsRuntimeInfo[];
   js_runtime_in_use: string | null;
