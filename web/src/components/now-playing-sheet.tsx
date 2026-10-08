@@ -5,17 +5,18 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { QueueList } from "@/components/queue-list";
 import { SeekBar } from "@/components/seek-bar";
-import { dzOf, formatTime } from "@/lib/api";
+import { formatTime } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
 import {
   ChevronDown,
+  Download,
+  Heart,
   ListMusic,
   Loader2,
   Music,
   Pause,
   Play,
-  RefreshCw,
   Repeat,
   Repeat1,
   Shuffle,
@@ -25,10 +26,18 @@ import {
 
 export function NowPlayingSheet({
   onClose,
-  onRetryMatch,
+  liked,
+  downloadable,
+  downloading,
+  onToggleLike,
+  onDownload,
 }: {
   onClose: () => void;
-  onRetryMatch: () => void;
+  liked: boolean;
+  downloadable: boolean;
+  downloading: boolean;
+  onToggleLike: () => void;
+  onDownload: () => void;
 }) {
   const track = useCurrentTrack();
   const resolving = usePlayer((s) => s.resolving);
@@ -197,40 +206,93 @@ export function NowPlayingSheet({
                     </p>
                   )}
                 </div>
-              </div>
-            ) : (
-              <div className="touch-none select-none text-center">
-                <Marquee
-                  text={track.title}
-                  className="text-center text-2xl font-semibold tracking-tight text-foreground"
-                />
-                <Marquee
-                  text={`${track.artist} · ${track.album}`}
-                  className="text-center text-base text-muted-foreground"
-                />
-                {resolving || buffering ? (
-                  <p
-                    role="status"
-                    className="mt-1 flex items-center justify-center gap-1.5 text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground"
+                <div className="flex flex-shrink-0 items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggleLike}
+                    aria-pressed={liked}
+                    aria-label={liked ? "Unlike" : "Like"}
+                    className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
                   >
-                    <Loader2
-                      className="h-3.5 w-3.5 animate-spin"
+                    <Heart
+                      className={`h-5 w-5 ${liked ? "fill-foreground text-foreground" : ""}`}
                       aria-hidden
                     />
-                    {resolving ? "Finding the song…" : "Getting the song ready…"}
-                  </p>
-                ) : (
-                  dzOf(track) !== null && (
-                    <button
-                      type="button"
-                      onClick={onRetryMatch}
-                      className="mx-auto mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  </Button>
+                  {downloadable && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={downloading}
+                      onClick={onDownload}
+                      aria-label={downloading ? "Downloading" : "Download"}
+                      className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
                     >
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                      Not the right song? Try another match
-                    </button>
-                  )
-                )}
+                      {downloading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                      ) : (
+                        <Download className="h-5 w-5" aria-hidden />
+                      )}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex touch-none select-none items-center gap-2">
+                <div className="min-w-0 flex-1 text-left">
+                  <Marquee
+                    text={track.title}
+                    className="text-left text-2xl font-semibold tracking-tight text-foreground"
+                  />
+                  <Marquee
+                    text={`${track.artist} · ${track.album}`}
+                    className="text-left text-base text-muted-foreground"
+                  />
+                  {(resolving || buffering) && (
+                    <p
+                      role="status"
+                      className="mt-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground"
+                    >
+                      <Loader2
+                        className="h-3.5 w-3.5 animate-spin"
+                        aria-hidden
+                      />
+                      {resolving ? "Finding the song…" : "Getting the song ready…"}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggleLike}
+                    aria-pressed={liked}
+                    aria-label={liked ? "Unlike" : "Like"}
+                    className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <Heart
+                      className={`h-6 w-6 ${liked ? "fill-foreground text-foreground" : ""}`}
+                      aria-hidden
+                    />
+                  </Button>
+                  {downloadable && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={downloading}
+                      onClick={onDownload}
+                      aria-label={downloading ? "Downloading" : "Download"}
+                      className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
+                    >
+                      {downloading ? (
+                        <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
+                      ) : (
+                        <Download className="h-6 w-6" aria-hidden />
+                      )}
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 

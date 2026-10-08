@@ -931,7 +931,30 @@ return (
         {sheetOpen && (
           <NowPlayingSheet
             onClose={() => setSheetOpen(false)}
-            onRetryMatch={() => void retryMatch()}
+            liked={
+              activeTrack !== undefined &&
+              (() => {
+                const k = likeKeyFor(activeTrack);
+                return k !== null && likes.has(k);
+              })()
+            }
+            downloadable={
+              activeTrack !== undefined && dzOf(activeTrack) !== null
+            }
+            downloading={
+              activeTrack !== undefined &&
+              (dl[`np-${activeTrack.id}`]?.state === "working" ||
+                dl[`np-${activeTrack.id}`]?.state === "queued")
+            }
+            onToggleLike={() => {
+              if (activeTrack !== undefined) toggleLike(activeTrack);
+            }}
+            onDownload={() => {
+              if (activeTrack !== undefined) {
+                const dz = dzOf(activeTrack);
+                if (dz !== null) downloadSong(dz, `np-${activeTrack.id}`);
+              }
+            }}
           />
         )}
       </AnimatePresence>
