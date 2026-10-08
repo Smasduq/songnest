@@ -6,6 +6,7 @@ import {
   fetchCookiesStatus,
   fetchDownloader,
   postCookies,
+  postCookiesImport,
   postDownloaderRecheck,
   postDownloaderRuntime,
   postDownloaderUpdate,
@@ -26,6 +27,7 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
   const [cookiesPresent, setCookiesPresent] = useState<boolean | null>(null);
   const [cookiesDraft, setCookiesDraft] = useState("");
   const [cookiesBusy, setCookiesBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
 
   const refreshCookies = useCallback(async () => {
     try {
@@ -64,6 +66,21 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
       setError(e instanceof Error ? e.message : "cookies save failed");
     } finally {
       setCookiesBusy(false);
+    }
+  }
+
+  async function importCookies() {
+    setImportBusy(true);
+    try {
+      const res = await postCookiesImport();
+      setCookiesDraft("");
+      await refreshCookies();
+      await refresh();
+      onToast(`Cookies imported from ${res.browser} — throttling should ease off`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "import failed");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -253,10 +270,23 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
                 : cookiesPresent
                   ? "Installed — downloads and streams run authenticated."
                   : "Not installed — after a few anonymous fetches the source throttles and downloads stall."}{" "}
-              Export a Netscape-format cookie file while logged into YouTube
-              (browser extension, youtube.com open) and paste it below. Same
-              file the desktop reads as cookies.txt; refresh it every few
-              weeks.
+              One tap pulls the YouTube login from this device's browser —
+              no copy-pasting needed. Make sure you're logged into YouTube
+              in the browser first.
+            </p>
+            <Button
+              size="sm"
+              disabled={importBusy}
+              onClick={importCookies}
+              className="h-9 rounded-full px-4"
+            >
+              {importBusy ? "Importing… (may take a minute)" : "Import from this device's browser"}
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              If the import can't read your browser, paste a Netscape-format
+              cookie export below instead (browser extension, youtube.com
+              open). Same file the desktop reads as cookies.txt; refresh it
+              every few weeks.
             </p>
             <textarea
               value={cookiesDraft}

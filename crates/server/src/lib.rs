@@ -907,15 +907,289 @@ fn classify_failure(stderr_text: &str, io_failed: bool) -> Health {
     Health::Outdated
 }
 
-/// Extra yt-dlp args from `SONGNEST_COOKIES` (default `cookies.txt`).
+/// Where the YouTube cookie jar lives (`SONGNEST_COOKIES` overrides the
+/// default `cookies.txt` in the data dir).
+fn cookies_file() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var("SONGNEST_COOKIES").unwrap_or_else(|_| "cookies.txt".to_string()),
+    )
+}
+
+/// Extra yt-dlp args from the cookie jar.
 /// Empty when the file doesn't exist: YouTube works until it 429s us.
 fn cookie_args() -> Vec<String> {
-    let path =
-        std::env::var("SONGNEST_COOKIES").unwrap_or_else(|_| "cookies.txt".to_string());
-    if std::path::Path::new(&path).exists() {
-        vec!["--cookies".to_string(), path]
+    let path = cookies_file();
+    if path.exists() {
+        vec![
+            "--cookies".to_string(),
+            path.to_string_lossy().into_owned(),
+        ]
     } else {
         Vec::new()
+    }
+}
+
+/// Cookie names that prove a browser profile is logged into Google/YouTube
+/// (names only — no decryption needed for discovery).
+const YT_AUTH_COOKIES: &[&str] = &[
+    "SID",
+    "LOGIN_INFO",
+    "__Secure-1PSID",
+    "__Secure-3PSID",
+    "__Secure-1PSIDTS",
+    "__Secure-3PSIDTS",
+];
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+}
+
+/// (yt-dlp browser id, config root, firefox schema?) for browsers actually
+/// installed on this device. No desktop browser on Android/iOS, so mobile
+/// in-process servers simply find nothing and keep the paste fallback.
+fn browser_search_roots() -> Vec<(&'static str, std::path::PathBuf, bool)> {
+    let mut out: Vec<(&'static str, std::path::PathBuf, bool)> = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let l = std::path::PathBuf::from(local);
+            out.extend([
+                ("chrome", l.join("Google/Chrome/User Data"), false),
+                ("chromium", l.join("Chromium/User Data"), false),
+                ("brave", l.join("BraveSoftware/Brave-Browser"), false),
+                ("edge", l.join("Microsoft/Edge/User Data"), false),
+                ("vivaldi", l.join("Vivaldi"), false),
+                ("opera", l.join("Opera Software/Opera Stable"), false),
+            ]);
+        }
+        if let Ok(app) = std::env::var("APPDATA") {
+            out.push((
+                "firefox",
+                std::path::PathBuf::from(app).join("Mozilla/Firefox/Profiles"),
+                true,
+            ));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(h) = home_dir() {
+            let base = h.join("Library/Application Support");
+            out.extend([
+                ("chrome", base.join("Google/Chrome"), false),
+                ("chromium", base.join("Chromium"), false),
+                ("brave", base.join("BraveSoftware/Brave-Browser"), false),
+                ("edge", base.join("Microsoft Edge"), false),
+                ("vivaldi", base.join("Vivaldi"), false),
+                ("opera", base.join("com.operasoftware.Opera"), false),
+                ("firefox", base.join("Firefox/Profiles"), true),
+            ]);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(h) = home_dir() {
+            out.extend([
+                ("chrome", h.join(".config/google-chrome"), false),
+                ("chromium", h.join(".config/chromium"), false),
+                ("brave", h.join(".config/BraveSoftware/Brave-Browser"), false),
+                ("edge", h.join(".config/microsoft-edge"), false),
+                ("vivaldi", h.join(".config/vivaldi"), false),
+                ("opera", h.join(".config/opera"), false),
+            ]);
+            out.push(("firefox", h.join(".mozilla/firefox"), true));
+        }
+    }
+    out.into_iter().filter(|(_, p, _)| p.is_dir()).collect()
+}
+
+/// True when a browser cookie DB mentions YouTube/Google auth cookies.
+/// Reads names from a temp copy (the live DB may be locked) — values stay
+/// encrypted until yt-dlp itself decrypts them during import.
+fn profile_has_yt_login(db_src: &std::path::Path, firefox: bool) -> bool {
+    let tmp = std::env::temp_dir().join(format!("songnest-ck-{}.sqlite", std::process::id()));
+    if std::fs::copy(db_src, &tmp).is_err() {
+        return false;
+    }
+    let found = (|| -> anyhow::Result<bool> {
+        let conn = rusqlite::Connection::open(&tmp)?;
+        let (table, host_col) = if firefox {
+            ("moz_cookies", "host")
+        } else {
+            ("cookies", "host_key")
+        };
+        let placeholders = YT_AUTH_COOKIES.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT 1 FROM {table} WHERE ({host_col} LIKE '%youtube%' OR {host_col} LIKE '%google%') AND name IN ({placeholders}) LIMIT 1"
+        );
+        let mut st = conn.prepare(&sql)?;
+        let mut rows = st.query(rusqlite::params_from_iter(YT_AUTH_COOKIES.iter()))?;
+        Ok(rows.next()?.is_some())
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    found.unwrap_or(false)
+}
+
+/// (yt-dlp `--cookies-from-browser` spec, UI label) for every local browser
+/// profile, logged-into-YouTube profiles first. Non-logged-in profiles are
+/// skipped: anonymous cookies can't fix throttling, and each attempt costs
+/// a network probe.
+fn cookie_import_candidates() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (id, root, firefox) in browser_search_roots() {
+        let mut profiles: Vec<(String, std::path::PathBuf)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&root) {
+            for e in rd.flatten() {
+                if firefox {
+                    let db = e.path().join("cookies.sqlite");
+                    if db.is_file() {
+                        profiles.push((
+                            e.file_name().to_string_lossy().into_owned(),
+                            db,
+                        ));
+                    }
+                } else {
+                    if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        continue;
+                    }
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    for db in [e.path().join("Cookies"), e.path().join("Network/Cookies")] {
+                        if db.is_file() {
+                            profiles.push((name.clone(), db));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        profiles.sort_by_key(|(n, _)| if n == "Default" { 0 } else { 1 });
+        for (profile, db) in profiles {
+            if profile_has_yt_login(&db, firefox) {
+                out.push((format!("{id}:{profile}"), format!("{id} ({profile})")));
+            }
+        }
+    }
+    out
+}
+
+fn tmp_has_youtube(tmp: &std::path::Path) -> bool {
+    std::fs::read_to_string(tmp)
+        .map(|t| {
+            t.contains("youtube.com")
+                && t.lines().any(|l| {
+                    let l = l.trim();
+                    !l.starts_with('#') && l.split('\t').count() >= 6
+                })
+        })
+        .unwrap_or(false)
+}
+
+fn install_cookies_file(tmp: &std::path::Path, dest: &std::path::Path) -> bool {
+    let bytes = match std::fs::read(tmp) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    if std::fs::write(dest, &bytes).is_err() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600));
+    }
+    true
+}
+
+/// Try one browser profile: extract its jar to a temp file and validate it
+/// with a real YouTube fetch in the same command. Only a jar that defeats
+/// the bot check is installed.
+async fn try_import_spec(bin: &str, spec: &str, dest: &std::path::Path) -> bool {
+    // Linux needs the explicit keyring choice first: yt-dlp's default
+    // BASICTEXT backend can't decrypt, so every cookie is silently skipped
+    // and the "import" looks successful while fixing nothing.
+    let mut specs = vec![spec.to_string()];
+    #[cfg(target_os = "linux")]
+    {
+        if let Some((browser, rest)) = spec.split_once(':') {
+            specs.insert(0, format!("{browser}+gnomekeyring:{rest}"));
+        }
+    }
+    for s in &specs {
+        let tmp =
+            std::env::temp_dir().join(format!("songnest-cookies-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        let probe = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            tokio::process::Command::new(bin)
+                .args(["--cookies-from-browser", s, "--cookies"])
+                .arg(&tmp)
+                .args([
+                    "--skip-download",
+                    "--no-warnings",
+                    "--print",
+                    "title",
+                    "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+                ])
+                .output(),
+        )
+        .await;
+        let ok = match probe {
+            Ok(Ok(out)) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                out.status.success()
+                    && !stdout.trim().is_empty()
+                    && !youtube_blocked(&stderr)
+                    && tmp_has_youtube(&tmp)
+            }
+            _ => false,
+        };
+        if ok && install_cookies_file(&tmp, dest) {
+            let _ = std::fs::remove_file(&tmp);
+            return true;
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+    false
+}
+
+/// Pull YouTube cookies from a browser on this device into the cookie jar.
+/// Returns a human label ("chromium (Default)") for the UI toast.
+async fn import_browser_cookies(dl: &DownloaderState) -> Result<String, String> {
+    let bin = dl.argv().map(|(b, _)| b).map_err(|e| e.to_string())?;
+    let dest = cookies_file();
+    let cands = cookie_import_candidates();
+    if cands.is_empty() {
+        return Err(
+            "no browser logged into YouTube found on this device — log in, then try again"
+                .to_string(),
+        );
+    }
+    for (spec, label) in cands.iter().take(3) {
+        if try_import_spec(&bin, spec, &dest).await {
+            return Ok(label.clone());
+        }
+    }
+    Err(
+        "couldn't read your browser's cookies (the browser may be locked) — try again, or paste an export below"
+            .to_string(),
+    )
+}
+
+/// Background one-shot at startup: no jar installed -> try the device's
+/// browsers. Best-effort and quiet on failure (the paste box and the
+/// import button remain for manual use).
+async fn ensure_cookies(s: AppState) {
+    let present = std::fs::metadata(cookies_file())
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    if present || !matches!(s.backend, Backend::YtDlp) {
+        return;
+    }
+    match import_browser_cookies(&s.downloader).await {
+        Ok(label) => eprintln!("songnest: imported YouTube cookies from {label}"),
+        Err(e) => eprintln!("songnest: automatic cookie import unavailable ({e})"),
     }
 }
 
@@ -1840,7 +2114,7 @@ async fn api_auth_logout(State(_s): State<AppState>) -> impl IntoResponse {
 
 /// GET /api/cookies — whether a cookies.txt is installed.
 async fn api_cookies_status() -> impl IntoResponse {
-    let present = std::fs::metadata("cookies.txt")
+    let present = std::fs::metadata(cookies_file())
         .map(|m| m.len() > 0)
         .unwrap_or(false);
     Json(serde_json::json!({ "present": present }))
@@ -1870,7 +2144,7 @@ async fn api_cookies_install(body: String) -> impl IntoResponse {
         )
             .into_response();
     }
-    if std::fs::write("cookies.txt", body).is_err() {
+    if std::fs::write(cookies_file(), body).is_err() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "could not write cookies.txt",
@@ -1878,6 +2152,22 @@ async fn api_cookies_install(body: String) -> impl IntoResponse {
             .into_response();
     }
     Json(serde_json::json!({ "ok": true, "cookies": true })).into_response()
+}
+
+/// POST /api/cookies/import — one-click cookie setup: read YouTube login
+/// cookies from a browser on this device into the jar, validated with a
+/// real fetch. This is the non-technical path; the paste box stays as the
+/// fallback for locked browsers and phones without desktop browsers.
+async fn api_cookies_import(State(s): State<AppState>) -> impl IntoResponse {
+    match import_browser_cookies(&s.downloader).await {
+        Ok(browser) => {
+            // re-probe now so the UI flips to ok immediately instead of
+            // showing the stale anonymous state until the next cycle
+            health_check_once(&s).await;
+            Json(serde_json::json!({ "ok": true, "browser": browser })).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
+    }
 }
 
 /// JSON API for the React frontend.
@@ -2702,6 +2992,11 @@ async fn health_check_once(s: &AppState) {
 async fn run_downloader_tasks(s: AppState) {
     // startup: check, then health
     // (self-update only makes sense for the yt-dlp binary backend)
+    // Fresh device first: import cookies before the first probe so it
+    // already runs authenticated. The old parallel order let the anonymous
+    // probe lose the race and report rate_limited for 24h while a working
+    // jar sat on disk.
+    ensure_cookies(s.clone()).await;
     if matches!(s.backend, Backend::YtDlp) {
         update_cycle(&s).await;
     }
@@ -2799,6 +3094,7 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/auth/status", get(api_auth_status))
         .route("/api/auth/logout", post(api_auth_logout))
         .route("/api/cookies", get(api_cookies_status).post(api_cookies_install))
+        .route("/api/cookies/import", post(api_cookies_import))
         .route("/api/library", get(api_library))
         .route("/api/library/refresh-artists", post(api_refresh_artists))
         .route("/api/search", get(api_search))

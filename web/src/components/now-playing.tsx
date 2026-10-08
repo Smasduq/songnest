@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { BurstButton } from "@/components/burst-button";
 import { EmptyState } from "@/components/empty-state";
 import { QueueList } from "@/components/queue-list";
 import { formatTime, type Song } from "@/lib/api";
@@ -88,28 +88,33 @@ export function NowPlaying({
             )}
           </div>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onToggleLike}
-              className="h-9 flex-1 rounded-full"
-            >
-              <Heart
-                className={`h-4 w-4 ${liked ? "fill-foreground" : ""}`}
-              />
-              {liked ? "Liked" : "Like"}
-            </Button>
+            <BurstButton
+              layout="pill"
+              label={liked ? "Unlike" : "Like"}
+              pressed={liked}
+              burstOn="activate"
+              onAction={onToggleLike}
+              idleIcon={
+                <Heart
+                  className={`h-4 w-4 ${liked ? "fill-foreground" : ""}`}
+                  aria-hidden
+                />
+              }
+              text={liked ? "Liked" : "Like"}
+              particleClassName="bg-rose-500"
+              ringClassName="border-rose-500"
+            />
             {downloadable && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={downloading}
-                onClick={onDownload}
-                className="h-9 flex-1 rounded-full"
-              >
-                <Download className="h-4 w-4" />
-                {downloading ? "Working…" : "Download"}
-              </Button>
+              <BurstButton
+                layout="pill"
+                label="Download"
+                busyLabel="Downloading"
+                busy={downloading}
+                onAction={onDownload}
+                idleIcon={<Download className="h-4 w-4" aria-hidden />}
+                text="Download"
+                busyText="Working…"
+              />
             )}
           </div>
           {downloadable && !resolving && (

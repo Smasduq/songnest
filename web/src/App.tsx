@@ -640,9 +640,18 @@ return (
             </div>
           )}
           {dlStatus?.health === "rate_limited" && (
-            <div className="rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm text-muted-foreground backdrop-blur-xl md:mx-4">
-              The source is rate limiting requests — streaming and downloads may
-              fail. Please wait a few minutes and try again.
+            <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">
+              <span className="flex-1 text-muted-foreground">
+                The source is rate limiting requests — streaming and downloads may
+                fail. Signing in with YouTube usually fixes it.
+              </span>
+              <button
+                type="button"
+                onClick={() => go("diagnostics")}
+                className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
+              >
+                Fix
+              </button>
             </div>
           )}
           {dlStatus?.health === "js_runtime_missing" && (

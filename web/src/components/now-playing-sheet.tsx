@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion, useDragControls } from "framer-motion";
 
 import { Button } from "@/components/ui/button";
+import { BurstButton } from "@/components/burst-button";
 import { EmptyState } from "@/components/empty-state";
 import { QueueList } from "@/components/queue-list";
 import { SeekBar } from "@/components/seek-bar";
@@ -207,34 +208,31 @@ export function NowPlayingSheet({
                   )}
                 </div>
                 <div className="flex flex-shrink-0 items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onToggleLike}
-                    aria-pressed={liked}
-                    aria-label={liked ? "Unlike" : "Like"}
-                    className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <Heart
-                      className={`h-5 w-5 ${liked ? "fill-foreground text-foreground" : ""}`}
-                      aria-hidden
-                    />
-                  </Button>
+                  <BurstButton
+                    layout="icon"
+                    label={liked ? "Unlike" : "Like"}
+                    pressed={liked}
+                    burstOn="activate"
+                    onAction={onToggleLike}
+                    idleIcon={
+                      <Heart
+                        className={`h-5 w-5 ${liked ? "fill-foreground text-foreground" : ""}`}
+                        aria-hidden
+                      />
+                    }
+                    particleClassName="bg-rose-500"
+                    ringClassName="border-rose-500"
+                  />
                   {downloadable && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={downloading}
-                      onClick={onDownload}
-                      aria-label={downloading ? "Downloading" : "Download"}
-                      className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
-                    >
-                      {downloading ? (
-                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                      ) : (
-                        <Download className="h-5 w-5" aria-hidden />
-                      )}
-                    </Button>
+                    <BurstButton
+                      layout="icon"
+                      iconClassName="h-5 w-5"
+                      label="Download"
+                      busyLabel="Downloading"
+                      busy={downloading}
+                      onAction={onDownload}
+                      idleIcon={<Download className="h-5 w-5" aria-hidden />}
+                    />
                   )}
                 </div>
               </div>
@@ -263,34 +261,31 @@ export function NowPlayingSheet({
                   )}
                 </div>
                 <div className="flex flex-shrink-0 items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onToggleLike}
-                    aria-pressed={liked}
-                    aria-label={liked ? "Unlike" : "Like"}
-                    className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <Heart
-                      className={`h-6 w-6 ${liked ? "fill-foreground text-foreground" : ""}`}
-                      aria-hidden
-                    />
-                  </Button>
+                  <BurstButton
+                    layout="icon"
+                    label={liked ? "Unlike" : "Like"}
+                    pressed={liked}
+                    burstOn="activate"
+                    onAction={onToggleLike}
+                    idleIcon={
+                      <Heart
+                        className={`h-6 w-6 ${liked ? "fill-foreground text-foreground" : ""}`}
+                        aria-hidden
+                      />
+                    }
+                    particleClassName="bg-rose-500"
+                    ringClassName="border-rose-500"
+                  />
                   {downloadable && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      disabled={downloading}
-                      onClick={onDownload}
-                      aria-label={downloading ? "Downloading" : "Download"}
-                      className="h-11 w-11 rounded-full text-muted-foreground hover:text-foreground"
-                    >
-                      {downloading ? (
-                        <Loader2 className="h-6 w-6 animate-spin" aria-hidden />
-                      ) : (
-                        <Download className="h-6 w-6" aria-hidden />
-                      )}
-                    </Button>
+                    <BurstButton
+                      layout="icon"
+                      iconClassName="h-6 w-6"
+                      label="Download"
+                      busyLabel="Downloading"
+                      busy={downloading}
+                      onAction={onDownload}
+                      idleIcon={<Download className="h-6 w-6" aria-hidden />}
+                    />
                   )}
                 </div>
               </div>

@@ -288,6 +288,17 @@ export async function fetchCookiesStatus(): Promise<boolean> {
 }
 
 /**
+ * One-click cookie setup: the server reads YouTube login cookies from a
+ * browser on its own device and validates them with a real fetch.
+ * This is the path for non-technical users; paste stays as fallback.
+ */
+export async function postCookiesImport(): Promise<{ ok: boolean; browser: string }> {
+  const r = await fetch(`${apiBase()}/api/cookies/import`, { method: "POST" });
+  if (!r.ok) throw new Error((await r.text()) || "import failed");
+  return (await r.json()) as { ok: boolean; browser: string };
+}
+
+/**
  * Install a cookies.txt on the server (same file the desktop reads from
  * its data dir). Paste a Netscape-format export taken while logged into
  * YouTube — that is what stops the source throttling downloads after a
