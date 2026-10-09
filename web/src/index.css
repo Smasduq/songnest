@@ -289,4 +289,10 @@
     outline: none;
     box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
   }
+
+  /* Opt-out for borderless inputs (search, auth): kills the global
+     focus ring above. Keyboard-focus cue is lost there by design. */
+  .no-focus-ring:focus-visible {
+    box-shadow: none;
+  }
 }

@@ -296,7 +296,7 @@ export function Header({
               onBlur={() => setFocused(false)}
               placeholder="Search artist or song"
               aria-label="Search artist or song"
-              className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-muted-foreground focus:outline-none no-focus-ring"
             />
             {query !== "" && (
               <button
