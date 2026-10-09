@@ -11,7 +11,7 @@ const THEME_KEY = "songnest-theme";
 
 export function loadTheme(): Theme {
   const raw = localStorage.getItem(THEME_KEY);
-  return raw === "dark" || raw === "system" ? raw : "light";
+  return raw === "dark" || raw === "light" ? raw : "system";
 }
 
 /** Apply theme to <html> and persist. Follows the OS when "system". */
