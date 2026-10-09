@@ -4,6 +4,7 @@ import { AnimatePresence, motion, MotionConfig, useReducedMotion } from "framer-
 
 import { NowPlaying } from "@/components/now-playing";
 import { NowPlayingSheet } from "@/components/now-playing-sheet";
+import { SettingsSheet } from "@/components/settings-sheet";
 import { MiniPlayer } from "@/components/mini-player";
 import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
@@ -126,6 +127,7 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2500);
   }
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const { theme, setTheme } = useTheme();
   const mainRef = useRef<HTMLElement>(null);
@@ -819,7 +821,7 @@ return (
           setHits([]);
           setSearchFailed(false);
         }}
-        onOpenSettings={() => go("diagnostics")}
+        onOpenSettings={() => setSettingsOpen(true)}
         onOpenSearch={() => {
           runSearch();
           go("search");
@@ -1194,6 +1196,32 @@ return (
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {settingsOpen && (
+          <SettingsSheet
+            onClose={() => setSettingsOpen(false)}
+            theme={theme}
+            onPickTheme={setTheme}
+            server={health}
+            serverUrl={getServerUrl()}
+            onSaveServerUrl={(url) => {
+              setServerUrl(url);
+              refreshLibrary();
+              fetchHealth()
+                .then(setHealth)
+                .catch(() => setHealth(null));
+            }}
+            onOpenDiagnostics={() => go("diagnostics")}
+            authed={health?.authed ?? false}
+            onAuthChange={() => {
+              fetchHealth()
+                .then(setHealth)
+                .catch(() => setHealth(null));
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {sheetOpen && (
