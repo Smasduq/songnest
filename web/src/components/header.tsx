@@ -281,7 +281,7 @@ export function Header({
                 ? { duration: 0 }
                 : { type: "spring", stiffness: 400, damping: 35 }
             }
-            className="flex h-full items-center gap-1 rounded-full border border-border/60 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none"
+            className="flex h-full items-center gap-1 rounded-full border-0 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none"
             style={{ zIndex: 10 }}
           >
             <input
