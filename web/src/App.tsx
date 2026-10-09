@@ -49,12 +49,10 @@ import {
   fetchLikes,
   fetchSuggestions,
   refreshArtists,
-  getServerUrl,
   likeKeyFor,
   resolveTrack,
   searchSongs,
   setLiked,
-  setServerUrl,
   waitForDownload,
   type DownloaderStatus,
   type Health,
@@ -775,7 +773,6 @@ return (
       <Header
         theme={theme}
         onPickTheme={setTheme}
-        server={health}
         query={query}
         onQueryChange={setQuery}
         onSubmitSearch={() => {
@@ -787,20 +784,10 @@ return (
           setHits([]);
           setSearchFailed(false);
         }}
-        serverUrl={getServerUrl()}
-        onSaveServerUrl={(url) => {
-          setServerUrl(url);
-          refreshLibrary();
-          fetchHealth()
-            .then(setHealth)
-            .catch(() => setHealth(null));
-        }}
         onOpenDiagnostics={() => go("diagnostics")}
-        authed={health?.authed ?? false}
-        onAuthChange={() => {
-          fetchHealth()
-            .then(setHealth)
-            .catch(() => setHealth(null));
+        accountEmail={account?.email ?? null}
+        onOpenAccount={() => {
+          window.location.hash = "#signin";
         }}
         className="hidden md:flex"
         page={page}
@@ -1203,22 +1190,11 @@ return (
             onClose={() => setSettingsOpen(false)}
             theme={theme}
             onPickTheme={setTheme}
-            server={health}
-            serverUrl={getServerUrl()}
-            onSaveServerUrl={(url) => {
-              setServerUrl(url);
-              refreshLibrary();
-              fetchHealth()
-                .then(setHealth)
-                .catch(() => setHealth(null));
+            accountEmail={account?.email ?? null}
+            onOpenAccount={() => {
+              window.location.hash = "#signin";
             }}
             onOpenDiagnostics={() => go("diagnostics")}
-            authed={health?.authed ?? false}
-            onAuthChange={() => {
-              fetchHealth()
-                .then(setHealth)
-                .catch(() => setHealth(null));
-            }}
           />
         )}
       </AnimatePresence>

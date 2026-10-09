@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { Search, Settings, X } from "lucide-react";
-import type { Health } from "@/lib/api";
 import { SettingsPanel } from "@/components/settings-panel";
 
 export type Theme = "light" | "dark" | "system";
@@ -36,31 +35,25 @@ export function useTheme() {
 export function Header({
   theme,
   onPickTheme,
-  server,
   query,
   onQueryChange,
   onSubmitSearch,
   onClearSearch,
-  serverUrl,
-  onSaveServerUrl,
   onOpenDiagnostics,
-  authed,
-  onAuthChange,
+  accountEmail,
+  onOpenAccount,
   className,
   page,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
-  server: Health | null;
   query: string;
   onQueryChange: (q: string) => void;
   onSubmitSearch: () => void;
   onClearSearch: () => void;
-  serverUrl: string;
-  onSaveServerUrl: (url: string) => void;
   onOpenDiagnostics: () => void;
-  authed: boolean;
-  onAuthChange: () => void;
+  accountEmail: string | null;
+  onOpenAccount: () => void;
   className?: string;
   page?: "home" | "search" | "library" | "liked" | "diagnostics";
 }) {
@@ -233,16 +226,15 @@ export function Header({
                 <SettingsPanel
                   theme={theme}
                   onPickTheme={onPickTheme}
-                  server={server}
-                  serverUrl={serverUrl}
-                  onSaveServerUrl={onSaveServerUrl}
+                  accountEmail={accountEmail}
+                  onOpenAccount={() => {
+                    setOpen(false);
+                    onOpenAccount();
+                  }}
                   onOpenDiagnostics={() => {
                     setOpen(false);
                     onOpenDiagnostics();
                   }}
-                  authed={authed}
-                  onAuthChange={onAuthChange}
-                  active={open}
                 />
               </motion.div>
           )}

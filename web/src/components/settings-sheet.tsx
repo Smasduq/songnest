@@ -3,7 +3,6 @@ import { motion, useDragControls } from "framer-motion";
 
 import { SettingsPanel } from "@/components/settings-panel";
 import type { Theme } from "@/components/header";
-import type { Health } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 
@@ -11,22 +10,16 @@ export function SettingsSheet({
   onClose,
   theme,
   onPickTheme,
-  server,
-  serverUrl,
-  onSaveServerUrl,
+  accountEmail,
+  onOpenAccount,
   onOpenDiagnostics,
-  authed,
-  onAuthChange,
 }: {
   onClose: () => void;
   theme: Theme;
   onPickTheme: (t: Theme) => void;
-  server: Health | null;
-  serverUrl: string;
-  onSaveServerUrl: (url: string) => void;
+  accountEmail: string | null;
+  onOpenAccount: () => void;
   onOpenDiagnostics: () => void;
-  authed: boolean;
-  onAuthChange: () => void;
 }) {
   const controls = useDragControls();
 
@@ -97,19 +90,15 @@ export function SettingsSheet({
           <SettingsPanel
             theme={theme}
             onPickTheme={onPickTheme}
-            server={server}
-            serverUrl={serverUrl}
-            onSaveServerUrl={(url) => {
-              onSaveServerUrl(url);
+            accountEmail={accountEmail}
+            onOpenAccount={() => {
+              onOpenAccount();
               onClose();
             }}
             onOpenDiagnostics={() => {
               onOpenDiagnostics();
               onClose();
             }}
-            authed={authed}
-            onAuthChange={onAuthChange}
-            active
           />
         </div>
       </motion.section>
