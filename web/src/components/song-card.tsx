@@ -287,10 +287,10 @@ export function SongCard({
             onSwipeLeft();
           }
         }}
-        className={`group/card relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+        className={`group/card relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border-0 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
-            ? "border border-foreground/40 bg-foreground/[0.08]"
-            : "border border-transparent bg-transparent hover:border-border/40 hover:bg-background/60"
+            ? "bg-foreground/[0.08]"
+            : "bg-transparent hover:bg-background/60"
         }`}
       ><button
         type="button"
@@ -298,7 +298,7 @@ export function SongCard({
           if (!tapGuard(e)) onPlay();
         }}
         aria-label={`Play ${song.title}`}
-        className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
+        className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border-0 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl"
       >
         {song.coverUrl !== "" && (
           <img
@@ -380,7 +380,7 @@ export function SongCard({
           title="Retry download"
           aria-label="Retry download"
           onClick={onDownload}
-          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-border/40 text-muted-foreground hover:text-foreground"
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-0 text-muted-foreground hover:text-foreground"
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
@@ -396,10 +396,10 @@ export function SongCard({
             setAnchor("button");
             setOpen((o) => !o);
           }}
-          className={`flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:text-foreground sm:h-9 sm:w-9 ${
+          className={`flex h-8 w-8 items-center justify-center rounded-full border-0 text-muted-foreground hover:text-foreground sm:h-9 sm:w-9 ${
             open
-              ? "border border-border/40 bg-background/60 backdrop-blur"
-              : "border border-transparent bg-transparent hover:border-border/40 hover:bg-background/60 hover:backdrop-blur focus-visible:border-border/40 focus-visible:bg-background/60"
+              ? "bg-background/60 backdrop-blur"
+              : "bg-transparent hover:bg-background/60 hover:backdrop-blur focus-visible:bg-background/60"
           }`}
         >
           <MoreVertical className="h-4 w-4" />
