@@ -5,7 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 // Importing icons from lucide-react
 import { ArrowRight, Mail, Gem, Lock, Eye, EyeOff, ArrowLeft, X, AlertCircle, PartyPopper, Loader } from "lucide-react";
 // Importing animation components from framer-motion
-import { AnimatePresence, motion, useInView, type Variants, type Transition, type MarginType } from "framer-motion";
+import { AnimatePresence, motion, useInView, type Variants, type Transition } from "framer-motion";
 
 // --- CONFETTI LOGIC ---
 import type { ReactNode } from "react"
@@ -74,10 +74,10 @@ export function TextLoop({ children, className, interval = 2, transition = { dur
 }
 
 // --- BUILT-IN BLUR FADE ANIMATION COMPONENT ---
-interface BlurFadeProps { children: React.ReactNode; className?: string; variant?: { hidden: { y: number }; visible: { y: number } }; duration?: number; delay?: number; yOffset?: number; inView?: boolean; inViewMargin?: MarginType; blur?: string; }
-function BlurFade({ children, className, variant, duration = 0.4, delay = 0, yOffset = 6, inView = true, inViewMargin = "-50px" as MarginType, blur = "6px" }: BlurFadeProps) {
+interface BlurFadeProps { children: React.ReactNode; className?: string; variant?: { hidden: { y: number }; visible: { y: number } }; duration?: number; delay?: number; yOffset?: number; inView?: boolean; inViewMargin?: string; blur?: string; }
+function BlurFade({ children, className, variant, duration = 0.4, delay = 0, yOffset = 6, inView = true, inViewMargin = "-50px", blur = "6px" }: BlurFadeProps) {
   const ref = useRef(null);
-  const inViewResult = useInView(ref, { once: true, margin: inViewMargin });
+  const inViewResult = useInView(ref, { once: true, margin: inViewMargin as never });
   const isInView = !inView || inViewResult;
   const defaultVariants: Variants = {
     hidden: { y: yOffset, opacity: 0, filter: `blur(${blur})` },

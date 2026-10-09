@@ -110,12 +110,55 @@ fn spawn_phone_server(app: &tauri::AppHandle) {
     });
 }
 
+/// OS-credential-store secrets for account tokens (see secure-store.ts).
+///
+/// Uses the platform keychain (macOS Keychain, Windows Credential Manager,
+/// Linux Secret Service, mobile keystores) via the `keyring` crate. Any
+/// platform failure is reported as a plain error string — never the secret
+/// — so the frontend can fall back to localStorage (browser dev).
+const SECRET_SERVICE: &str = "com.songnest.app";
+
+#[tauri::command]
+fn secret_set(key: String, value: String) -> Result<(), String> {
+    keyring::Entry::new(SECRET_SERVICE, &key)
+        .map_err(|e| format!("keychain unavailable: {e}"))?
+        .set_password(&value)
+        .map_err(|e| format!("keychain write failed: {e}"))
+}
+
+#[tauri::command]
+fn secret_get(key: String) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(SECRET_SERVICE, &key)
+        .map_err(|e| format!("keychain unavailable: {e}"))?;
+    match entry.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("keychain read failed: {e}")),
+    }
+}
+
+#[tauri::command]
+fn secret_delete(key: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(SECRET_SERVICE, &key)
+        .map_err(|e| format!("keychain unavailable: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keychain delete failed: {e}")),
+    }
+}
+
 fn builder() {
     let backend: ChildSlot = Arc::new(Mutex::new(None));
     let slot = backend.clone();
     let exit_slot = backend.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            secret_set,
+            secret_get,
+            secret_delete
+        ])
         .setup(move |app| {
             #[cfg(desktop)]
             spawn_backend(&app.handle(), &slot);
