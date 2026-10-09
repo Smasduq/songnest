@@ -7,13 +7,21 @@
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod password;
+pub mod ratelimit;
 pub mod routes;
+pub mod tokens;
 
-use axum::{Router, http::HeaderValue, routing::get};
+use axum::{
+    Router,
+    http::HeaderValue,
+    routing::{get, post},
+};
+use std::time::Duration;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::config::Config;
+use crate::{config::Config, ratelimit::RateLimitLayer};
 
 /// Shared state for all handlers.
 #[derive(Clone)]
@@ -26,9 +34,29 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(routes::health::health))
+        .merge(auth_router(&state))
         .layer(RequestBodyLimitLayer::new(state.config.max_body_bytes))
         .layer(strict_cors(&state.config))
         .with_state(state)
+}
+
+/// Credential endpoints with a per-IP brute-force guard (token bucket:
+/// `auth_per_minute` requests per 60s window).
+///
+/// NOTE: behind the Caddy reverse proxy the peer IP is loopback for all
+/// clients; per-user throttling on top is a TODO once login-identity
+/// keying is added (see routes::auth).
+fn auth_router(state: &AppState) -> Router<AppState> {
+    Router::new()
+        .route("/auth/signup", post(routes::auth::signup))
+        .route("/auth/login", post(routes::auth::login))
+        .route("/auth/refresh", post(routes::auth::refresh))
+        .route("/auth/logout", post(routes::auth::logout))
+        .route("/me", get(routes::auth::me))
+        .layer(RateLimitLayer::new(
+            state.config.auth_per_minute.max(1) as u32,
+            Duration::from_secs(60),
+        ))
 }
 
 /// Exact-match CORS: only configured origins, common API methods/headers.

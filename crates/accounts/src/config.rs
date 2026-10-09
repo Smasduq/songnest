@@ -39,10 +39,17 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
+        let jwt_secret = require_env("SONGNEST_JWT_SECRET")?;
+        if jwt_secret.len() < 32 {
+            return Err(AppError::from(ConfigError::Invalid {
+                var: "SONGNEST_JWT_SECRET".to_owned(),
+                reason: "must be at least 32 bytes (see .env.example)".to_owned(),
+            }));
+        }
         Ok(Self {
             bind: parse_env("SONGNEST_ACCOUNTS_BIND", DEFAULT_BIND)?,
             database_url: require_env("DATABASE_URL")?,
-            jwt_secret: require_env("SONGNEST_JWT_SECRET")?,
+            jwt_secret,
             access_ttl: Duration::from_secs(parse_env(
                 "SONGNEST_ACCESS_TTL_SECS",
                 &DEFAULT_ACCESS_TTL_SECS.to_string(),
@@ -137,6 +144,9 @@ mod tests {
                 std::env::set_var("SONGNEST_JWT_SECRET", v);
             }
         }
-        assert!(err.contains("DATABASE_URL"), "unexpected error: {err}");
+        assert!(
+            err.contains("environment variable"),
+            "unexpected error: {err}"
+        );
     }
 }
