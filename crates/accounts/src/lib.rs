@@ -47,16 +47,25 @@ pub fn router(state: AppState) -> Router {
 /// clients; per-user throttling on top is a TODO once login-identity
 /// keying is added (see routes::auth).
 fn auth_router(state: &AppState) -> Router<AppState> {
+    // Credential endpoints only: /me and /sync/* stay outside the
+    // brute-force budget (sync pulls run on every launch).
     Router::new()
         .route("/auth/signup", post(routes::auth::signup))
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/refresh", post(routes::auth::refresh))
         .route("/auth/logout", post(routes::auth::logout))
-        .route("/me", get(routes::auth::me))
         .layer(RateLimitLayer::new(
             state.config.auth_per_minute.max(1) as u32,
             Duration::from_secs(60),
         ))
+        .merge(api_router())
+}
+
+fn api_router() -> Router<AppState> {
+    Router::new()
+        .route("/me", get(routes::auth::me))
+        .route("/sync/likes", get(routes::sync::pull_likes))
+        .route("/sync/likes", post(routes::sync::push_likes))
 }
 
 /// Exact-match CORS: only configured origins, common API methods/headers.

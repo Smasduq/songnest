@@ -32,4 +32,4 @@ sha2 = "0.10"
 hex = "0.4"
 
 [dev-dependencies]
-axum-test = "16"
+reqwest = { workspace = true }

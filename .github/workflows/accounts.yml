@@ -1,0 +1,55 @@
+name: accounts
+
+# Checks for the songnest-accounts service: fmt, clippy, unit tests and
+# the live-Postgres integration tests (tests/api.rs needs TEST_DATABASE_URL,
+# provided here by the postgres service).
+
+on:
+  push:
+    paths:
+      - "crates/accounts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/accounts.yml"
+  pull_request:
+    paths:
+      - "crates/accounts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: songnest
+          POSTGRES_PASSWORD: songnest-test
+          POSTGRES_DB: songnest_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U songnest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://songnest:songnest-test@127.0.0.1:5432/songnest_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: fmt
+        run: cargo fmt -p songnest-accounts -- --check
+
+      - name: clippy
+        run: cargo clippy -p songnest-accounts --all-targets -- -D warnings
+
+      - name: test (unit + live-DB integration)
+        run: cargo test -p songnest-accounts
