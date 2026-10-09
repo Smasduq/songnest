@@ -7,7 +7,25 @@ import { NowPlayingSheet } from "@/components/now-playing-sheet";
 import { MiniPlayer } from "@/components/mini-player";
 import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
+import { AccountCard } from "@/components/account-card";
 import AuthPage from "@/pages/auth";
+import {
+  AccountsError,
+  dropPushed,
+  enqueueChange,
+  getCursor,
+  isLocalOnly,
+  loadOutbox,
+  loadSession,
+  logout,
+  pullLikes,
+  pushLikes,
+  setCursor,
+  syncWithBackoff,
+  toChange,
+  type RemoteLike,
+  type Session,
+} from "@/lib/accounts";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { MobileHeader } from "@/components/mobile-header";
@@ -351,13 +369,209 @@ export default function App() {
     const key = likeKeyFor(song);
     if (key === null) return;
     const next = !likes.has(key);
+    // Optimistic: the heart fills instantly, even offline.
+    setLikes((prev) => {
+      const n = new Set(prev);
+      if (next) n.add(key);
+      else n.delete(key);
+      return n;
+    });
+    setLikedRows((prev) =>
+      next
+        ? [
+            ...prev.filter((r) => r.key !== key),
+            {
+              key,
+              title: song.title,
+              artist: song.artist,
+              album: song.album,
+              cover: song.coverUrl,
+            },
+          ]
+        : prev.filter((r) => r.key !== key)
+    );
     try {
       await setLiked(song, next);
       await refreshLikes();
     } catch {
-      // backend unreachable — ignore
+      // Music server unreachable (offline): local state already updated;
+      // the account sync below still queues the change.
+    }
+    const session = accountRef.current;
+    if (session !== null) {
+      const change = toChange(song, next);
+      // null → local-only like (library row without a Deezer ID):
+      // stays on this device, never uploaded.
+      if (change !== null) {
+        enqueueChange(session.userId, change);
+        scheduleSync();
+      }
     }
   }
+
+  // --- Account + liked-songs sync --------------------------------------
+  const [account, setAccount] = useState<Session | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const accountRef = useRef<Session | null>(null);
+  const syncActive = useRef(false);
+  const syncCancel = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    accountRef.current = account;
+  }, [account]);
+
+  /** Apply one server change to the music server + local state. Throws
+   *  offline so the cursor does not advance past unapplied changes. */
+  async function applyRemoteLike(change: RemoteLike): Promise<void> {
+    const m = /^dz:(\d+)$/.exec(change.track_id);
+    if (m === null) return;
+    const dz = Number(m[1]);
+    const song: Song = {
+      id: `dz-${dz}`,
+      title: change.title,
+      artist: change.artist,
+      album: change.album,
+      duration: 0,
+      coverUrl: change.cover,
+      streamUrl: "",
+      deezerId: dz,
+    };
+    await setLiked(song, change.liked);
+    const key = `dz:${dz}`;
+    setLikes((prev) => {
+      const n = new Set(prev);
+      if (change.liked) n.add(key);
+      else n.delete(key);
+      return n;
+    });
+    setLikedRows((prev) =>
+      change.liked
+        ? [
+            ...prev.filter((r) => r.key !== key),
+            {
+              key,
+              title: change.title,
+              artist: change.artist,
+              album: change.album,
+              cover: change.cover,
+            },
+          ]
+        : prev.filter((r) => r.key !== key)
+    );
+  }
+
+  /** Push queued changes, then pull + apply. Merge-safe: push first so
+   *  local edits are on the server before remote state is applied. */
+  async function runSync(session: Session): Promise<void> {
+    if (syncActive.current) return;
+    syncActive.current = true;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      for (;;) {
+        const batch = loadOutbox(session.userId).slice(0, 500);
+        if (batch.length === 0) break;
+        await pushLikes(batch);
+        dropPushed(session.userId, batch.length);
+      }
+      let since = getCursor(session.userId);
+      for (;;) {
+        const { changes, cursor } = await pullLikes(since);
+        for (const c of changes) {
+          await applyRemoteLike(c);
+          since = c.version;
+          setCursor(session.userId, since);
+        }
+        if (changes.length < 500) {
+          setCursor(session.userId, Math.max(since, cursor));
+          break;
+        }
+      }
+    } catch (e) {
+      if (e instanceof AccountsError && e.code === "logged-out") {
+        setAccount(null);
+      } else {
+        setSyncError(
+          e instanceof AccountsError ? e.message : "Sync failed — will retry."
+        );
+      }
+      throw e;
+    } finally {
+      syncActive.current = false;
+      setSyncing(false);
+    }
+  }
+
+  function scheduleSync(): void {
+    syncCancel.current?.();
+    syncCancel.current = syncWithBackoff(async () => {
+      const session = accountRef.current;
+      if (session !== null) await runSync(session);
+    });
+  }
+
+  /** First login: seed the outbox from existing local likes so neither
+   *  side is overwritten — local and server merge via last-write-wins. */
+  function seedOutboxFromLocal(session: Session): void {
+    const byDbId = new Map(library.map((t) => [t.id, t]));
+    for (const row of likedRows) {
+      if (/^dz:\d+$/.test(row.key)) {
+        enqueueChange(session.userId, {
+          track_id: row.key,
+          liked: true,
+          updated_at: new Date().toISOString(),
+          title: row.title,
+          artist: row.artist,
+          album: row.album,
+          cover: row.cover,
+        });
+        continue;
+      }
+      const dbm = /^db:(\d+)$/.exec(row.key);
+      if (dbm !== null) {
+        const song = byDbId.get(`db-${dbm[1]}`);
+        // TODO(resolve): upgrade db-only likes to dz: IDs via Deezer
+        // search + match scoring so they can sync; until then they stay
+        // local and are never uploaded.
+        const change = song !== undefined ? toChange(song, true) : null;
+        if (change !== null) enqueueChange(session.userId, change);
+      }
+    }
+  }
+
+  function handleAuthed(session: Session): void {
+    seedOutboxFromLocal(session);
+    setAccount(session);
+    window.location.hash = "";
+    setIsAuthRoute(false);
+    runSync(session).catch(() => {
+      // Error state is set inside runSync; retry is scheduled by callers.
+    });
+  }
+
+  async function handleSignOut(): Promise<void> {
+    syncCancel.current?.();
+    await logout();
+    setAccount(null);
+    showToast("Signed out");
+  }
+
+  useEffect(() => {
+    loadSession().then((session) => {
+      if (session !== null) {
+        setAccount(session);
+        runSync(session).catch(() => {});
+      }
+    });
+    const onOnline = () => scheduleSync();
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      syncCancel.current?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function downloadSong(dz: number, mapKey: string) {
     const now = Date.now();
@@ -507,6 +721,7 @@ export default function App() {
         }
         onAddToQueue={() => addToQueue(song)}
         onPlay={onPlay}
+        localOnly={isLocalOnly(song)}
       />
     );
   }
@@ -541,6 +756,7 @@ export default function App() {
     return (
       <MotionConfig reducedMotion="user">
         <AuthPage
+          onAuthed={handleAuthed}
           onBack={() => {
             window.location.hash = "";
             setIsAuthRoute(false);
@@ -619,6 +835,10 @@ return (
             onNavigate={go}
             libraryCount={library.length}
             likedCount={likes.size}
+            accountEmail={account?.email ?? null}
+            onOpenAccount={() => {
+              window.location.hash = "#signin";
+            }}
           />
         </div>
 
@@ -886,7 +1106,17 @@ return (
           )}
 
           {page === "diagnostics" && (
-            <div className="md:mx-4">
+            <div className="space-y-3 md:mx-4">
+              <AccountCard
+                email={account?.email ?? null}
+                syncing={syncing}
+                lastError={syncError}
+                onSignIn={() => {
+                  window.location.hash = "#signin";
+                }}
+                onSignOut={() => void handleSignOut()}
+                onSyncNow={() => scheduleSync()}
+              />
               <Diagnostics onToast={showToast} />
             </div>
           )}

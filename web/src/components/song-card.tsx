@@ -50,6 +50,8 @@ interface Props {
   onSwipeLeft: () => void;
   onAddToQueue: () => void;
   onPlay: () => void;
+  /** Library rows without a Deezer ID stay on this device (see accounts sync). */
+  localOnly?: boolean;
 }
 
 export function SongCard({
@@ -67,6 +69,7 @@ export function SongCard({
   onSwipeLeft,
   onAddToQueue,
   onPlay,
+  localOnly = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   // "button": opened from ⋯ (anchor under it); "cursor": right-click /
@@ -339,6 +342,7 @@ export function SongCard({
         </p>
         <p className="truncate text-xs text-muted-foreground">
           {song.artist} · {song.album}
+          {localOnly ? " · local only" : ""}
         </p>
         <p className="mt-0.5 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
           {formatTime(song.duration)}

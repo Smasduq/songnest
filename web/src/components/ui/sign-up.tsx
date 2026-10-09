@@ -158,12 +158,24 @@ const TEXT_LOOP_INTERVAL = 1.5;
 const DefaultLogo = () => ( <div className="bg-primary text-primary-foreground rounded-md p-1.5"> <Gem className="h-4 w-4" /> </div> );
 
 // --- MAIN COMPONENT ---
+export type AuthMode = "signup" | "login";
+
 interface AuthComponentProps {
   logo?: React.ReactNode;
   brandName?: string;
+  /** Signup (email → password → confirm) or login (email → password). */
+  mode?: AuthMode;
+  /** Shown under the form when provided; flips `mode`. */
+  onModeChange?: (mode: AuthMode) => void;
+  /**
+   * Real submit handler (e.g. API signup/login). Reject with an Error
+   * whose message is safe to show. When absent, the original mock
+   * success flow runs (demos only).
+   */
+  onSubmit?: (email: string, password: string) => Promise<void>;
 }
 
-export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize" }: AuthComponentProps) => {
+export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize", mode = "signup", onModeChange, onSubmit }: AuthComponentProps) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -175,8 +187,8 @@ export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize" }
   const confettiRef = useRef<ConfettiRef>(null);
 
   const isEmailValid = /\S+@\S+\.\S+/.test(email);
-  const isPasswordValid = password.length >= 6;
-  const isConfirmPasswordValid = confirmPassword.length >= 6;
+  const isPasswordValid = password.length >= 8;
+  const isConfirmPasswordValid = confirmPassword.length >= 8;
 
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const confirmPasswordInputRef = useRef<HTMLInputElement>(null);
@@ -191,13 +203,20 @@ export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize" }
     }
   };
 
-  const handleFinalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (modalStatus !== 'closed' || authStep !== 'confirmPassword') return;
-
-    if (password !== confirmPassword) {
-        setModalErrorMessage("Passwords do not match!");
-        setModalStatus('error');
+  const doSubmit = () => {
+    if (modalStatus !== 'closed') return;
+    if (onSubmit) {
+        setModalStatus('loading');
+        onSubmit(email, password).then(
+            () => {
+                fireSideCanons();
+                setModalStatus('success');
+            },
+            (e: unknown) => {
+                setModalErrorMessage(e instanceof Error ? e.message : "Something went wrong — try again.");
+                setModalStatus('error');
+            }
+        );
     } else {
         setModalStatus('loading');
         const loadingStepsCount = modalSteps.length - 1;
@@ -209,11 +228,26 @@ export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize" }
     }
   };
 
+  const handleFinalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (modalStatus !== 'closed' || authStep !== 'confirmPassword') return;
+
+    if (password !== confirmPassword) {
+        setModalErrorMessage("Passwords do not match!");
+        setModalStatus('error');
+    } else {
+        doSubmit();
+    }
+  };
+
   const handleProgressStep = () => {
     if (authStep === 'email') {
         if (isEmailValid) setAuthStep("password");
     } else if (authStep === 'password') {
-        if (isPasswordValid) setAuthStep("confirmPassword");
+        if (!isPasswordValid) return;
+        // Login has no confirm step: the password arrow submits.
+        if (mode === 'login') doSubmit();
+        else setAuthStep("confirmPassword");
     }
   };
 
@@ -315,7 +349,7 @@ useEffect(() => {
                     </motion.div>}
                     {authStep === "password" && <motion.div key="password-title" initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: "easeOut" }} className="w-full flex flex-col items-center text-center gap-4">
                         <BlurFade delay={0} className="w-full"><div className="text-center"><p className="font-serif font-light text-4xl sm:text-5xl tracking-tight text-foreground whitespace-nowrap">Create your password</p></div></BlurFade>
-                        <BlurFade delay={0.25 * 1}><p className="text-sm font-medium text-muted-foreground">Your password must be at least 6 characters long.</p></BlurFade>
+                        <BlurFade delay={0.25 * 1}><p className="text-sm font-medium text-muted-foreground">Your password must be at least 8 characters long.</p></BlurFade>
                     </motion.div>}
                      {authStep === "confirmPassword" && <motion.div key="confirm-title" initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease: "easeOut" }} className="w-full flex flex-col items-center text-center gap-4">
                          <BlurFade delay={0} className="w-full"><div className="text-center"><p className="font-serif font-light text-4xl sm:text-5xl tracking-tight text-foreground whitespace-nowrap">One Last Step</p></div></BlurFade>
@@ -378,6 +412,15 @@ useEffect(() => {
                         </BlurFade>}
                     </AnimatePresence>
                 </form>
+                {onModeChange && (
+                    <button
+                        type="button"
+                        onClick={() => onModeChange(mode === 'login' ? 'signup' : 'login')}
+                        className="text-sm text-foreground/70 hover:text-foreground transition-colors"
+                    >
+                        {mode === 'login' ? "New here? Create an account" : "Already have an account? Log in"}
+                    </button>
+                )}
             </fieldset>
         </div>
     </div>

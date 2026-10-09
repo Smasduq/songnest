@@ -1,4 +1,4 @@
-import { Heart, Home, Library, Search, Wrench } from "lucide-react";
+import { CircleUserRound, Heart, Home, Library, Search, Wrench } from "lucide-react";
 
 export type Page = "home" | "library" | "liked" | "search" | "diagnostics";
 
@@ -7,6 +7,8 @@ interface Props {
   onNavigate: (page: Page) => void;
   libraryCount: number;
   likedCount: number;
+  accountEmail: string | null;
+  onOpenAccount: () => void;
 }
 
 const linkCls = (on: boolean) =>
@@ -21,6 +23,8 @@ export function Sidebar({
   onNavigate,
   libraryCount,
   likedCount,
+  accountEmail,
+  onOpenAccount,
 }: Props) {
   return (
     <aside className="scroller flex h-full w-60 flex-shrink-0 flex-col gap-1 rounded-3xl border border-border/40 bg-background/60 p-3 backdrop-blur-xl">
@@ -57,6 +61,14 @@ export function Sidebar({
       >
         <Wrench className="h-4 w-4" />
         Diagnostics
+      </button>
+      <button
+        type="button"
+        onClick={onOpenAccount}
+        className={linkCls(false)}
+      >
+        <CircleUserRound className="h-4 w-4" />
+        <span className="truncate">{accountEmail ?? "Sign in"}</span>
       </button>
       <div className="mt-auto px-3 pb-1 pt-4 text-xs leading-relaxed text-muted-foreground">
         Downloads live in your library. Streams play from the server on :8787.

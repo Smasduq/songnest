@@ -1,21 +1,16 @@
-import { AuthComponent } from "@/components/ui/sign-up";
+import { useState } from "react";
+
+import { AuthComponent, type AuthMode } from "@/components/ui/sign-up";
+import { login, signup, type Session } from "@/lib/accounts";
 
 /**
  * Songnest sign-in / sign-up page.
  *
- * Props/data:
- * - No props required; renders full-screen. Pass `logo`/`brandName`
- *   through to AuthComponent when rebranding.
- * State:
- * - All form state (email -> password -> confirm) lives inside
- *   AuthComponent; this page is stateless apart from the optional
- *   back navigation.
- * Assets:
- * - Uses the existing `/songnest-logo.png` (public/) with the
- *   theme-adaptive `.logo-mark` class — no new images needed.
- * Responsive:
- * - AuthComponent is full-screen (min-h-screen w-screen) and centers
- *   a 280-300px column; works on mobile and desktop as-is.
+ * Wraps AuthComponent (visuals untouched) with real API calls:
+ * signup mode creates the account, login mode signs in. On success the
+ * caller (`onAuthed`) runs the first merge + sync.
+ *
+ * No props required besides `onAuthed`; renders full-screen.
  */
 
 function SongnestLogo() {
@@ -28,7 +23,14 @@ function SongnestLogo() {
   );
 }
 
-export default function AuthPage({ onBack }: { onBack?: () => void }) {
+export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Session) => void; onBack?: () => void }) {
+  const [mode, setMode] = useState<AuthMode>("signup");
+
+  async function handleSubmit(email: string, password: string): Promise<void> {
+    const session = mode === "login" ? await login(email, password) : await signup(email, password);
+    onAuthed(session);
+  }
+
   return (
     <div className="relative">
       {onBack !== undefined && (
@@ -40,7 +42,14 @@ export default function AuthPage({ onBack }: { onBack?: () => void }) {
           ← Back to app
         </button>
       )}
-      <AuthComponent logo={<SongnestLogo />} brandName="Songnest" />
+      <AuthComponent
+        key={mode}
+        logo={<SongnestLogo />}
+        brandName="Songnest"
+        mode={mode}
+        onModeChange={setMode}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }
