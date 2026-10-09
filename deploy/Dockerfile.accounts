@@ -1,0 +1,25 @@
+# songnest-accounts — multi-stage build.
+#
+# Target is a Linux/aarch64 VM (Oracle Cloud free tier): build ON the VM
+# (`docker build .`) so no cross toolchain is needed. sqlx here uses only
+# dynamic queries plus compile-embedded migrations, so the build needs no
+# live database (no DATABASE_URL at build time).
+#
+#   docker build -f deploy/Dockerfile.accounts -t songnest-accounts .
+#   docker run --network host --env-file /etc/songnest/accounts.env songnest-accounts
+
+FROM docker.io/library/rust:1-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY crates/accounts ./crates/accounts
+# Workspace deps of the accounts crate only; the binary is self-contained.
+RUN cargo build --release -p songnest-accounts
+
+FROM docker.io/library/debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/songnest-accounts /usr/local/bin/songnest-accounts
+# The service binds loopback by default; Caddy (see Caddyfile) terminates TLS.
+EXPOSE 8788
+ENTRYPOINT ["/usr/local/bin/songnest-accounts"]

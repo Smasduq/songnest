@@ -1,0 +1,10 @@
+# Caddy reverse proxy for songnest-accounts.
+# TLS is automatic (Let's Encrypt). The API itself stays on loopback.
+#
+# NOTE: the in-app per-IP rate limiter sees Caddy's loopback address for
+# every client behind this proxy. Per-user throttling is a TODO (see
+# crates/accounts/src/lib.rs).
+
+accounts.example.com {
+	reverse_proxy 127.0.0.1:8788
+}

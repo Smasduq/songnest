@@ -1,0 +1,24 @@
+[Unit]
+Description=Songnest accounts and liked-songs sync API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=songnest
+Group=songnest
+# Secrets and config live here, NOT in the unit file. See
+# crates/accounts/.env.example for every variable.
+EnvironmentFile=/etc/songnest/accounts.env
+ExecStart=/usr/local/bin/songnest-accounts
+Restart=on-failure
+RestartSec=5
+# Hardening: no need for much here (loopback-only HTTP service).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/songnest-accounts
+
+[Install]
+WantedBy=multi-user.target
