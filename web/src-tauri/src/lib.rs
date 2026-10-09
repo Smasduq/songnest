@@ -3,6 +3,8 @@
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, RunEvent};
 
+mod player;
+
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
 
 /// Locate the songnest backend binary:
@@ -154,12 +156,16 @@ fn builder() {
     let exit_slot = backend.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_native_audio::init())
         .invoke_handler(tauri::generate_handler![
             secret_set,
             secret_get,
             secret_delete
         ])
         .setup(move |app| {
+            // Tray + close-to-hide (desktop): the background player shell.
+            // Mobile is a no-op here; its player lives in the native service.
+            player::setup(app)?;
             #[cfg(desktop)]
             spawn_backend(&app.handle(), &slot);
             #[cfg(not(desktop))]
@@ -177,11 +183,26 @@ fn builder() {
             );
             Ok(())
         })
-        .on_window_event(move |_, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Some(mut child) = backend.lock().unwrap().take() {
-                    let _ = child.kill();
+        .on_window_event(move |window, event| {
+            match event {
+                // Desktop background playback: closing the window hides it
+                // to the tray instead of stopping the music. Real exit goes
+                // through the tray "Quit" item (RunEvent::ExitRequested).
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    #[cfg(desktop)]
+                    {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
+                    #[cfg(not(desktop))]
+                    let _ = (window, api);
                 }
+                tauri::WindowEvent::Destroyed => {
+                    if let Some(mut child) = backend.lock().unwrap().take() {
+                        let _ = child.kill();
+                    }
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

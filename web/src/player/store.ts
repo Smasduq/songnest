@@ -1,6 +1,17 @@
 import { create } from "zustand";
 
 import { resolveTrack, type Song } from "@/lib/api";
+import {
+  isNativePlaying,
+  nativeDuration,
+  nativeLoad,
+  nativePause,
+  nativePlay,
+  nativePosition,
+  nativeSeek,
+  nativeStop,
+  preferNativeTransport,
+} from "@/native/background-player";
 
 export type { Song };
 
@@ -109,6 +120,20 @@ function combined(queue: Song[], library: Song[]): Song[] {
   return [...queue, ...library];
 }
 
+/**
+ * Transport position/duration behind the active engine: the native phone
+ * player (Media3/AVPlayer) or the WebView `<audio>` element. Never touch
+ * `audio.*` on the native path — the element stays idle so nothing can
+ * double-play.
+ */
+function curPos(): number {
+  return preferNativeTransport() ? nativePosition() : audio.currentTime;
+}
+
+function curDur(): number {
+  return preferNativeTransport() ? nativeDuration() : audio.duration || 0;
+}
+
 /** Drop play-now placeholders that are no longer current. The playing
  *  index follows its track; library offsets shift with the queue. */
 function pruneTransient() {
@@ -136,6 +161,10 @@ function pruneTransient() {
 }
 
 function playCurrentElement() {
+  if (preferNativeTransport()) {
+    void nativePlay();
+    return;
+  }
   audio.play().catch((e: unknown) => {
     // Rapid track switches reject the earlier play(): normal, silent.
     if (e instanceof DOMException && e.name === "AbortError") return;
@@ -163,6 +192,14 @@ function loadAt(index: number) {
   }
   retriesLeft = 1;
   usePlayer.setState({ index, error: null });
+  if (preferNativeTransport()) {
+    // Native owns the element-free path: hand over URL + metadata, play.
+    // Progress/ended/error come back through the native state listener.
+    usePlayer.setState({ buffering: true });
+    void nativeLoad(track);
+    pruneTransient();
+    return;
+  }
   if (audio.getAttribute("src") !== track.streamUrl) {
     audio.src = track.streamUrl;
     // streams buffer over the network; downloaded tracks play off disk,
@@ -175,6 +212,24 @@ function loadAt(index: number) {
 
 /** Reload the current src once (expired proxy URL), resume where we were. */
 function recoverStream() {
+  if (preferNativeTransport()) {
+    // Native errors surface through the state listener; a retry here just
+    // re-hands the current track to the engine with the same budget.
+    if (retriesLeft <= 0) {
+      usePlayer.setState({
+        error: "Stream failed. Check connection or try another track.",
+      });
+      return;
+    }
+    retriesLeft--;
+    const { queue, library, index } = usePlayer.getState();
+    const track = combined(queue, library)[index];
+    if (track?.streamUrl !== undefined && track.streamUrl !== "") {
+      usePlayer.setState({ buffering: true });
+      void nativeLoad(track);
+    }
+    return;
+  }
   if (!audio.getAttribute("src")) return; // element was emptied on purpose
   if (retriesLeft <= 0) {
     usePlayer.setState({
@@ -406,9 +461,13 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     // removing what's playing: continue with whatever is now there
     const total = next.length + library.length;
     if (total === 0 || index >= total) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      if (preferNativeTransport()) {
+        void nativeStop();
+      } else {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
       set({ queue: next, transientIds: live, index: 0, playing: false, buffering: false });
       return;
     }
@@ -417,6 +476,12 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   toggle: () => {
+    if (preferNativeTransport()) {
+      usePlayer.setState({ error: null });
+      if (isNativePlaying()) void nativePause();
+      else void nativePlay();
+      return;
+    }
     if (audio.paused) {
       usePlayer.setState({ error: null });
       playCurrentElement();
@@ -450,14 +515,21 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const { queue, library, index } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
-    if (audio.currentTime > 3) {
-      audio.currentTime = 0; // standard: restart first, then go back
+    if (curPos() > 3) {
+      // standard: restart first, then go back
+      if (preferNativeTransport()) void nativeSeek(0);
+      else audio.currentTime = 0;
       return;
     }
     loadAt((index - 1 + total) % total);
   },
 
   seekTo: (ratio) => {
+    const at = Math.min(1, Math.max(0, ratio)) * curDur();
+    if (preferNativeTransport()) {
+      if (curDur() > 0) void nativeSeek(at);
+      return;
+    }
     if (audio.duration) {
       audio.currentTime =
         Math.min(1, Math.max(0, ratio)) * audio.duration;
@@ -465,6 +537,13 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   seekBy: (seconds) => {
+    if (preferNativeTransport()) {
+      const d = curDur();
+      if (d > 0) {
+        void nativeSeek(Math.min(Math.max(0, curPos() + seconds), d));
+      }
+      return;
+    }
     if (audio.duration) {
       audio.currentTime = Math.min(
         Math.max(0, audio.currentTime + seconds),
@@ -475,6 +554,17 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
 
   setVolume: (v) => {
     const clamped = Math.min(1, Math.max(0, v));
+    if (preferNativeTransport()) {
+      // Phones use hardware buttons; the plugin exposes no gain API.
+      // Remember the choice for desktop/browser sessions anyway.
+      try {
+        localStorage.setItem(VOL_KEY, String(clamped));
+      } catch {
+        // ignore
+      }
+      set({ volume: clamped });
+      return;
+    }
     audio.volume = clamped;
     // Volume-up is an explicit want-to-hear: drop any mute. Volume-down to
     // 0 just goes silent through the gain — it never sets the mute flag,
@@ -486,6 +576,16 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   toggleMute: () => {
+    if (preferNativeTransport()) {
+      const next = !get().muted;
+      try {
+        localStorage.setItem(MUTE_KEY, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      set({ muted: next });
+      return;
+    }
     const next = !get().muted;
     audio.muted = next;
     persistVolume();

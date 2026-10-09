@@ -37,6 +37,7 @@ import { EmptyState, OfflineState } from "@/components/empty-state";
 import { Disc3, Heart, Library, SearchX } from "lucide-react";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
+import { initBackgroundPlayer } from "@/native/background-player";
 import {
   deleteTrack,
   dzOf,
@@ -193,6 +194,12 @@ export default function App() {
     } catch {
       // backend unreachable — keep previous state
     }
+  }, []);
+
+  // Background player boot (once): native phone engine when available,
+  // desktop tray/MediaSession wiring otherwise. Never blocks first paint.
+  useEffect(() => {
+    void initBackgroundPlayer();
   }, []);
 
   useEffect(() => {

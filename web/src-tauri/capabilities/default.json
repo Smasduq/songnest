@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capabilities for the main window.",
   "windows": ["main"],
-  "permissions": ["opener:allow-open-url"]
+  "permissions": ["opener:allow-open-url", "core:event:allow-listen", "native-audio:default"]
 }

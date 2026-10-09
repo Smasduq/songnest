@@ -11,10 +11,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 keyring = "4"
+# Background playback on phones: Media3 ExoPlayer + MediaSessionService
+# (Android) / AVPlayer (iOS). Vendored fork (path dep) of
+# tauri-plugin-native-audio 1.0.5 — see plugins/native-audio/FORK.md:
+# song artwork on the notification/lockscreen card + prev/next buttons
+# that forward into the app queue. Desktop builds compile it as a no-op;
+# the desktop background player is the tray + hide-to-close in player.rs.
+tauri-plugin-native-audio = { path = "plugins/native-audio" }
 songnest-server = { path = "../../crates/server" }
 tokio = { version = "1", features = ["full"] }
 tauri-plugin-opener = "2"

@@ -14,7 +14,9 @@ What works today:
 - Source health and diagnostics screen (backend versions, update status,
   cooldown state).
 - Desktop app (Tauri) that spawns and manages the backend automatically.
-- Android builds are **experimental** (thin client over your local network).
+- Background playback: native notification + lockscreen controls on
+  Android (Media3), tray + close-to-tray with OS media keys on desktop.
+- Android builds are **experimental** (on-device server + native player).
 
 Planned or experimental:
 

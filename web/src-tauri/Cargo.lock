@@ -3916,6 +3916,7 @@ dependencies = [
  "songnest-server",
  "tauri",
  "tauri-build",
+ "tauri-plugin-native-audio",
  "tauri-plugin-opener",
  "tokio",
 ]
@@ -4281,6 +4282,14 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-native-audio"
+version = "1.0.5"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

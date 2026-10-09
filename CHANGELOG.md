@@ -5,6 +5,16 @@ Releases are cut from tags like `v0.1.0-alpha.2`.
 
 ## Unreleased
 
+- Background playback on both platforms: Android plays through a native
+  Media3 service (notification, lockscreen controls, audio focus, survives
+  backgrounding); desktop hides to the system tray instead of quitting on
+  close, with tray transport actions and OS media-key metadata.
+  Phone queue/transport logic is unchanged — only the audio engine swaps.
+- Android lockscreen/notification card shows the song cover with
+  prev/play/next (vendored player fork, see
+  `web/src-tauri/plugins/native-audio/FORK.md`); track buttons forward
+  into the app queue, so repeat/shuffle keep working from the lockscreen.
+
 ## v0.1.0-alpha.2 — 2026-10-07
 
 - Offline and empty states with big centered icons instead of
