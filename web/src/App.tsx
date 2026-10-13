@@ -579,6 +579,9 @@ export default function App() {
     if (accountRef.current !== null) go("profile");
     else window.location.hash = "#signin";
   }, []);
+  const handleProfileLoggedOut = useCallback(() => {
+    setAccount(null);
+  }, []);
 
   useEffect(() => {
     loadSession().then((session) => {
@@ -1128,7 +1131,7 @@ return (
               }}
               onSignOut={() => void handleSignOut()}
               onSyncNow={() => scheduleSync()}
-              onLoggedOut={() => setAccount(null)}
+              onLoggedOut={handleProfileLoggedOut}
             />
           )}
 
