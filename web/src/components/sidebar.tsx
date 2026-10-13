@@ -1,6 +1,6 @@
 import { CircleUserRound, Heart, Home, Library, Search, Wrench } from "lucide-react";
 
-export type Page = "home" | "library" | "liked" | "search" | "diagnostics";
+export type Page = "home" | "library" | "liked" | "search" | "diagnostics" | "profile";
 
 interface Props {
   page: Page;
@@ -65,7 +65,7 @@ export function Sidebar({
       <button
         type="button"
         onClick={onOpenAccount}
-        className={linkCls(false)}
+        className={linkCls(page === "profile")}
       >
         <CircleUserRound className="h-4 w-4" />
         <span className="truncate">{accountEmail ?? "Sign in"}</span>

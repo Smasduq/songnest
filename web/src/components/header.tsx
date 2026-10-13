@@ -55,7 +55,7 @@ export function Header({
   accountEmail: string | null;
   onOpenAccount: () => void;
   className?: string;
-  page?: "home" | "search" | "library" | "liked" | "diagnostics";
+  page?: "home" | "search" | "library" | "liked" | "diagnostics" | "profile";
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);

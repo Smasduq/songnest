@@ -8,7 +8,7 @@ import { SettingsSheet } from "@/components/settings-sheet";
 import { MiniPlayer } from "@/components/mini-player";
 import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
-import { AccountCard } from "@/components/account-card";
+import ProfilePage from "@/pages/profile";
 import AuthPage from "@/pages/auth";
 import {
   AccountsError,
@@ -242,15 +242,24 @@ export default function App() {
   }, []);
 
   // deep link: #diagnostics opens the diagnostics page,
+  // #profile (also #account / #me, or path /profile) opens the profile page,
   // #signin / #signup / #auth opens the sign-in/sign-up page
   const [isAuthRoute, setIsAuthRoute] = useState(() =>
     ["#signin", "#signup", "#auth"].includes(window.location.hash)
   );
   useEffect(() => {
     function applyHash() {
-      if (window.location.hash === "#diagnostics") go("diagnostics");
+      const hash = window.location.hash;
+      if (hash === "#diagnostics") go("diagnostics");
+      else if (
+        hash === "#profile" ||
+        hash === "#account" ||
+        hash === "#me" ||
+        window.location.pathname === "/profile"
+      )
+        go("profile");
       setIsAuthRoute(
-        ["#signin", "#signup", "#auth"].includes(window.location.hash)
+        ["#signin", "#signup", "#auth"].includes(hash)
       );
     }
     applyHash();
@@ -564,6 +573,13 @@ export default function App() {
     showToast("Signed out");
   }
 
+  /** Account button: signed-out users go to sign-in, signed-in users
+   *  go to their profile page. */
+  const handleOpenAccount = useCallback(() => {
+    if (accountRef.current !== null) go("profile");
+    else window.location.hash = "#signin";
+  }, []);
+
   useEffect(() => {
     loadSession().then((session) => {
       if (session !== null) {
@@ -793,9 +809,7 @@ return (
         }}
         onOpenDiagnostics={() => go("diagnostics")}
         accountEmail={account?.email ?? null}
-        onOpenAccount={() => {
-          window.location.hash = "#signin";
-        }}
+        onOpenAccount={handleOpenAccount}
         className="hidden md:flex"
         page={page}
       />
@@ -832,9 +846,7 @@ return (
             libraryCount={library.length}
             likedCount={likes.size}
             accountEmail={account?.email ?? null}
-            onOpenAccount={() => {
-              window.location.hash = "#signin";
-            }}
+            onOpenAccount={handleOpenAccount}
           />
         </div>
 
@@ -1101,18 +1113,27 @@ return (
             </section>
           )}
 
+          {page === "profile" && (
+            <ProfilePage
+              account={account}
+              syncing={syncing}
+              lastError={syncError}
+              libraryCount={library.length}
+              likedCount={likes.size}
+              pendingCount={
+                account !== null ? loadOutbox(account.userId).length : 0
+              }
+              onSignIn={() => {
+                window.location.hash = "#signin";
+              }}
+              onSignOut={() => void handleSignOut()}
+              onSyncNow={() => scheduleSync()}
+              onLoggedOut={() => setAccount(null)}
+            />
+          )}
+
           {page === "diagnostics" && (
             <div className="space-y-3 md:mx-4">
-              <AccountCard
-                email={account?.email ?? null}
-                syncing={syncing}
-                lastError={syncError}
-                onSignIn={() => {
-                  window.location.hash = "#signin";
-                }}
-                onSignOut={() => void handleSignOut()}
-                onSyncNow={() => scheduleSync()}
-              />
               <Diagnostics onToast={showToast} />
             </div>
           )}
@@ -1198,9 +1219,7 @@ return (
             theme={theme}
             onPickTheme={setTheme}
             accountEmail={account?.email ?? null}
-            onOpenAccount={() => {
-              window.location.hash = "#signin";
-            }}
+            onOpenAccount={handleOpenAccount}
             onOpenDiagnostics={() => go("diagnostics")}
           />
         )}

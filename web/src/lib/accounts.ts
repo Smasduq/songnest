@@ -330,6 +330,31 @@ export async function pushLikes(
   return failFor(status, json, "Couldn't upload likes.");
 }
 
+/** Fetch the caller's profile (`GET /me`). Throws `logged-out` when the
+ *  refresh is dead (storage is cleared), otherwise a showable AccountsError. */
+export interface UserProfile {
+  id: string;
+  email: string;
+}
+
+export async function fetchProfile(): Promise<UserProfile> {
+  const session = await ensureSession();
+  const { status, json } = await request(
+    "/me",
+    { method: "GET" },
+    session.accessToken
+  );
+  if (status === 200) {
+    const body = json as { id: string; email: string };
+    return { id: body.id, email: body.email };
+  }
+  if (status === 401) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return failFor(status, json, "Couldn't load your profile.");
+}
+
 /** Pull changes after `since`. Returns changes + new cursor. */
 export async function pullLikes(since: number): Promise<{ changes: RemoteLike[]; cursor: number }> {
   const session = await ensureSession();
