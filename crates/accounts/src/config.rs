@@ -22,7 +22,13 @@ pub struct Config {
     /// Address to bind (bind loopback in production; Caddy terminates TLS).
     pub bind: SocketAddr,
     /// Postgres URL, e.g. `postgres://songnest:…@127.0.0.1:5432/songnest`.
+    /// On Neon this is the pooled (`-pooler`) URL for app traffic.
     pub database_url: String,
+    /// Optional direct (unpooled) Postgres URL for migrations, dumps, and
+    /// other session-level work. On Neon this is `DATABASE_URL_UNPOOLED`
+    /// (no `-pooler` suffix). Falls back to `database_url` when unset,
+    /// e.g. local dev with a single localhost Postgres.
+    pub database_url_unpooled: Option<String>,
     /// HMAC secret for access-token JWTs. No default — must be set.
     pub jwt_secret: String,
     /// Optional secret for verifying GitHub App webhook deliveries.
@@ -51,6 +57,9 @@ impl Config {
         Ok(Self {
             bind: parse_env("SONGNEST_ACCOUNTS_BIND", DEFAULT_BIND)?,
             database_url: require_env("DATABASE_URL")?,
+            database_url_unpooled: std::env::var("DATABASE_URL_UNPOOLED")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
             jwt_secret,
             github_webhook_secret: std::env::var("SONGNEST_GITHUB_WEBHOOK_SECRET")
                 .ok()

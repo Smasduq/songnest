@@ -13,3 +13,5 @@ js_runtime.txt
 bin/
 .private/
 PRIVATE-FINDINGS.md
+.vercel
+.neon

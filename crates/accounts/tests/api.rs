@@ -21,6 +21,7 @@ fn test_config(database_url: String, auth_per_minute: u64) -> Config {
     Config {
         bind: "127.0.0.1:0".parse().expect("test bind addr"),
         database_url,
+        database_url_unpooled: std::env::var("TEST_DATABASE_URL_UNPOOLED").ok(),
         jwt_secret: "test-secret-that-is-at-least-32-bytes!!".to_owned(),
         github_webhook_secret: Some("test-webhook-secret".to_owned()),
         access_ttl: Duration::from_secs(900),
@@ -82,7 +83,7 @@ impl Client {
 async fn boot(auth_per_minute: u64) -> Option<(Client, Config)> {
     let url = std::env::var("TEST_DATABASE_URL").ok()?;
     let config = test_config(url.clone(), auth_per_minute);
-    let pool = db::connect(&url).await.ok()?;
+    let pool = db::connect_config(&config).await.ok()?;
     let state = AppState {
         pool,
         config: config.clone(),

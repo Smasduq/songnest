@@ -16,6 +16,8 @@ on:
       - "crates/accounts/**"
       - "Cargo.toml"
       - "Cargo.lock"
+  release:
+    types: [published]
   workflow_dispatch: {}
 
 jobs:
@@ -53,3 +55,27 @@ jobs:
 
       - name: test (unit + live-DB integration)
         run: cargo test -p songnest-accounts
+
+  deploy:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: check
+    runs-on: ubuntu-latest
+    concurrency:
+      group: vercel-accounts-production
+      cancel-in-progress: false
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_ACCOUNTS_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: install Vercel CLI
+        run: npm install --global vercel@64.0.1
+
+      - name: build and deploy production on Vercel
+        run: vercel deploy --prod --yes --token="$VERCEL_TOKEN"

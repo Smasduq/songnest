@@ -104,6 +104,7 @@ Environment variables (full list in `crates/accounts/.env.example`):
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | — (required) | Postgres connection |
+| `DATABASE_URL_UNPOOLED` | unset | Optional direct Postgres URL for migrations; use Neon's unpooled URL when `DATABASE_URL` is pooled |
 | `SONGNEST_JWT_SECRET` | — (required, ≥32 bytes) | Access-token HMAC secret |
 | `SONGNEST_GITHUB_WEBHOOK_SECRET` | unset | Optional GitHub App webhook HMAC secret; set this to enable webhook verification |
 | `SONGNEST_ACCOUNTS_BIND` | `127.0.0.1:8788` | Bind address (keep loopback) |
@@ -150,6 +151,17 @@ password reset are TODOs (`POST /auth/...` reserved in code comments).
 The GitHub App webhook URL is `https://api.songnest.smasduq.xyz/webhooks/github`.
 Configure the same webhook secret in GitHub and `SONGNEST_GITHUB_WEBHOOK_SECRET`;
 the endpoint currently acknowledges events but only handles the `ping` response.
+
+The `songnest` Vercel project is rooted at `crates/accounts` and serves the same
+Axum API as a Rust Function. Its `vercel.json` skips Git-triggered deployments;
+`.github/workflows/accounts.yml` runs checks and deploys production only when a
+GitHub Release is published. Configure the GitHub Actions secrets
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_ACCOUNTS_PROJECT_ID` (separate
+from the download site's `VERCEL_PROJECT_ID`), and set the Vercel production
+environment variables `DATABASE_URL`, `SONGNEST_JWT_SECRET`, and
+`SONGNEST_GITHUB_WEBHOOK_SECRET`; for Neon, also set `DATABASE_URL_UNPOOLED`
+to the direct connection URL used by migrations. The app's `DATABASE_URL`
+should be Neon's pooled connection URL. Both must be reachable from Vercel.
 
 Known limitations: sync trusts device clocks for `updated_at` (skewed
 clocks can misorder concurrent two-device edits); the per-IP rate limiter

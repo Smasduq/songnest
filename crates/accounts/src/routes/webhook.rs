@@ -77,6 +77,7 @@ mod tests {
             config: Config {
                 bind: "127.0.0.1:8788".parse().expect("test bind addr"),
                 database_url: "postgres://songnest:test@127.0.0.1/songnest".to_owned(),
+                database_url_unpooled: None,
                 jwt_secret: "test-secret-that-is-at-least-32-bytes!!".to_owned(),
                 github_webhook_secret: secret.map(str::to_owned),
                 access_ttl: Duration::from_secs(900),

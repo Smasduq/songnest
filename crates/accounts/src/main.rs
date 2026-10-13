@@ -15,6 +15,6 @@ async fn main() -> Result<(), AppError> {
         tracing::error!(error = %e, "invalid configuration (see .env.example)");
         e
     })?;
-    let pool = db::connect(&config.database_url).await?;
+    let pool = db::connect_config(&config).await?;
     songnest_accounts::run(AppState { pool, config }).await
 }
