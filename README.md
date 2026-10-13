@@ -107,6 +107,7 @@ Environment variables (full list in `crates/accounts/.env.example`):
 | `DATABASE_URL_UNPOOLED` | unset | Optional direct Postgres URL for migrations; use Neon's unpooled URL when `DATABASE_URL` is pooled |
 | `SONGNEST_JWT_SECRET` | — (required, ≥32 bytes) | Access-token HMAC secret |
 | `SONGNEST_GITHUB_WEBHOOK_SECRET` | unset | Optional GitHub App webhook HMAC secret; set this to enable webhook verification |
+| `SONGNEST_GITHUB_CLIENT_ID` / `SONGNEST_GITHUB_CLIENT_SECRET` | unset | GitHub App Client ID + secret for Login with GitHub (General page); unset disables `GET /auth/github/start` + `POST /auth/github/callback` |
 | `SONGNEST_ACCOUNTS_BIND` | `127.0.0.1:8788` | Bind address (keep loopback) |
 | `SONGNEST_ACCESS_TTL_SECS` | `900` | Access-token lifetime |
 | `SONGNEST_REFRESH_TTL_SECS` | `2592000` | Refresh-token lifetime |
@@ -127,6 +128,8 @@ API reference (JSON; errors are `{ "error": "<showable message>" }`):
 | `POST /auth/login` | — (rate-limited) | `{email, password}` → `200` + tokens |
 | `POST /auth/refresh` | — (rate-limited) | `{refresh_token}` → rotated pair |
 | `POST /auth/logout` | — (rate-limited) | `{refresh_token}` → always `200` |
+| `GET /auth/github/start?redirect_uri=<url>` | — (rate-limited) | `{authorize_url}` for Login with GitHub (needs `SONGNEST_GITHUB_CLIENT_ID`) |
+| `POST /auth/github/callback` | — (rate-limited) | `{code, redirect_uri}` → `200` + tokens (find-or-create by GitHub ID, else link by verified email) |
 | `GET /me` | Bearer | `{id, email, avatar_url}` (`avatar_url` is null when unset) |
 | `PUT /me/avatar` | Bearer | Raw JPEG/PNG/WebP/GIF body (≤512 KiB, magic-byte checked) → `200` `{avatar_url}`; stored in Neon Object Storage under a fresh key, old picture removed |
 | `DELETE /me/avatar` | Bearer | Removes the picture → always `200` |
