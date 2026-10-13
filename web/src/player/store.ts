@@ -412,7 +412,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   enqueue: (song) => {
-    const { queue, transientIds } = get();
+    const { queue, library, index, transientIds } = get();
     // explicit add: it belongs in Up next even if it was a placeholder
     if (queue.some((t) => t.id === song.id)) {
       if (transientIds.includes(song.id)) {
@@ -420,7 +420,16 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       }
       return;
     }
-    set({ queue: [...queue, song] });
+    // Appending to the queue shifts every library offset right by one, so
+    // pin Now Playing to its track when it currently sits in the library.
+    // (+1 keeps the same library row even when the enqueued id duplicates it.)
+    const cur = combined(queue, library)[index];
+    const nextQueue = [...queue, song];
+    let nextIndex = index;
+    if (cur !== undefined && index >= queue.length) {
+      nextIndex = index + 1;
+    }
+    set({ queue: nextQueue, index: nextIndex });
   },
 
   setQueueOrder: (next) => {
@@ -491,9 +500,34 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   next: (manual) => {
-    const { queue, library, index, repeat, shuffle } = get();
+    const { queue, library, index, repeat, shuffle, transientIds } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
+    const cur = combined(queue, library)[index];
+    const inQueue = index < queue.length;
+    // Queued songs come first: whenever the current song is out in the
+    // library and Up next holds an explicitly added song, that song is
+    // next — both for auto-advance (ended) and manual skip.
+    if (!inQueue) {
+      const qi = queue.findIndex(
+        (t) => !transientIds.includes(t.id) && t.id !== cur?.id
+      );
+      if (qi >= 0) {
+        loadAt(qi);
+        return;
+      }
+    } else if (shuffle && total > 1) {
+      // Shuffled but still draining Up next in order: a random jump must
+      // not skip over explicitly queued songs sitting ahead.
+      const ahead = queue.findIndex(
+        (t, i) =>
+          i > index && !transientIds.includes(t.id) && t.id !== cur?.id
+      );
+      if (ahead >= 0) {
+        loadAt(ahead);
+        return;
+      }
+    }
     if (!manual && repeat === "off" && index >= total - 1) {
       audio.pause(); // stop at the end instead of wrapping
       return;
