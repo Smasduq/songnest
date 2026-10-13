@@ -90,6 +90,16 @@ struct YtEntry {
     channel: Option<String>,
 }
 
+/// Timestamped trace log for stream/download diagnosis (stderr).
+/// `t0` is process start; every line carries elapsed ms so lock waits,
+/// subprocess spawns, first bytes and completions can be ordered.
+fn trace(tag: &str, msg: String) {
+    use std::sync::OnceLock;
+    static T0: OnceLock<Instant> = OnceLock::new();
+    let t0 = T0.get_or_init(Instant::now);
+    eprintln!("[trace {:>9}ms {:<8}] {}", t0.elapsed().as_millis(), tag, msg);
+}
+
 #[derive(Clone)]
 struct AppState {
     db: Db,
@@ -1343,9 +1353,11 @@ async fn youtube_match(
 ) -> Option<(String, i32)> {
     if !fresh {
         if let Some(hit) = get_match(db, t.id) {
+            trace("match", format!("dz={} cache hit -> {}", t.id, hit.0));
             return Some(hit);
         }
     }
+    trace("match", format!("dz={} miss, searching", t.id));
     #[cfg(feature = "songnestpy")]
     if let Backend::SongnestPy(ex) = backend {
         // on-device search fans out over the same queries as desktop
@@ -1382,6 +1394,7 @@ async fn youtube_match(
     // desktop: up to 3 queries, 10 candidates each, 25s per search
     let mut best: Option<(YtEntry, i32)> = None;
     for q in search_queries(t) {
+        trace("match", format!("dz={} ytsearch start", t.id));
         let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
         let out = tokio::time::timeout(
             Duration::from_secs(25),
@@ -1413,8 +1426,13 @@ async fn youtube_match(
     }
     let (entry, sc) = best?;
     if !is_confident(&entry, t, sc) {
+        trace("match", format!("dz={} no confident match", t.id));
         return None;
     }
+    trace(
+        "match",
+        format!("dz={} matched {} (score {sc})", t.id, entry.id),
+    );
     put_match(db, t.id, &entry.id, sc);
     Some((entry.id.clone(), sc))
 }
@@ -1439,6 +1457,52 @@ fn set_job(db: &Db, id: i64, status: &str, progress: i64, error: Option<&str>) {
     );
 }
 
+/// Unique scratch dir for one download job: two jobs for the same video
+/// (different songs can match one video) must never share yt-dlp's `.part`
+/// file, and `/stream` must never see a half-written `<base>/<id>.m4a`.
+/// The finished file is atomically promoted into `base` afterwards.
+fn job_tmp_dir(base: &str, job_id: i64) -> String {
+    format!("{base}/.tmp-{job_id}")
+}
+
+/// Promote a finished download out of its scratch dir into `base`
+/// (same-filesystem rename: atomic) and remove the scratch dir.
+/// Returns the final path, or the tmp path when promotion fails so the
+/// caller still tags/inserts something usable.
+fn promote_download(base: &str, job_id: i64, tmp_path: &str) -> String {
+    let tmp_dir = job_tmp_dir(base, job_id);
+    let file_name = std::path::Path::new(tmp_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| tmp_path.to_string());
+    let dest = format!("{base}/{file_name}");
+    if std::fs::rename(tmp_path, &dest).is_ok() {
+        trace("dl", format!("job {job_id} promoted -> {dest}"));
+    } else {
+        return tmp_path.to_string();
+    }
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    dest
+}
+
+/// Drop scratch dirs left behind by killed jobs/older versions.
+fn clean_stale_tmp_dirs() {
+    clean_stale_tmp_dirs_in("music");
+}
+
+fn clean_stale_tmp_dirs_in(base: &str) {
+    if let Ok(rd) = std::fs::read_dir(base) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir()
+                && e.file_name().to_string_lossy().starts_with(".tmp-")
+            {
+                let _ = std::fs::remove_dir_all(&p);
+            }
+        }
+    }
+}
+
 /// Parse `[download]  34.5% of ...` progress lines.
 fn parse_progress(line: &str) -> Option<u8> {
     let after = line.split("[download]").nth(1)?;
@@ -1451,12 +1515,18 @@ fn parse_progress(line: &str) -> Option<u8> {
 
 /// Blocking yt-dlp download with human-like pauses and progress.
 /// Err carries stderr tail for throttle detection.
+///
+/// Stream wiring that matters: yt-dlp prints `[download] NN%` progress to
+/// STDOUT (drained) and errors to STDERR (kept as a bounded tail). Parsing
+/// progress from stderr yields nothing, ever; reading stderr to EOF and
+/// *then* calling `wait_with_output` always yields an empty error.
 fn download_job(
     dl: &DownloaderState,
     video_id: &str,
     out_dir: &str,
     on_progress: &(dyn Fn(u8) + Send + Sync),
 ) -> Result<String, String> {
+    use std::collections::VecDeque;
     use std::io::BufRead;
     let template = format!("{out_dir}/%(id)s.%(ext)s");
     let _guard = dl.hold();
@@ -1491,35 +1561,60 @@ fn download_job(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    // drain stdout (discard) so the child never blocks on a full pipe
-    let mut sout = child.stdout.take().unwrap();
+    trace("dl", format!("yt-dlp spawned pid={} id={video_id}", child.id()));
+    // Progress flows on stdout: parse it on the drain thread and ship
+    // percentages back, so the child never blocks on a full pipe.
+    let (ptx, prx) = std::sync::mpsc::channel::<u8>();
+    let sout = child.stdout.take().unwrap();
     let drain = std::thread::spawn(move || {
-        std::io::copy(&mut sout, &mut std::io::sink()).ok();
+        for line in std::io::BufReader::new(sout).lines().map_while(Result::ok) {
+            if let Some(p) = parse_progress(&line) {
+                if ptx.send(p).is_err() {
+                    break;
+                }
+            }
+        }
     });
+    // Errors flow on stderr: keep a bounded tail for the failure message.
     let serr = child.stderr.take().unwrap();
-    for line in std::io::BufReader::new(serr).lines().map_while(Result::ok) {
-        if let Some(p) = parse_progress(&line) {
+    let mut tail: VecDeque<String> = VecDeque::with_capacity(5);
+    let mut saw_first_progress = false;
+    let mut pump_progress = |saw_first: &mut bool| {
+        for p in prx.try_iter() {
+            if !*saw_first {
+                trace("dl", format!("id={video_id} first progress {p}%"));
+                *saw_first = true;
+            }
             on_progress(p);
         }
+    };
+    for line in std::io::BufReader::new(serr).lines().map_while(Result::ok) {
+        pump_progress(&mut saw_first_progress);
+        if tail.len() == 5 {
+            tail.pop_front();
+        }
+        tail.push_back(line);
     }
+    // stderr hit EOF (child done): reap the status, then collect stragglers.
+    let status = child.wait().map_err(|e| e.to_string())?;
     drain.join().ok();
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        let tail: String = String::from_utf8_lossy(&out.stderr)
-            .lines()
-            .rev()
-            .take(5)
-            .collect::<Vec<_>>()
-            .join("\n");
-        return Err(tail);
+    pump_progress(&mut saw_first_progress);
+    trace(
+        "dl",
+        format!("id={video_id} yt-dlp exited success={}", status.success()),
+    );
+    if !status.success() {
+        return Err(tail.make_contiguous().join("\n"));
     }
     on_progress(100);
     Ok(format!("{out_dir}/{video_id}.m4a"))
 }
 
 /// Fetch audio bytes directly (no yt-dlp/ffmpeg): resolve via the shared
-/// URL cache, then stream bounded 1MB range chunks to `music/<id>.m4a`
-/// with progress. No transcoding — the resolved stream is already m4a.
+/// URL cache, then stream bounded 1MB range chunks to `<out_dir>/<id>.<ext>`
+/// with progress (out_dir is the job's scratch dir; the caller promotes the
+/// finished file into `music/`). No transcoding — the resolved stream is
+/// already m4a.
 /// Err carries a short message, checked for throttle signals by the caller.
 /// Browser-grade headers for googlevideo media requests, copied from a
 /// working player session: bare-bones clients get flagged faster.
@@ -1560,6 +1655,7 @@ async fn pace_media(s: &AppState) {
     if let Some(t) = *last {
         let elapsed = t.elapsed().as_millis() as u64;
         if elapsed < gap {
+            trace("pace", format!("sleeping {}ms (media gate)", gap - elapsed));
             tokio::time::sleep(Duration::from_millis(gap - elapsed)).await;
         }
     }
@@ -1586,7 +1682,9 @@ async fn download_direct(
     on_progress: &(dyn Fn(u8) + Send + Sync),
 ) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
+    trace("dl", format!("direct download start {video_id} (resolve)"));
     let mut url = resolve_url(s, video_id, false).await.map_err(|e| e.to_string())?;
+    trace("dl", format!("direct download {video_id} resolved, fetching chunks"));
     let ext = audio_ext(&cached_mime(s, video_id).unwrap_or_else(|| "audio/mp4".to_string()));
     const CHUNK: u64 = 1024 * 1024;
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
@@ -1595,6 +1693,7 @@ async fn download_direct(
     let mut file = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
     let mut start: u64 = 0;
     let mut total: u64 = 0;
+    let mut logged_decile: u64 = 0;
     // One paced retry max: a second 403 means throttling, not a stale URL.
     // Hammering hot retries is what gets IPs flagged — fail fast into the
     // shared cooldown instead.
@@ -1649,6 +1748,10 @@ async fn download_direct(
                 .checked_div(total)
                 .unwrap_or(0)
                 .min(100) as u8;
+            if pct as u64 >= logged_decile + 10 || pct == 100 {
+                logged_decile = pct as u64 / 10 * 10;
+                trace("dl", format!("direct download {video_id} {pct}%"));
+            }
             on_progress(pct);
         }
         if total > 0 && start >= total {
@@ -1692,8 +1795,10 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         }
     };
     // 2. cached match: each song is searched once, even across queue jobs
+    trace("dl", format!("job {job_id} matching dz={dzid}"));
     let Some((video_id, _)) = youtube_match(&s.downloader, &s.backend, &s.db, &t, false).await else {
         set_job(&s.db, job_id, "error", 0, Some("no YouTube match (throttled?)"));
+        trace("dl", format!("job {job_id} match failed"));
         return;
     };
     s.db
@@ -1705,13 +1810,20 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         )
         .ok();
     // 3. download with progress (yt-dlp subprocess, or direct fetch on songnestpy)
+    // into a per-job scratch dir (see job_tmp_dir): concurrent jobs for
+    // the same video must not share partial files.
+    let tmp_dir = job_tmp_dir("music", job_id);
+    std::fs::create_dir_all(&tmp_dir).ok();
+    trace("dl", format!("job {job_id} download start {video_id}"));
+    let tmp_dir_ref = &tmp_dir;
     let dl_result: Result<String, String> = match &s.backend {
         Backend::YtDlp => {
             let db2 = s.db.clone();
             let vid2 = video_id.clone();
             let dl_state = s.downloader.clone();
+            let out2 = tmp_dir.clone();
             tokio::task::spawn_blocking(move || {
-                download_job(&dl_state, &vid2, "music", &|p| {
+                download_job(&dl_state, &vid2, &out2, &|p| {
                     let _ = db2.lock().unwrap().execute(
                         "UPDATE downloads SET progress=?1, updated_at=strftime('%s','now') WHERE id=?2",
                         rusqlite::params![p as i64, job_id],
@@ -1724,7 +1836,7 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         #[cfg(feature = "songnestpy")]
         Backend::SongnestPy(_) => {
             let db2 = s.db.clone();
-            download_direct(s, &video_id, "music", &|p| {
+            download_direct(s, &video_id, tmp_dir_ref, &|p| {
                 let _ = db2.lock().unwrap().execute(
                     "UPDATE downloads SET progress=?1, updated_at=strftime('%s','now') WHERE id=?2",
                     rusqlite::params![p as i64, job_id],
@@ -1734,8 +1846,13 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
         }
     };
     let path = match dl_result {
-        Ok(p) => p,
+        Ok(p) => {
+            trace("dl", format!("job {job_id} download finished -> {p}"));
+            promote_download("music", job_id, &p)
+        }
         Err(msg) => {
+            trace("dl", format!("job {job_id} download failed: {}", msg.chars().take(120).collect::<String>()));
+            let _ = std::fs::remove_dir_all(&tmp_dir);
             if youtube_blocked(&msg) {
                 *s.yt_cooldown_until.lock().unwrap() =
                     Some(Instant::now() + Duration::from_secs(5 * 60));
@@ -1821,13 +1938,16 @@ async fn download_worker(s: AppState) {
             tokio::time::sleep(Duration::from_secs(2)).await;
             continue;
         };
+        trace("dl", format!("job {job_id} claimed (dz={dzid})"));
         // cooling down: put it back, wait it out, don't burn calls
         if let Some(secs) = cooled_down(&s) {
+            trace("dl", format!("job {job_id} parked: cooling down {secs}s"));
             set_job(&s.db, job_id, "queued", 0, None);
             tokio::time::sleep(Duration::from_secs(secs.min(60).max(5))).await;
             continue;
         }
         let _permit = s.dl_sem.acquire().await.unwrap();
+        trace("dl", format!("job {job_id} semaphore acquired"));
         run_job(&s, job_id, dzid).await;
         // pause between downloads: never machine-gun YouTube
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -1873,6 +1993,8 @@ async fn enqueue(
     )
     .ok();
     let id = db.last_insert_rowid();
+    drop(db);
+    trace("dl", format!("enqueue requested dz={dzid} -> job {id}"));
     Json(serde_json::json!({"job": id})).into_response()
 }
 
@@ -3059,6 +3181,9 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
     // two queue workers = max 2 concurrent downloads, ever
     tokio::spawn(download_worker(state.clone()));
     tokio::spawn(download_worker(state.clone()));
+    // scratch dirs from killed jobs must not accumulate (or confuse a
+    // future /stream into serving a half-written file)
+    clean_stale_tmp_dirs();
     // cookies.txt (when pushed to the data dir) flips yt-dlp to
     // authenticated requests — log it so logcat shows the mode.
     #[cfg(feature = "songnestpy")]
@@ -3473,6 +3598,10 @@ struct FetchedStream {
 }
 
 async fn fetch_stream(s: &AppState, id: &str) -> anyhow::Result<FetchedStream> {
+    trace(
+        "resolve",
+        format!("id={id} yt-dlp -g start (backend={})", s.backend.name()),
+    );
     match &s.backend {
         Backend::YtDlp => {
             let YtDlpCall { mut cmd, _guard } = ytdlp_command(&s.downloader)?;
@@ -3522,19 +3651,25 @@ async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<Stri
     };
     if !fresh {
         if let Some(u) = cached(s) {
+            trace("resolve", format!("id={id} url-cache hit"));
             return Ok(u);
         }
     }
     // cooling down: don't burn calls, fail fast (stream() -> 502)
     if cooled_down(s).is_some() {
+        trace("resolve", format!("id={id} refused: cooling down"));
         anyhow::bail!("youtube cooling down");
     }
+    trace("resolve", format!("id={id} waiting for resolve lock"));
     let _guard = s.resolve_lock.lock().await; // one resolver at a time
+    trace("resolve", format!("id={id} resolve lock acquired"));
     if let Some(u) = cached(s) {
         return Ok(u); // someone else may have finished while we waited
     }
 
+    trace("resolve", format!("id={id} fetch start"));
     let FetchedStream { url, mime } = fetch_stream(s, id).await?;
+    trace("resolve", format!("id={id} fetch done, caching url"));
     s.urls
         .lock()
         .unwrap()
@@ -3553,10 +3688,12 @@ fn cached_mime(s: &AppState, id: &str) -> Option<String> {
 }
 
 async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<Body>) -> Response {
+    trace("stream", format!("id={id} request"));
     // downloaded file first (extension depends on backend mime), else proxy
     for ext in ["m4a", "webm"] {
         let local = format!("music/{id}.{ext}");
         if std::path::Path::new(&local).exists() {
+            trace("stream", format!("id={id} serving local file"));
             return ServeFile::new(local)
                 .oneshot(req)
                 .await
@@ -3565,6 +3702,7 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
         }
     }
     let Ok(url) = resolve_url(&s, &id, false).await else {
+        trace("stream", format!("id={id} resolve failed -> 502"));
         return StatusCode::BAD_GATEWAY.into_response();
     };
     let range = req
@@ -3573,8 +3711,17 @@ async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
     let mut up = match paced_media_get(&s, &url, range.clone()).await {
-        Ok(up) => up,
-        Err(_) => return StatusCode::BAD_GATEWAY.into_response(),
+        Ok(up) => {
+            trace(
+                "stream",
+                format!("id={id} first byte (upstream {})", up.status()),
+            );
+            up
+        }
+        Err(_) => {
+            trace("stream", format!("id={id} upstream fetch failed -> 502"));
+            return StatusCode::BAD_GATEWAY.into_response();
+        }
     };
     // YouTube 403s dead/flagged media URLs: drop the cached URL, resolve
     // once more, retry once. (Per-URL issue — not a global cooldown.)
@@ -3948,5 +4095,150 @@ mod downloader_tests {
             Health::Outdated
         );
         assert_eq!(classify_failure("", false), Health::Outdated);
+    }
+
+    #[test]
+    fn progress_parses_stdout_style_lines() {
+        // exact yt-dlp --newline --progress shape (stdout, not stderr)
+        assert_eq!(
+            parse_progress("[download]  42.0% of  3.29MiB at  322.00KiB/s ETA 00:00"),
+            Some(42)
+        );
+        assert_eq!(parse_progress("[download] 100% of 3.29MiB in 00:11"), Some(100));
+        assert_eq!(parse_progress("[download] 100.0% of ~ 5.00MiB"), Some(100));
+        // over-100 clamps, non-progress lines miss
+        assert_eq!(parse_progress("[download] 100.5% of 1MiB"), Some(100));
+        assert_eq!(parse_progress("[youtube] Downloading webpage"), None);
+        assert_eq!(parse_progress("ERROR: Sign in to confirm you're not a bot"), None);
+        assert_eq!(parse_progress(""), None);
+    }
+
+    #[test]
+    fn scratch_dirs_promote_and_clean() {
+        let base = std::env::temp_dir().join(format!("songnest-scratch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let base = base.to_string_lossy().into_owned();
+        // promote moves the file up and removes the scratch dir
+        let tmp = job_tmp_dir(&base, 7);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(format!("{tmp}/vid9.m4a"), b"audio").unwrap();
+        assert_eq!(promote_download(&base, 7, &format!("{tmp}/vid9.m4a")), format!("{base}/vid9.m4a"));
+        assert!(std::path::Path::new(&format!("{base}/vid9.m4a")).exists());
+        assert!(!std::path::Path::new(&tmp).exists());
+        // stale sweep removes .tmp-* dirs only
+        std::fs::create_dir_all(format!("{base}/.tmp-8")).unwrap();
+        std::fs::create_dir_all(format!("{base}/keep")).unwrap();
+        clean_stale_tmp_dirs_in(&base);
+        assert!(!std::path::Path::new(&format!("{base}/.tmp-8")).exists());
+        assert!(std::path::Path::new(&format!("{base}/keep")).is_dir());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Fake yt-dlp: prints progress to stdout (like the real one), noise to
+    /// stderr, then exits. Proves progress is read from the right stream.
+    #[cfg(unix)]
+    fn fake_ytdlp(dir: &std::path::Path, exit_code: i32) -> String {
+        let bin = dir.join("fake-ytdlp.sh");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho '[download]   5.0% of  1.00MiB at  1.00MiB/s ETA 00:01'\nsleep 1\necho '[download]  55.0% of  1.00MiB' >&2\necho '[download] 100.0% of  1.00MiB at  1.00MiB/s'\necho 'ERROR: something broke' >&2\nexit {exit_code}\n"
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin.to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    fn test_downloader(bin: &str) -> DownloaderState {
+        let dl = DownloaderState::default();
+        dl.inner.write().unwrap().binary_path = bin.to_string();
+        dl
+    }
+
+    /// Progress must come from stdout (stderr lookalikes ignored); on
+    /// failure the error must carry the stderr tail (previously always
+    /// empty because stderr was consumed before wait_with_output).
+    #[cfg(unix)]
+    #[test]
+    fn download_job_uses_stdout_progress_and_stderr_errors() {
+        let dir = std::env::temp_dir().join(format!("songnest-fake-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let out = out.to_string_lossy().into_owned();
+
+        let dl = test_downloader(&fake_ytdlp(&dir, 0));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let seen2 = seen.clone();
+        let r = download_job(&dl, "vid1", &out, &|p| seen2.lock().unwrap().push(p));
+        assert!(r.is_ok());
+        // 5 and 100 from stdout; the 55 on stderr must NOT surface as progress
+        assert_eq!(*seen.lock().unwrap(), vec![5, 100, 100]);
+
+        let dl = test_downloader(&fake_ytdlp(&dir, 1));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let seen2 = seen.clone();
+        let r = download_job(&dl, "vid1", &out, &|p| seen2.lock().unwrap().push(p));
+        let err = r.expect_err("exit 1 must fail");
+        assert!(err.contains("ERROR: something broke"), "tail was: {err:?}");
+        assert_eq!(*seen.lock().unwrap(), vec![5, 100]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two concurrent downloads for the SAME video (different songs can
+    /// match one video) must both make progress through per-job scratch
+    /// dirs and promote without colliding — the reported stall shape.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_same_video_downloads_both_progress() {
+        let dir = std::env::temp_dir().join(format!("songnest-conc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("music");
+        std::fs::create_dir_all(&base).unwrap();
+        let base = base.to_string_lossy().into_owned();
+        let bin = fake_ytdlp(&dir, 0);
+
+        async fn one_job(base: String, bin: String, job_id: i64) -> (Vec<u8>, String) {
+            let tmp = job_tmp_dir(&base, job_id);
+            std::fs::create_dir_all(&tmp).unwrap();
+            let dl = DownloaderState::default();
+            dl.inner.write().unwrap().binary_path = bin;
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+            let seen2 = seen.clone();
+            let tmp2 = tmp.clone();
+            let r = tokio::task::spawn_blocking(move || {
+                download_job(&dl, "samevid", &tmp2, &|p| seen2.lock().unwrap().push(p))
+            })
+            .await
+            .expect("join");
+            assert!(r.is_ok());
+            // the fake binary writes no media file; plant one like -x would,
+            // then promote exactly as run_job does
+            std::fs::write(format!("{tmp}/samevid.m4a"), b"audio").unwrap();
+            let final_path = promote_download(&base, job_id, &format!("{tmp}/samevid.m4a"));
+            (seen.lock().unwrap().clone(), final_path)
+        }
+
+        let start = std::time::Instant::now();
+        let ((seen_a, final_a), (seen_b, final_b)) = tokio::join!(
+            one_job(base.clone(), bin.clone(), 101),
+            one_job(base.clone(), bin.clone(), 102),
+        );
+        let elapsed = start.elapsed();
+        assert_eq!(seen_a, vec![5, 100, 100]);
+        assert_eq!(seen_b, vec![5, 100, 100]);
+        // each fake run sleeps ~1s: true overlap finishes well under 2x
+        assert!(elapsed < std::time::Duration::from_secs(4), "took {elapsed:?}");
+        assert!(std::path::Path::new(&final_a).exists());
+        assert!(std::path::Path::new(&final_b).exists());
+        assert!(!std::path::Path::new(&job_tmp_dir(&base, 101)).exists());
+        assert!(!std::path::Path::new(&job_tmp_dir(&base, 102)).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
