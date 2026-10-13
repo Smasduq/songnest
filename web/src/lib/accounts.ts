@@ -262,6 +262,61 @@ export async function login(email: string, password: string): Promise<Session> {
   return failFor(status, json, "Couldn't log you in.");
 }
 
+/** Callback URL sent to GitHub. Root origin keeps SPA serving simple:
+ *  GitHub redirects to `/?code=…&state=…` and the app finishes login. */
+export function githubRedirectUri(): string {
+  return `${window.location.origin}/`;
+}
+
+/** Start GitHub login: ask the API for the authorize URL, remember `state`
+ *  for CSRF check, then redirect the browser there. */
+export async function startGithubLogin(): Promise<void> {
+  const redirect_uri = githubRedirectUri();
+  const { status, json } = await request(
+    `/auth/github/start?redirect_uri=${encodeURIComponent(redirect_uri)}`,
+    { method: "GET" },
+  );
+  if (status !== 200) {
+    return failFor(status, json, "GitHub login isn't available right now.");
+  }
+  const url = (json as { authorize_url?: string }).authorize_url;
+  if (typeof url !== "string" || url === "") {
+    throw new AccountsError("server", "GitHub login isn't available right now.");
+  }
+  try {
+    const state = new URL(url).searchParams.get("state");
+    if (state !== null) window.sessionStorage.setItem("songnest-github-state", state);
+  } catch {
+    // Non-fatal: the callback still exchanges the code without the check.
+  }
+  window.location.href = url;
+}
+
+/** Finish GitHub login after the redirect back with `?code=…`. Verifies
+ *  the stored `state`, then exchanges the code for a Songnest session. */
+export async function finishGithubLogin(code: string, state: string | null): Promise<Session> {
+  try {
+    const expected = window.sessionStorage.getItem("songnest-github-state");
+    if (expected !== null && state !== null && expected !== state) {
+      throw new AccountsError("invalid", "GitHub login expired — try again.");
+    }
+  } catch (e) {
+    if (e instanceof AccountsError) throw e;
+    // Storage blocked: continue without the CSRF check.
+  }
+  const { status, json } = await request("/auth/github/callback", {
+    method: "POST",
+    body: JSON.stringify({ code, redirect_uri: githubRedirectUri() }),
+  });
+  try {
+    window.sessionStorage.removeItem("songnest-github-state");
+  } catch {
+    // Best effort.
+  }
+  if (status === 200) return toSession(json as PairResponse);
+  return failFor(status, json, "Couldn't log you in with GitHub.");
+}
+
 /** Refresh the access token. Returns null when the refresh is dead. */
 async function refreshSession(refreshToken: string): Promise<Session | null> {
   const { status, json } = await request("/auth/refresh", {
@@ -353,6 +408,7 @@ export async function pushLikes(
 export interface UserProfile {
   id: string;
   email: string;
+  avatar_url: string | null;
 }
 
 export async function fetchProfile(): Promise<UserProfile> {
@@ -363,14 +419,60 @@ export async function fetchProfile(): Promise<UserProfile> {
     session.accessToken
   );
   if (status === 200) {
-    const body = json as { id: string; email: string };
-    return { id: body.id, email: body.email };
+    const body = json as { id: string; email: string; avatar_url?: string | null };
+    return { id: body.id, email: body.email, avatar_url: body.avatar_url ?? null };
   }
   if (status === 401) {
     await clearSession();
     throw new AccountsError("logged-out", "Your login expired — please log in again.");
   }
   return failFor(status, json, "Couldn't load your profile.");
+}
+
+/** Max avatar upload size (must stay in sync with the server default:
+ *  `SONGNEST_AVATAR_MAX_BYTES`, 512 KiB). The server is authoritative —
+ *  this is only a fast client-side check for a friendly error. */
+export const AVATAR_MAX_BYTES = 512 * 1024;
+
+/** Accepted avatar image types (mirrors the server's magic-byte sniffing). */
+export const AVATAR_ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
+
+/**
+ * Upload a profile picture (`PUT /me/avatar`). `data` is the raw image
+ * bytes; returns the public URL. Throws `logged-out` on stale sessions,
+ * otherwise a showable AccountsError (too big / not an image / unavailable).
+ */
+export async function uploadAvatar(data: ArrayBuffer, contentType: string): Promise<string> {
+  const session = await ensureSession();
+  const { status, json } = await request(
+    "/me/avatar",
+    { method: "PUT", body: data, headers: { "Content-Type": contentType } },
+    session.accessToken
+  );
+  if (status === 200) {
+    return (json as { avatar_url: string }).avatar_url;
+  }
+  if (status === 401) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return failFor(status, json, "Couldn't upload your picture.");
+}
+
+/** Remove the profile picture (`DELETE /me/avatar`). Idempotent. */
+export async function deleteAvatar(): Promise<void> {
+  const session = await ensureSession();
+  const { status, json } = await request(
+    "/me/avatar",
+    { method: "DELETE" },
+    session.accessToken
+  );
+  if (status === 200) return;
+  if (status === 401) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return failFor(status, json, "Couldn't remove your picture.");
 }
 
 /** Pull changes after `since`. Returns changes + new cursor. */
@@ -490,36 +592,4 @@ export function setCursor(userId: string, cursor: number): void {
   }
 }
 
-// --- Retry scheduling --------------------------------------------------------
-
-/**
- * Run `task` with exponential backoff (2s → 4s → … capped at 5 min),
- * resolving on first success. Returns a cancel function. Offline and
- * server errors retry; credential/logout errors reject immediately.
- */
-export function syncWithBackoff(task: () => Promise<void>): () => void {
-  let cancelled = false;
-  let timer: number | undefined;
-  let delay = 2000;
-  const attempt = () => {
-    if (cancelled) return;
-    task().then(
-      () => {
-        // Success: nothing to do (caller re-schedules on next change).
-      },
-      (e: unknown) => {
-        if (cancelled) return;
-        if (e instanceof AccountsError && (e.code === "credentials" || e.code === "logged-out")) {
-          return;
-        }
-        timer = window.setTimeout(attempt, delay);
-        delay = Math.min(delay * 2, 5 * 60 * 1000);
-      }
-    );
-  };
-  attempt();
-  return () => {
-    cancelled = true;
-    window.clearTimeout(timer);
-  };
-}
+// --- Sync identity -------------------------------------------------------

@@ -22,11 +22,14 @@ import {
   pullLikes,
   pushLikes,
   setCursor,
-  syncWithBackoff,
   toChange,
   type RemoteLike,
   type Session,
 } from "@/lib/accounts";
+import {
+  startLikesSync,
+  type LikesSyncHandle,
+} from "@/lib/likes-sync-worker";
 import { Sidebar, type Page } from "@/components/sidebar";
 import { Header, useTheme } from "@/components/header";
 import { MobileHeader } from "@/components/mobile-header";
@@ -243,9 +246,11 @@ export default function App() {
 
   // deep link: #diagnostics opens the diagnostics page,
   // #profile (also #account / #me, or path /profile) opens the profile page,
-  // #signin / #signup / #auth opens the sign-in/sign-up page
+  // #signin / #signup / #auth opens the sign-in/sign-up page.
+  // `?code=` (GitHub OAuth return) also opens it so the callback is exchanged.
   const [isAuthRoute, setIsAuthRoute] = useState(() =>
-    ["#signin", "#signup", "#auth"].includes(window.location.hash)
+    ["#signin", "#signup", "#auth"].includes(window.location.hash) ||
+    new URLSearchParams(window.location.search).has("code")
   );
   useEffect(() => {
     function applyHash() {
@@ -259,7 +264,8 @@ export default function App() {
       )
         go("profile");
       setIsAuthRoute(
-        ["#signin", "#signup", "#auth"].includes(hash)
+        ["#signin", "#signup", "#auth"].includes(hash) ||
+          new URLSearchParams(window.location.search).has("code"),
       );
     }
     applyHash();
@@ -431,11 +437,18 @@ export default function App() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const accountRef = useRef<Session | null>(null);
   const syncActive = useRef(false);
-  const syncCancel = useRef<(() => void) | null>(null);
+  // Background sync engine (see lib/likes-sync-worker.ts). Started once
+  // on mount; `scheduleSync` below just nudges it.
+  const likesSyncRef = useRef<LikesSyncHandle | null>(null);
+  const runSyncRef = useRef<(session: Session) => Promise<void>>(
+    () => Promise.resolve()
+  );
 
+  // Keep mutable refs fresh every render (no deps array on purpose).
   useEffect(() => {
     accountRef.current = account;
-  }, [account]);
+    runSyncRef.current = runSync;
+  });
 
   /** Apply one server change to the music server + local state. Throws
    *  offline so the cursor does not advance past unapplied changes. */
@@ -519,12 +532,9 @@ export default function App() {
     }
   }
 
+  /** Nudge the background sync engine (debounced + coalesced there). */
   function scheduleSync(): void {
-    syncCancel.current?.();
-    syncCancel.current = syncWithBackoff(async () => {
-      const session = accountRef.current;
-      if (session !== null) await runSync(session);
-    });
+    likesSyncRef.current?.requestSync();
   }
 
   /** First login: seed the outbox from existing local likes so neither
@@ -559,7 +569,16 @@ export default function App() {
   function handleAuthed(session: Session): void {
     seedOutboxFromLocal(session);
     setAccount(session);
-    window.location.hash = "";
+    // Clear both the auth hash and any one-time OAuth query (?code=&state=).
+    try {
+      const clean = new URL(window.location.href);
+      clean.hash = "";
+      clean.searchParams.delete("code");
+      clean.searchParams.delete("state");
+      window.history.replaceState(null, "", clean.toString());
+    } catch {
+      window.location.hash = "";
+    }
     setIsAuthRoute(false);
     runSync(session).catch(() => {
       // Error state is set inside runSync; retry is scheduled by callers.
@@ -567,7 +586,7 @@ export default function App() {
   }
 
   async function handleSignOut(): Promise<void> {
-    syncCancel.current?.();
+    likesSyncRef.current?.cancel();
     await logout();
     setAccount(null);
     showToast("Signed out");
@@ -584,17 +603,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Background worker: auto-sync likes whenever we're online, plus
+    // heartbeat + cross-tab + visibility triggers (see the module docs).
+    const handle = startLikesSync({
+      isSignedIn: () => accountRef.current !== null,
+      hasPending: () => {
+        const session = accountRef.current;
+        return session !== null && loadOutbox(session.userId).length > 0;
+      },
+      run: async () => {
+        const session = accountRef.current;
+        if (session !== null) await runSyncRef.current(session);
+      },
+    });
+    likesSyncRef.current = handle;
     loadSession().then((session) => {
       if (session !== null) {
         setAccount(session);
         runSync(session).catch(() => {});
       }
     });
-    const onOnline = () => scheduleSync();
-    window.addEventListener("online", onOnline);
     return () => {
-      window.removeEventListener("online", onOnline);
-      syncCancel.current?.();
+      handle.stop();
+      likesSyncRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1221,7 +1252,6 @@ return (
             onClose={() => setSettingsOpen(false)}
             theme={theme}
             onPickTheme={setTheme}
-            accountEmail={account?.email ?? null}
             onOpenAccount={handleOpenAccount}
             onOpenDiagnostics={() => go("diagnostics")}
           />

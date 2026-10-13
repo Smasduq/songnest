@@ -45,6 +45,7 @@ pub struct RefreshBody {
 pub struct UserView {
     pub id: Uuid,
     pub email: String,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,14 +95,14 @@ pub async fn login(
     let email = password::normalize_email(&body.email);
     password::validate_email(&email).map_err(AuthError::InvalidInput)?;
 
-    let row: Option<(Uuid, String, String)> =
+    let row: Option<(Uuid, String, Option<String>)> =
         sqlx::query_as("SELECT id, email, password_hash FROM users WHERE email = $1")
             .bind(&email)
             .fetch_optional(&state.pool)
             .await?;
 
     match row {
-        Some((id, email, hash)) if password::verify_password(&body.password, &hash) => {
+        Some((id, email, Some(hash))) if password::verify_password(&body.password, &hash) => {
             Ok(Json(issue_pair(&state, id, &email, None).await?))
         }
         _ => {
@@ -211,25 +212,31 @@ pub fn authenticate(headers: &axum::http::HeaderMap, jwt_secret: &str) -> Result
     Ok(tokens::verify_access(jwt_secret, token)?.user_id)
 }
 
-/// `GET /me` → the caller's profile.
+/// `GET /me` → the caller's profile (plus avatar URL, if set).
 pub async fn me(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<UserView>, AppError> {
     let user_id = authenticate(&headers, &state.config.jwt_secret)?;
-    let row: Option<(Uuid, String)> = sqlx::query_as("SELECT id, email FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.pool)
-        .await?;
+    let row: Option<(Uuid, String, Option<String>)> =
+        sqlx::query_as("SELECT id, email, avatar_key FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await?;
     match row {
-        Some((id, email)) => Ok(Json(UserView { id, email })),
+        Some((id, email, avatar_key)) => Ok(Json(UserView {
+            id,
+            email,
+            avatar_url: avatar_key
+                .and_then(|key| state.storage.as_ref().map(|s| s.public_url(&key))),
+        })),
         None => Err(AppError::Auth(AuthError::Unauthorized)),
     }
 }
 
 /// Mint an access token + persistent refresh token for a user.
 /// `rotated_from` links the new token to the one it replaces.
-async fn issue_pair(
+pub(crate) async fn issue_pair(
     state: &AppState,
     user_id: Uuid,
     email: &str,
@@ -254,6 +261,8 @@ async fn issue_pair(
         user: UserView {
             id: user_id,
             email: email.to_owned(),
+            // Fresh credentials carry no avatar; clients read it via /me.
+            avatar_url: None,
         },
         access_token: access,
         refresh_token: refresh_raw,

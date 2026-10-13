@@ -23,18 +23,20 @@ export function SettingsPanel({
   theme,
   onPickTheme,
   accountEmail,
+  showProfileLabel = false,
   onOpenAccount,
   onOpenDiagnostics,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
-  accountEmail: string | null;
+  accountEmail?: string | null;
+  showProfileLabel?: boolean;
   onOpenAccount: () => void;
   onOpenDiagnostics: () => void;
 }) {
   return (
     <div className="space-y-5">
-      <Section icon={Palette} title="Appearance">
+      <Section icon={Palette} title="Themes">
         <div
           role="group"
           aria-label="Theme"
@@ -64,18 +66,16 @@ export function SettingsPanel({
         </div>
       </Section>
 
-      <Section icon={CircleUserRound} title="Account">
-        <button
-          type="button"
-          onClick={onOpenAccount}
-          className="flex w-full items-center gap-2.5 rounded-2xl bg-foreground/5 px-4 py-3 text-left text-sm text-foreground hover:text-foreground"
-        >
-          <CircleUserRound className="h-4 w-4 text-muted-foreground" aria-hidden />
-          <span className="flex-1 truncate">
-            {accountEmail ?? "Sign in / Sign up"}
-          </span>
-        </button>
-      </Section>
+      <button
+        type="button"
+        onClick={onOpenAccount}
+        className="flex w-full items-center gap-2.5 rounded-2xl bg-foreground/5 px-4 py-3 text-left text-sm text-foreground hover:text-foreground"
+      >
+        <CircleUserRound className="h-4 w-4 text-muted-foreground" aria-hidden />
+        <span className="flex-1">
+          {showProfileLabel ? "Profile" : accountEmail ?? "Sign in / Sign up"}
+        </span>
+      </button>
 
       <button
         type="button"

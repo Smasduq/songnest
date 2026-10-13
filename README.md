@@ -113,6 +113,9 @@ Environment variables (full list in `crates/accounts/.env.example`):
 | `SONGNEST_CORS_ORIGINS` | Vite + Tauri origins | Exact-match CORS allowlist |
 | `SONGNEST_AUTH_PER_MINUTE` | `10` | Per-IP auth rate limit |
 | `SONGNEST_MAX_BODY_BYTES` | `1048576` | Max JSON body size |
+| `SONGNEST_AVATARS_BUCKET` | `songnest-bucket` | Neon Object Storage bucket for profile pictures |
+| `SONGNEST_AVATAR_MAX_BYTES` | `524288` | Max avatar upload size (must fit inside `SONGNEST_MAX_BODY_BYTES`) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_ENDPOINT_URL_S3` / `AWS_REGION` | — (avatars disabled when absent) | Branch storage credentials, injected by `neon deploy`; set the same four on Vercel production |
 
 API reference (JSON; errors are `{ "error": "<showable message>" }`):
 
@@ -124,7 +127,9 @@ API reference (JSON; errors are `{ "error": "<showable message>" }`):
 | `POST /auth/login` | — (rate-limited) | `{email, password}` → `200` + tokens |
 | `POST /auth/refresh` | — (rate-limited) | `{refresh_token}` → rotated pair |
 | `POST /auth/logout` | — (rate-limited) | `{refresh_token}` → always `200` |
-| `GET /me` | Bearer | `{id, email}` |
+| `GET /me` | Bearer | `{id, email, avatar_url}` (`avatar_url` is null when unset) |
+| `PUT /me/avatar` | Bearer | Raw JPEG/PNG/WebP/GIF body (≤512 KiB, magic-byte checked) → `200` `{avatar_url}`; stored in Neon Object Storage under a fresh key, old picture removed |
+| `DELETE /me/avatar` | Bearer | Removes the picture → always `200` |
 | `GET /sync/likes?since=<cursor>` | Bearer | Changes after cursor (incl. unlikes), oldest first, + new `cursor` |
 | `POST /sync/likes` | Bearer | `{changes: [{track_id, liked, updated_at, title?, artist?, album?, cover?}]}` → `{cursor, applied, skipped}` (idempotent) |
 
@@ -142,7 +147,10 @@ account (mobile), or open `/#signin`. Tokens live in the OS credential
 store (localStorage fallback in browser dev). Likes work offline and sync
 on launch, login, change, and reconnect with backoff. The accounts base URL
 defaults to `http://127.0.0.1:8788`, overridable via `VITE_ACCOUNTS_URL` or
-the runtime `songnest-accounts-url` localStorage key.
+the runtime `songnest-accounts-url` localStorage key. Profile pictures are
+managed on `/#profile` (JPEG/PNG/WebP/GIF, ≤512 KiB) and stored in the
+`songnest-bucket` Neon Object Storage bucket; `GET /me` returns the public
+`avatar_url`.
 
 Deployment (`deploy/`): `Dockerfile.accounts` (build on the ARM VM),
 `songnest-accounts.service` (systemd), `Caddyfile` (HTTPS proxy), and

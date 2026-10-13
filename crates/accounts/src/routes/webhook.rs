@@ -80,12 +80,17 @@ mod tests {
                 database_url_unpooled: None,
                 jwt_secret: "test-secret-that-is-at-least-32-bytes!!".to_owned(),
                 github_webhook_secret: secret.map(str::to_owned),
+                github_client_id: None,
+                github_client_secret: None,
                 access_ttl: Duration::from_secs(900),
                 refresh_ttl: Duration::from_secs(3600),
                 max_body_bytes: 1024 * 1024,
                 cors_origins: Vec::new(),
                 auth_per_minute: 10,
+                avatars_bucket: "songnest-bucket".to_owned(),
+                avatar_max_bytes: 512 * 1024,
             },
+            storage: None,
         }
     }
 

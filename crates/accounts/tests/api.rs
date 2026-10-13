@@ -24,11 +24,16 @@ fn test_config(database_url: String, auth_per_minute: u64) -> Config {
         database_url_unpooled: std::env::var("TEST_DATABASE_URL_UNPOOLED").ok(),
         jwt_secret: "test-secret-that-is-at-least-32-bytes!!".to_owned(),
         github_webhook_secret: Some("test-webhook-secret".to_owned()),
+        github_client_id: None,
+        github_client_secret: None,
         access_ttl: Duration::from_secs(900),
         refresh_ttl: Duration::from_secs(3600),
         max_body_bytes: 1024 * 1024,
         cors_origins: vec!["http://localhost:1420".to_owned()],
         auth_per_minute,
+        avatars_bucket: std::env::var("SONGNEST_AVATARS_BUCKET")
+            .unwrap_or_else(|_| "songnest-bucket".to_owned()),
+        avatar_max_bytes: 512 * 1024,
     }
 }
 
@@ -77,6 +82,34 @@ impl Client {
         let json: Value = res.json().await.unwrap_or(Value::Null);
         (status, json)
     }
+
+    async fn put_bytes(&self, path: &str, token: Option<&str>, content_type: &str, bytes: Vec<u8>) -> (u16, Value) {
+        let mut req = self
+            .http
+            .put(format!("{}{path}", self.base))
+            .header("Content-Type", content_type)
+            .body(bytes);
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        let res = req.send().await.expect("request");
+        let status = res.status().as_u16();
+        let json: Value = res.json().await.unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    async fn delete_authed(&self, path: &str, token: &str) -> (u16, Value) {
+        let res = self
+            .http
+            .delete(format!("{}{path}", self.base))
+            .bearer_auth(token)
+            .send()
+            .await
+            .expect("request");
+        let status = res.status().as_u16();
+        let json: Value = res.json().await.unwrap_or(Value::Null);
+        (status, json)
+    }
 }
 
 /// Boot the app against the test DB, or return `None` to skip.
@@ -84,9 +117,11 @@ async fn boot(auth_per_minute: u64) -> Option<(Client, Config)> {
     let url = std::env::var("TEST_DATABASE_URL").ok()?;
     let config = test_config(url.clone(), auth_per_minute);
     let pool = db::connect_config(&config).await.ok()?;
+    let storage = songnest_accounts::storage::Storage::from_env(&config.avatars_bucket);
     let state = AppState {
         pool,
         config: config.clone(),
+        storage,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.ok()?;
     let addr = listener.local_addr().ok()?;
@@ -254,4 +289,80 @@ async fn auth_endpoints_are_rate_limited() {
         limited,
         "expected a 429 within 8 rapid signups at limit 3/min"
     );
+}
+
+/// Minimal PNG (magic bytes + filler — the API sniffs magic, it does not
+/// decode images) and an obvious non-image.
+fn png_bytes() -> Vec<u8> {
+    let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    v.extend_from_slice(&[0u8; 64]);
+    v
+}
+
+fn gif_bytes() -> Vec<u8> {
+    let mut v = b"GIF89a".to_vec();
+    v.extend_from_slice(&[0u8; 64]);
+    v
+}
+
+#[tokio::test]
+async fn avatar_upload_view_replace_delete_flow() {
+    let Some((client, _)) = boot(1000).await else {
+        eprintln!("SKIPPED: set TEST_DATABASE_URL to run live-DB tests");
+        return;
+    };
+    let email = unique_email("avatar");
+
+    let (status, signup) = client
+        .post(
+            "/auth/signup",
+            &json!({"email": email, "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 201, "{signup}");
+    let access = signup["access_token"].as_str().expect("access token");
+
+    // Without storage configured the endpoints answer 503 — skip, don't fail.
+    let (status, first) = client
+        .put_bytes("/me/avatar", Some(access), "image/png", png_bytes())
+        .await;
+    if status == 503 {
+        eprintln!("SKIPPED: avatar storage not configured (AWS_* unset)");
+        return;
+    }
+    assert_eq!(status, 200, "{first}");
+    let url1 = first["avatar_url"].as_str().expect("avatar_url");
+    assert!(url1.contains("avatars/"), "{url1}");
+
+    // Unauthenticated uploads are rejected.
+    let (status, _) = client
+        .put_bytes("/me/avatar", None, "image/png", png_bytes())
+        .await;
+    assert_eq!(status, 401);
+
+    // Non-images are rejected with a showable 400.
+    let (status, bad) = client
+        .put_bytes("/me/avatar", Some(access), "text/plain", b"hello".to_vec())
+        .await;
+    assert_eq!(status, 400, "{bad}");
+
+    // /me exposes the picture.
+    let (status, me) = client.get("/me", access).await;
+    assert_eq!(status, 200, "{me}");
+    assert_eq!(me["avatar_url"], url1);
+
+    // Replacing yields a fresh cache-busting URL…
+    let (status, second) = client
+        .put_bytes("/me/avatar", Some(access), "image/gif", gif_bytes())
+        .await;
+    assert_eq!(status, 200, "{second}");
+    let url2 = second["avatar_url"].as_str().expect("avatar_url");
+    assert_ne!(url1, url2);
+
+    // …and deleting clears it.
+    let (status, _) = client.delete_authed("/me/avatar", access).await;
+    assert_eq!(status, 200);
+    let (status, me) = client.get("/me", access).await;
+    assert_eq!(status, 200, "{me}");
+    assert!(me["avatar_url"].is_null(), "{me}");
 }

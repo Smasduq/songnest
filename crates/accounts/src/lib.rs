@@ -10,12 +10,13 @@ pub mod error;
 pub mod password;
 pub mod ratelimit;
 pub mod routes;
+pub mod storage;
 pub mod tokens;
 
 use axum::{
     Router,
     http::HeaderValue,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use std::time::Duration;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
@@ -28,6 +29,9 @@ use crate::{config::Config, ratelimit::RateLimitLayer};
 pub struct AppState {
     pub pool: db::Pool,
     pub config: Config,
+    /// Neon Object Storage. `None` when the `AWS_*` env is absent (local
+    /// dev without storage) — avatar endpoints answer 503, the rest works.
+    pub storage: Option<storage::Storage>,
 }
 
 /// Build the router. Split from [`run`] so tests can mount it in-process.
@@ -55,6 +59,8 @@ fn auth_router(state: &AppState) -> Router<AppState> {
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/refresh", post(routes::auth::refresh))
         .route("/auth/logout", post(routes::auth::logout))
+        .route("/auth/github/start", get(routes::github::start))
+        .route("/auth/github/callback", post(routes::github::callback))
         .layer(RateLimitLayer::new(
             state.config.auth_per_minute.max(1) as u32,
             Duration::from_secs(60),
@@ -65,6 +71,10 @@ fn auth_router(state: &AppState) -> Router<AppState> {
 fn api_router() -> Router<AppState> {
     Router::new()
         .route("/me", get(routes::auth::me))
+        .route(
+            "/me/avatar",
+            put(routes::avatar::put_avatar).delete(routes::avatar::delete_avatar),
+        )
         .route("/sync/likes", get(routes::sync::pull_likes))
         .route("/sync/likes", post(routes::sync::push_likes))
 }

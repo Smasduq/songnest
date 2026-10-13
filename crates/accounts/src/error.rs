@@ -15,6 +15,10 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("auth failure")]
     Auth(#[from] AuthError),
+    #[error("avatar storage unavailable")]
+    StorageUnavailable,
+    #[error("avatar storage failure: {0}")]
+    StorageFailed(String),
 }
 
 /// Startup configuration failures. Displayed only in server logs,
@@ -66,6 +70,12 @@ impl IntoResponse for AppError {
             }
             AppError::Auth(AuthError::InvalidInput(msg)) => (StatusCode::BAD_REQUEST, *msg),
             AppError::Auth(AuthError::Token) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            }
+            AppError::StorageUnavailable => {
+                (StatusCode::SERVICE_UNAVAILABLE, "avatars unavailable")
+            }
+            AppError::StorageFailed(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
             }
         };
