@@ -1,7 +1,15 @@
 import { useState } from "react";
 
 import { AuthComponent, type AuthMode } from "@/components/ui/sign-up";
-import { login, signup, type Session } from "@/lib/accounts";
+import {
+  AccountsError,
+  LOCAL_ACCOUNTS_URL,
+  getAccountsUrl,
+  login,
+  resetAccountsUrl,
+  signup,
+  type Session,
+} from "@/lib/accounts";
 
 /**
  * Songnest sign-in / sign-up page.
@@ -25,10 +33,27 @@ function SongnestLogo() {
 
 export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Session) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<AuthMode>("signup");
+  const [unreachableUrl, setUnreachableUrl] = useState<string | null>(null);
 
   async function handleSubmit(email: string, password: string): Promise<void> {
-    const session = mode === "login" ? await login(email, password) : await signup(email, password);
-    onAuthed(session);
+    try {
+      const session = mode === "login" ? await login(email, password) : await signup(email, password);
+      setUnreachableUrl(null);
+      onAuthed(session);
+    } catch (e) {
+      // The build already targets the local API; a stale runtime override
+      // (e.g. a hosted URL from earlier testing) is the usual cause of
+      // "can't reach the server" — offer a one-click way back to local.
+      if (e instanceof AccountsError && e.code === "unreachable") {
+        setUnreachableUrl(getAccountsUrl());
+      }
+      throw e;
+    }
+  }
+
+  function useLocalServer(): void {
+    resetAccountsUrl();
+    setUnreachableUrl(null);
   }
 
   return (
@@ -50,6 +75,18 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
         onModeChange={setMode}
         onSubmit={handleSubmit}
       />
+      {unreachableUrl !== null && unreachableUrl !== LOCAL_ACCOUNTS_URL && (
+        <p className="mx-auto mt-4 max-w-sm text-center text-xs text-muted-foreground">
+          Trying {unreachableUrl} —{" "}
+          <button
+            type="button"
+            onClick={useLocalServer}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            use the local server instead
+          </button>
+        </p>
+      )}
     </div>
   );
 }

@@ -21,9 +21,13 @@ import { secretDelete, secretGet, secretSet } from "./secure-store";
 
 const URL_KEY = "songnest-accounts-url";
 const SESSION_KEY = "songnest-accounts-session";
+/** Local accounts API. Local builds always default to this; a production
+ * URL is only used when baked in via `VITE_ACCOUNTS_URL` or explicitly
+ * set at runtime (see `setAccountsUrl`). */
+export const LOCAL_ACCOUNTS_URL = "http://127.0.0.1:8788";
 const BUILD_DEFAULT =
   (import.meta.env.VITE_ACCOUNTS_URL as string | undefined) ??
-  "http://127.0.0.1:8788";
+  LOCAL_ACCOUNTS_URL;
 
 export function getAccountsUrl(): string {
   try {
@@ -40,6 +44,20 @@ export function setAccountsUrl(url: string): void {
     window.localStorage.setItem(URL_KEY, url.replace(/\/+$/, ""));
   } catch {
     // Non-fatal: keeps running with the previous URL.
+  }
+}
+
+/**
+ * Forget any runtime accounts-URL override (e.g. a stale production URL)
+ * so the build default — the local API for local builds — takes effect
+ * again. Use when login fails with "can't reach the server" after moving
+ * between local and hosted backends.
+ */
+export function resetAccountsUrl(): void {
+  try {
+    window.localStorage.removeItem(URL_KEY);
+  } catch {
+    // Best effort.
   }
 }
 
