@@ -34,6 +34,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(routes::health::health))
+        .route("/webhooks/github", post(routes::webhook::github_webhook))
         .merge(auth_router(&state))
         .layer(RequestBodyLimitLayer::new(state.config.max_body_bytes))
         .layer(strict_cors(&state.config))

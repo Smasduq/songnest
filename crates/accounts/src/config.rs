@@ -25,6 +25,8 @@ pub struct Config {
     pub database_url: String,
     /// HMAC secret for access-token JWTs. No default — must be set.
     pub jwt_secret: String,
+    /// Optional secret for verifying GitHub App webhook deliveries.
+    pub github_webhook_secret: Option<String>,
     /// Access-token lifetime.
     pub access_ttl: Duration,
     /// Refresh-token lifetime.
@@ -50,6 +52,9 @@ impl Config {
             bind: parse_env("SONGNEST_ACCOUNTS_BIND", DEFAULT_BIND)?,
             database_url: require_env("DATABASE_URL")?,
             jwt_secret,
+            github_webhook_secret: std::env::var("SONGNEST_GITHUB_WEBHOOK_SECRET")
+                .ok()
+                .filter(|secret| !secret.is_empty()),
             access_ttl: Duration::from_secs(parse_env(
                 "SONGNEST_ACCESS_TTL_SECS",
                 &DEFAULT_ACCESS_TTL_SECS.to_string(),

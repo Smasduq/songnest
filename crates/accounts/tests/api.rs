@@ -22,6 +22,7 @@ fn test_config(database_url: String, auth_per_minute: u64) -> Config {
         bind: "127.0.0.1:0".parse().expect("test bind addr"),
         database_url,
         jwt_secret: "test-secret-that-is-at-least-32-bytes!!".to_owned(),
+        github_webhook_secret: Some("test-webhook-secret".to_owned()),
         access_ttl: Duration::from_secs(900),
         refresh_ttl: Duration::from_secs(3600),
         max_body_bytes: 1024 * 1024,

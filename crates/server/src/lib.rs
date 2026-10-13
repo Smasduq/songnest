@@ -97,7 +97,12 @@ fn trace(tag: &str, msg: String) {
     use std::sync::OnceLock;
     static T0: OnceLock<Instant> = OnceLock::new();
     let t0 = T0.get_or_init(Instant::now);
-    eprintln!("[trace {:>9}ms {:<8}] {}", t0.elapsed().as_millis(), tag, msg);
+    eprintln!(
+        "[trace {:>9}ms {:<8}] {}",
+        t0.elapsed().as_millis(),
+        tag,
+        msg
+    );
 }
 
 #[derive(Clone)]
@@ -140,8 +145,20 @@ fn youtube_blocked(text: &str) -> bool {
 /// Single letters are kept ("treat u right" needs the "u").
 fn word_tokens(s: &str) -> Vec<String> {
     const FILLER: &[&str] = &[
-        "official", "audio", "video", "music", "lyrics", "lyric", "visualizer",
-        "topic", "vevo", "records", "entertainment", "hq", "hd", "4k",
+        "official",
+        "audio",
+        "video",
+        "music",
+        "lyrics",
+        "lyric",
+        "visualizer",
+        "topic",
+        "vevo",
+        "records",
+        "entertainment",
+        "hq",
+        "hd",
+        "4k",
     ];
     s.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
@@ -200,11 +217,7 @@ async fn with_contributors(http: &reqwest::Client, mut tracks: Vec<DzTrack>) -> 
                 .send()
                 .await;
             let contributors = match res {
-                Ok(r) => r
-                    .json::<DzTrack>()
-                    .await
-                    .ok()
-                    .map(|full| full.contributors),
+                Ok(r) => r.json::<DzTrack>().await.ok().map(|full| full.contributors),
                 Err(_) => None,
             };
             (i, contributors)
@@ -329,8 +342,8 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         s += 8;
     }
     for bad in [
-        "live", "cover", "remix", "lyrics", "karaoke", "slowed", "sped up",
-        "tiktok", "reverb", "8d",
+        "live", "cover", "remix", "lyrics", "karaoke", "slowed", "sped up", "tiktok", "reverb",
+        "8d",
     ] {
         if yt.contains(bad) {
             s -= 20;
@@ -439,12 +452,9 @@ impl DownloaderState {
             if d.binary_path.is_empty() {
                 anyhow::bail!("no yt-dlp binary configured");
             }
-            let (name, path) = pick_runtime(
-                &d.runtimes,
-                &d.runtime_setting,
-                d.setting_path.as_ref()
-            )
-            .unwrap_or_default();
+            let (name, path) =
+                pick_runtime(&d.runtimes, &d.runtime_setting, d.setting_path.as_ref())
+                    .unwrap_or_default();
             (d.binary_path.clone(), name, path)
         };
         let mut args = Vec::new();
@@ -526,12 +536,8 @@ struct YtDlpCall {
     _guard: ActiveGuard,
 }
 
-
 /// Run a command with a timeout. None on timeout, spawn failure, or non-UTF8 issues.
-async fn run_timeout(
-    cmd: &mut tokio::process::Command,
-    secs: u64,
-) -> Option<std::process::Output> {
+async fn run_timeout(cmd: &mut tokio::process::Command, secs: u64) -> Option<std::process::Output> {
     tokio::time::timeout(Duration::from_secs(secs), cmd.output())
         .await
         .ok()?
@@ -640,18 +646,19 @@ async fn detect_runtimes(setting_path: Option<(String, String)>) -> Vec<RuntimeI
     let mut out = Vec::new();
     if let Some((name, path)) = setting_path {
         // user explicitly set this path: probe exactly it, nothing else extra
-        let probed = run_timeout(
-            tokio::process::Command::new(&path).arg("--version"),
-            8,
-        )
-        .await;
+        let probed = run_timeout(tokio::process::Command::new(&path).arg("--version"), 8).await;
         if let Some(o) = probed.filter(|o| o.status.success()) {
             let version = String::from_utf8(o.stdout)
                 .ok()
                 .and_then(|t| t.lines().next().map(|l| l.trim().to_string()))
                 .unwrap_or_default();
             let (n, supported) = classify_runtime(&name, &version);
-            out.push(RuntimeInfo { name: n, version, supported, path });
+            out.push(RuntimeInfo {
+                name: n,
+                version,
+                supported,
+                path,
+            });
         }
         return out;
     }
@@ -711,7 +718,11 @@ fn parse_runtime_setting(raw: &str) -> (String, Option<(String, String)>) {
 }
 /// Managed binary location inside the app data dir.
 fn managed_bin_path() -> std::path::PathBuf {
-    let exe = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+    let exe = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
     std::path::Path::new("bin").join(exe)
 }
 
@@ -768,7 +779,7 @@ async fn probe_ejs(binary: &str, source: &str) -> (Option<bool>, String) {
                 return (
                     None,
                     "no yt-dlp binary to inspect (PATH lookup failed)".to_string(),
-                )
+                );
             }
         }
     }
@@ -821,10 +832,7 @@ async fn probe_ejs_file(path: &str) -> (Option<bool>, String) {
     .await
     .is_some_and(|o| o.status.success());
     if ok {
-        (
-            Some(true),
-            format!("yt_dlp_ejs importable under {interp}"),
-        )
+        (Some(true), format!("yt_dlp_ejs importable under {interp}"))
     } else {
         (
             None,
@@ -836,11 +844,7 @@ async fn probe_ejs_file(path: &str) -> (Option<bool>, String) {
 }
 
 async fn probe_ffmpeg() -> Option<String> {
-    let out = run_timeout(
-        tokio::process::Command::new("ffmpeg").arg("-version"),
-        8,
-    )
-    .await?;
+    let out = run_timeout(tokio::process::Command::new("ffmpeg").arg("-version"), 8).await?;
     if !out.status.success() {
         return None;
     }
@@ -899,10 +903,7 @@ fn classify_failure(stderr_text: &str, io_failed: bool) -> Health {
     {
         return Health::Offline;
     }
-    if t.contains("429")
-        || t.contains("sign in to confirm")
-        || t.contains("bot check")
-    {
+    if t.contains("429") || t.contains("sign in to confirm") || t.contains("bot check") {
         return Health::RateLimited;
     }
     if t.contains("js runtime")
@@ -930,10 +931,7 @@ fn cookies_file() -> std::path::PathBuf {
 fn cookie_args() -> Vec<String> {
     let path = cookies_file();
     if path.exists() {
-        vec![
-            "--cookies".to_string(),
-            path.to_string_lossy().into_owned(),
-        ]
+        vec!["--cookies".to_string(), path.to_string_lossy().into_owned()]
     } else {
         Vec::new()
     }
@@ -1003,7 +1001,11 @@ fn browser_search_roots() -> Vec<(&'static str, std::path::PathBuf, bool)> {
             out.extend([
                 ("chrome", h.join(".config/google-chrome"), false),
                 ("chromium", h.join(".config/chromium"), false),
-                ("brave", h.join(".config/BraveSoftware/Brave-Browser"), false),
+                (
+                    "brave",
+                    h.join(".config/BraveSoftware/Brave-Browser"),
+                    false,
+                ),
                 ("edge", h.join(".config/microsoft-edge"), false),
                 ("vivaldi", h.join(".config/vivaldi"), false),
                 ("opera", h.join(".config/opera"), false),
@@ -1029,7 +1031,11 @@ fn profile_has_yt_login(db_src: &std::path::Path, firefox: bool) -> bool {
         } else {
             ("cookies", "host_key")
         };
-        let placeholders = YT_AUTH_COOKIES.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = YT_AUTH_COOKIES
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
         let sql = format!(
             "SELECT 1 FROM {table} WHERE ({host_col} LIKE '%youtube%' OR {host_col} LIKE '%google%') AND name IN ({placeholders}) LIMIT 1"
         );
@@ -1054,10 +1060,7 @@ fn cookie_import_candidates() -> Vec<(String, String)> {
                 if firefox {
                     let db = e.path().join("cookies.sqlite");
                     if db.is_file() {
-                        profiles.push((
-                            e.file_name().to_string_lossy().into_owned(),
-                            db,
-                        ));
+                        profiles.push((e.file_name().to_string_lossy().into_owned(), db));
                     }
                 } else {
                     if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -1126,8 +1129,7 @@ async fn try_import_spec(bin: &str, spec: &str, dest: &std::path::Path) -> bool 
         }
     }
     for s in &specs {
-        let tmp =
-            std::env::temp_dir().join(format!("songnest-cookies-{}.txt", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("songnest-cookies-{}.txt", std::process::id()));
         let _ = std::fs::remove_file(&tmp);
         let probe = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -1398,13 +1400,14 @@ async fn youtube_match(
         let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
         let out = tokio::time::timeout(
             Duration::from_secs(25),
-            cmd.args(cookie_args()).args([
-                "-J",
-                "--flat-playlist",
-                "--no-playlist",
-                &format!("ytsearch10:{q}"),
-            ])
-            .output(),
+            cmd.args(cookie_args())
+                .args([
+                    "-J",
+                    "--flat-playlist",
+                    "--no-playlist",
+                    &format!("ytsearch10:{q}"),
+                ])
+                .output(),
         )
         .await
         .ok()?
@@ -1419,7 +1422,10 @@ async fn youtube_match(
             if best.as_ref().map_or(true, |(_, b)| sc > *b) {
                 best = Some((e, sc));
             }
-            if best.as_ref().is_some_and(|(be, bs)| is_confident(be, t, *bs)) {
+            if best
+                .as_ref()
+                .is_some_and(|(be, bs)| is_confident(be, t, *bs))
+            {
                 break;
             }
         }
@@ -1494,9 +1500,7 @@ fn clean_stale_tmp_dirs_in(base: &str) {
     if let Ok(rd) = std::fs::read_dir(base) {
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_dir()
-                && e.file_name().to_string_lossy().starts_with(".tmp-")
-            {
+            if p.is_dir() && e.file_name().to_string_lossy().starts_with(".tmp-") {
                 let _ = std::fs::remove_dir_all(&p);
             }
         }
@@ -1561,7 +1565,10 @@ fn download_job(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    trace("dl", format!("yt-dlp spawned pid={} id={video_id}", child.id()));
+    trace(
+        "dl",
+        format!("yt-dlp spawned pid={} id={video_id}", child.id()),
+    );
     // Progress flows on stdout: parse it on the drain thread and ship
     // percentages back, so the child never blocks on a full pipe.
     let (ptx, prx) = std::sync::mpsc::channel::<u8>();
@@ -1683,14 +1690,21 @@ async fn download_direct(
 ) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
     trace("dl", format!("direct download start {video_id} (resolve)"));
-    let mut url = resolve_url(s, video_id, false).await.map_err(|e| e.to_string())?;
-    trace("dl", format!("direct download {video_id} resolved, fetching chunks"));
+    let mut url = resolve_url(s, video_id, false)
+        .await
+        .map_err(|e| e.to_string())?;
+    trace(
+        "dl",
+        format!("direct download {video_id} resolved, fetching chunks"),
+    );
     let ext = audio_ext(&cached_mime(s, video_id).unwrap_or_else(|| "audio/mp4".to_string()));
     const CHUNK: u64 = 1024 * 1024;
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
     let tmp = format!("{out_dir}/{video_id}.{ext}.part");
     let final_path = format!("{out_dir}/{video_id}.{ext}");
-    let mut file = tokio::fs::File::create(&tmp).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut start: u64 = 0;
     let mut total: u64 = 0;
     let mut logged_decile: u64 = 0;
@@ -1734,7 +1748,10 @@ async fn download_direct(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0);
         }
-        let bytes = resp.bytes().await.map_err(|e| format!("audio fetch failed: {e}"))?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("audio fetch failed: {e}"))?;
         if bytes.is_empty() {
             break;
         }
@@ -1796,13 +1813,19 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
     };
     // 2. cached match: each song is searched once, even across queue jobs
     trace("dl", format!("job {job_id} matching dz={dzid}"));
-    let Some((video_id, _)) = youtube_match(&s.downloader, &s.backend, &s.db, &t, false).await else {
-        set_job(&s.db, job_id, "error", 0, Some("no YouTube match (throttled?)"));
+    let Some((video_id, _)) = youtube_match(&s.downloader, &s.backend, &s.db, &t, false).await
+    else {
+        set_job(
+            &s.db,
+            job_id,
+            "error",
+            0,
+            Some("no YouTube match (throttled?)"),
+        );
         trace("dl", format!("job {job_id} match failed"));
         return;
     };
-    s.db
-        .lock()
+    s.db.lock()
         .unwrap()
         .execute(
             "UPDATE downloads SET video_id=?1, updated_at=strftime('%s','now') WHERE id=?2",
@@ -1851,7 +1874,13 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
             promote_download("music", job_id, &p)
         }
         Err(msg) => {
-            trace("dl", format!("job {job_id} download failed: {}", msg.chars().take(120).collect::<String>()));
+            trace(
+                "dl",
+                format!(
+                    "job {job_id} download failed: {}",
+                    msg.chars().take(120).collect::<String>()
+                ),
+            );
             let _ = std::fs::remove_dir_all(&tmp_dir);
             if youtube_blocked(&msg) {
                 *s.yt_cooldown_until.lock().unwrap() =
@@ -2055,7 +2084,9 @@ async fn queue_page(State(s): State<AppState>) -> impl IntoResponse {
     if items.is_empty() {
         items = "<li>(queue empty)</li>".to_string();
     }
-    axum::response::Html(format!("<h1>download queue</h1><ul>{items}</ul><p><a href=\"/\">back</a></p>"))
+    axum::response::Html(format!(
+        "<h1>download queue</h1><ul>{items}</ul><p><a href=\"/\">back</a></p>"
+    ))
 }
 
 /// Suggested songs: Deezer global chart, top 10.
@@ -2064,18 +2095,13 @@ async fn api_suggest(State(s): State<AppState>) -> impl IntoResponse {
     struct Chart {
         tracks: DzSearch,
     }
-    let Ok(resp) = s.http.get("https://api.deezer.com/chart").send().await
-    else {
+    let Ok(resp) = s.http.get("https://api.deezer.com/chart").send().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
     let Ok(chart): Result<Chart, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    let tracks = with_contributors(
-        &s.http,
-        chart.tracks.data.into_iter().take(10).collect(),
-    )
-    .await;
+    let tracks = with_contributors(&s.http, chart.tracks.data.into_iter().take(10).collect()).await;
     Json(
         tracks
             .iter()
@@ -2106,33 +2132,29 @@ struct LikeBody {
 }
 
 async fn api_likes(State(s): State<AppState>) -> impl IntoResponse {
-    let rows: Vec<serde_json::Value> = s
-        .db
-        .lock()
-        .unwrap()
-        .prepare("SELECT key, title, artist, album, cover FROM liked ORDER BY liked_at DESC")
-        .map(|mut st| {
-            st.query_map([], |r| {
-                Ok(serde_json::json!({
-                    "key": r.get::<_, String>(0)?,
-                    "title": r.get::<_, String>(1)?,
-                    "artist": r.get::<_, String>(2)?,
-                    "album": r.get::<_, String>(3)?,
-                    "cover": r.get::<_, String>(4)?,
-                }))
-            })
+    let rows: Vec<serde_json::Value> =
+        s.db.lock()
             .unwrap()
-            .filter_map(|r| r.ok())
-            .collect()
-        })
-        .unwrap_or_default();
+            .prepare("SELECT key, title, artist, album, cover FROM liked ORDER BY liked_at DESC")
+            .map(|mut st| {
+                st.query_map([], |r| {
+                    Ok(serde_json::json!({
+                        "key": r.get::<_, String>(0)?,
+                        "title": r.get::<_, String>(1)?,
+                        "artist": r.get::<_, String>(2)?,
+                        "album": r.get::<_, String>(3)?,
+                        "cover": r.get::<_, String>(4)?,
+                    }))
+                })
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+            })
+            .unwrap_or_default();
     Json(rows)
 }
 
-async fn api_like(
-    State(s): State<AppState>,
-    Json(b): Json<LikeBody>,
-) -> impl IntoResponse {
+async fn api_like(State(s): State<AppState>, Json(b): Json<LikeBody>) -> impl IntoResponse {
     if b.key.trim().is_empty() || b.title.trim().is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -2156,8 +2178,7 @@ async fn api_like(
             }
         }
     }
-    s.db
-        .lock()
+    s.db.lock()
         .unwrap()
         .execute(
             "INSERT INTO liked (key, title, artist, album, cover, liked_at)
@@ -2177,8 +2198,7 @@ async fn api_unlike(
 ) -> impl IntoResponse {
     match q.get("key") {
         Some(k) => {
-            s.db
-                .lock()
+            s.db.lock()
                 .unwrap()
                 .execute("DELETE FROM liked WHERE key = ?1", [k])
                 .ok();
@@ -2191,16 +2211,12 @@ async fn api_unlike(
 /// DELETE /api/track/:id — delete a downloaded track: audio file, library
 /// row, and its `db:<id>` like (the song is gone, so the like goes too).
 /// Queue/match history is left alone (re-download reuses the match).
-async fn api_delete_track(
-    State(s): State<AppState>,
-    Path(id): Path<i64>,
-) -> impl IntoResponse {
-    let path: Option<String> = s
-        .db
-        .lock()
-        .unwrap()
-        .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
-        .ok();
+async fn api_delete_track(State(s): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
+    let path: Option<String> =
+        s.db.lock()
+            .unwrap()
+            .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
+            .ok();
     let Some(path) = path else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -2253,12 +2269,13 @@ async fn api_cookies_install(body: String) -> impl IntoResponse {
     }
     let mut lines = body.lines().filter(|l| !l.trim().is_empty());
     let header = lines.next().unwrap_or("");
-    let ok_header =
-        header.starts_with("# Netscape HTTP Cookie File") || header.starts_with("# HTTP Cookie File");
-    let ok_body = body.contains("youtube.com") && body.lines().any(|l| {
-        let l = l.trim();
-        !l.starts_with('#') && l.split('\t').count() >= 6
-    });
+    let ok_header = header.starts_with("# Netscape HTTP Cookie File")
+        || header.starts_with("# HTTP Cookie File");
+    let ok_body = body.contains("youtube.com")
+        && body.lines().any(|l| {
+            let l = l.trim();
+            !l.starts_with('#') && l.split('\t').count() >= 6
+        });
     if !(ok_header && ok_body) {
         return (
             StatusCode::BAD_REQUEST,
@@ -2327,33 +2344,31 @@ async fn api_library(State(s): State<AppState>) -> impl IntoResponse {
 /// refreshes library + liked artist strings from the per-track endpoint.
 /// Best-effort, concurrent; returns how many rows changed.
 async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
-    let tracks: Vec<(i64, String, i64)> = s
-        .db
-        .lock()
-        .unwrap()
-        .prepare("SELECT id, artist, deezer_id FROM tracks WHERE deezer_id != 0")
-        .map(|mut st| {
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    let tracks: Vec<(i64, String, i64)> =
+        s.db.lock()
+            .unwrap()
+            .prepare("SELECT id, artist, deezer_id FROM tracks WHERE deezer_id != 0")
+            .map(|mut st| {
+                st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .unwrap()
+                    .filter_map(|r| r.ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+    let liked: Vec<(String, String)> =
+        s.db.lock()
+            .unwrap()
+            .prepare("SELECT key, artist FROM liked WHERE key LIKE 'dz:%'")
+            .map(|mut st| {
+                st.query_map([], |r| {
+                    let key: String = r.get(0)?;
+                    Ok((key, r.get(1)?))
+                })
                 .unwrap()
                 .filter_map(|r| r.ok())
                 .collect()
-        })
-        .unwrap_or_default();
-    let liked: Vec<(String, String)> = s
-        .db
-        .lock()
-        .unwrap()
-        .prepare("SELECT key, artist FROM liked WHERE key LIKE 'dz:%'")
-        .map(|mut st| {
-            st.query_map([], |r| {
-                let key: String = r.get(0)?;
-                Ok((key, r.get(1)?))
             })
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect()
-        })
-        .unwrap_or_default();
+            .unwrap_or_default();
     enum Target {
         Track(i64),
         Like(String),
@@ -2370,11 +2385,7 @@ async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
                 .send()
                 .await;
             let full = match res {
-                Ok(r) => r
-                    .json::<DzTrack>()
-                    .await
-                    .ok()
-                    .map(|t| display_artists(&t)),
+                Ok(r) => r.json::<DzTrack>().await.ok().map(|t| display_artists(&t)),
                 Err(_) => None,
             };
             (Target::Track(id), full)
@@ -2383,9 +2394,7 @@ async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
     for (key, _stored) in &liked {
         let http = s.http.clone();
         let key = key.clone();
-        let dz = key
-            .strip_prefix("dz:")
-            .and_then(|v| v.parse::<u64>().ok());
+        let dz = key.strip_prefix("dz:").and_then(|v| v.parse::<u64>().ok());
         let Some(dz) = dz else { continue };
         set.spawn(async move {
             let res = http
@@ -2394,11 +2403,7 @@ async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
                 .send()
                 .await;
             let full = match res {
-                Ok(r) => r
-                    .json::<DzTrack>()
-                    .await
-                    .ok()
-                    .map(|t| display_artists(&t)),
+                Ok(r) => r.json::<DzTrack>().await.ok().map(|t| display_artists(&t)),
                 Err(_) => None,
             };
             (Target::Like(key), full)
@@ -2419,7 +2424,9 @@ async fn api_refresh_artists(State(s): State<AppState>) -> impl IntoResponse {
         }
     };
     while let Some(res) = set.join_next().await {
-        let Ok((target, Some(full))) = res else { continue };
+        let Ok((target, Some(full))) = res else {
+            continue;
+        };
         if stored_of(&target) != Some(full.as_str()) {
             match target {
                 Target::Track(id) => track_updates.push((id, full)),
@@ -2471,9 +2478,7 @@ async fn api_search(
     let Ok(res): Result<DzSearch, _> = resp.json().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    let tracks =
-        with_contributors(&s.http, res.data.into_iter().take(10).collect())
-            .await;
+    let tracks = with_contributors(&s.http, res.data.into_iter().take(10).collect()).await;
     Json(
         tracks
             .iter()
@@ -2625,9 +2630,7 @@ async fn api_downloader_runtime(
     Json(b): Json<RuntimeSettingBody>,
 ) -> impl IntoResponse {
     let (setting, setting_path) = parse_runtime_setting(&b.setting);
-    if setting != "auto"
-        && !["deno", "node", "bun", "quickjs"].contains(&setting.as_str())
-    {
+    if setting != "auto" && !["deno", "node", "bun", "quickjs"].contains(&setting.as_str()) {
         return (
             StatusCode::BAD_REQUEST,
             "setting must be auto|deno|node|bun|quickjs",
@@ -2651,12 +2654,9 @@ async fn api_downloader_runtime(
         let (setting, path) = s
             .downloader
             .read(|d| (d.runtime_setting.clone(), d.setting_path.clone()));
-        detect_runtimes(path.map(|(_, p)| {
-            (
-                setting.split(':').next().unwrap_or("auto").to_string(),
-                p,
-            )
-        }))
+        detect_runtimes(
+            path.map(|(_, p)| (setting.split(':').next().unwrap_or("auto").to_string(), p)),
+        )
         .await
     };
     s.downloader.inner.write().unwrap().runtimes = runtimes;
@@ -2664,24 +2664,19 @@ async fn api_downloader_runtime(
 }
 
 async fn health(State(s): State<AppState>) -> impl IntoResponse {
-    let d = s.downloader.read(|d| {
-        (
-            d.version.clone(),
-            d.latest.clone(),
-            d.update_available,
-        )
-    });
+    let d = s
+        .downloader
+        .read(|d| (d.version.clone(), d.latest.clone(), d.update_available));
     let (ver, latest, update_available) = d;
-    let depth: i64 = s
-        .db
-        .lock()
-        .unwrap()
-        .query_row(
-            "SELECT COUNT(*) FROM downloads WHERE status IN ('queued','active')",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
+    let depth: i64 =
+        s.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM downloads WHERE status IN ('queued','active')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
     // "Signed in" == a cookies.txt is present (songnestpy hands it to
     // yt-dlp); desktop yt-dlp reads its own cookie args the same way.
     #[cfg(feature = "songnestpy")]
@@ -2717,11 +2712,7 @@ async fn wait_idle(dl: &DownloaderState) -> bool {
 
 /// Verify downloaded bytes against a SHA2-256SUMS-style listing.
 /// Refuses (Err) on missing entry or mismatch.
-fn verify_checksum(
-    bytes: &[u8],
-    sums_text: &str,
-    asset_name: &str,
-) -> Result<(), String> {
+fn verify_checksum(bytes: &[u8], sums_text: &str, asset_name: &str) -> Result<(), String> {
     let expect = sums_text.lines().find_map(|l| {
         let mut it = l.split_whitespace();
         let (hash, name) = (it.next()?, it.next()?);
@@ -2789,8 +2780,7 @@ async fn run_update(s: &AppState) -> String {
     let dl = &s.downloader;
     let rel: serde_json::Value = match tokio::time::timeout(
         Duration::from_secs(15),
-        http
-            .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+        http.get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
             .header("User-Agent", "songnest")
             .send(),
     )
@@ -2862,10 +2852,7 @@ async fn run_update(s: &AppState) -> String {
         let resp = resp.error_for_status().ok()?;
         resp.bytes().await.ok().map(|b| b.to_vec())
     }
-    let (sums, bytes) = tokio::join!(
-        get_bytes(http, &sums_url),
-        get_bytes(http, &asset_url)
-    );
+    let (sums, bytes) = tokio::join!(get_bytes(http, &sums_url), get_bytes(http, &asset_url));
     let (Some(sums), Some(bytes)) = (sums, bytes) else {
         return "download failed".to_string();
     };
@@ -2909,13 +2896,8 @@ async fn run_update(s: &AppState) -> String {
     }
     // re-detect against the fresh binary
     let fresh = init_downloader().await;
-    let (version, ejs, note) = fresh.read(|d| {
-        (
-            d.version.clone(),
-            d.ejs_available,
-            d.ejs_note.clone(),
-        )
-    });
+    let (version, ejs, note) =
+        fresh.read(|d| (d.version.clone(), d.ejs_available, d.ejs_note.clone()));
     {
         let mut d = dl.inner.write().unwrap();
         d.binary_path = dest.to_string_lossy().into_owned();
@@ -2956,8 +2938,10 @@ async fn update_cycle(s: &AppState) {
         d.last_check_at = now_unix();
         d.update_available = match (&latest, current.is_empty()) {
             (Some(l), false) => {
-                cmp_date_version(l.trim_start_matches(|c: char| !c.is_ascii_alphanumeric()), &current)
-                    == std::cmp::Ordering::Greater
+                cmp_date_version(
+                    l.trim_start_matches(|c: char| !c.is_ascii_alphanumeric()),
+                    &current,
+                ) == std::cmp::Ordering::Greater
             }
             _ => false,
         };
@@ -2971,8 +2955,7 @@ async fn update_cycle(s: &AppState) {
 async fn fetch_latest_tag(http: &reqwest::Client) -> Option<String> {
     let r = tokio::time::timeout(
         Duration::from_secs(15),
-        http
-            .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+        http.get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
             .header("User-Agent", "songnest")
             .send(),
     )
@@ -3038,9 +3021,8 @@ async fn health_check(s: &AppState) {
     // fast path: no runtime at all and none configured (yt-dlp only —
     // songnestpy runs yt-dlp on-device and needs no JS runtime)
     let runtimes_empty = matches!(s.backend, Backend::YtDlp)
-        && s.downloader.read(|d| {
-            d.runtimes.iter().all(|r| !r.supported)
-        });
+        && s.downloader
+            .read(|d| d.runtimes.iter().all(|r| !r.supported));
     let probe = tokio::time::timeout(Duration::from_secs(60), probe_fetch(s)).await;
     let (health, err) = match probe {
         Err(_) => (Health::Offline, "probe timed out (offline?)".to_string()),
@@ -3146,11 +3128,7 @@ pub fn port_from_env() -> u16 {
 /// routes. `data_dir` (library.db/music/cookies.txt/backend caches) becomes
 /// the process cwd first — same as `serve --data-dir`. Callable from the
 /// CLI or embedded (Tauri mobile runs this in-process on localhost).
-pub async fn run(
-    data_dir: Option<String>,
-    backend: Backend,
-    port: u16,
-) -> anyhow::Result<()> {
+pub async fn run(data_dir: Option<String>, backend: Backend, port: u16) -> anyhow::Result<()> {
     if let Some(dir) = data_dir {
         std::fs::create_dir_all(&dir)?;
         std::env::set_current_dir(&dir)?;
@@ -3218,7 +3196,10 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/auth/device", post(api_auth_device))
         .route("/api/auth/status", get(api_auth_status))
         .route("/api/auth/logout", post(api_auth_logout))
-        .route("/api/cookies", get(api_cookies_status).post(api_cookies_install))
+        .route(
+            "/api/cookies",
+            get(api_cookies_status).post(api_cookies_install),
+        )
         .route("/api/cookies/import", post(api_cookies_import))
         .route("/api/library", get(api_library))
         .route("/api/library/refresh-artists", post(api_refresh_artists))
@@ -3362,7 +3343,8 @@ async fn deezer_cover_for_youtube(s: &AppState, video_id: &str) -> Option<String
     if title.is_empty() {
         return None;
     }
-    let res: DzSearch = s.http
+    let res: DzSearch = s
+        .http
         .get("https://api.deezer.com/search")
         .query(&[("q", &title)])
         .send()
@@ -3496,7 +3478,9 @@ async fn dplay(
     let vid: Option<String> = if cooling.is_some() {
         None
     } else {
-        youtube_match(&s.downloader, &s.backend, &s.db, &t, fresh).await.map(|(v, _)| v)
+        youtube_match(&s.downloader, &s.backend, &s.db, &t, fresh)
+            .await
+            .map(|(v, _)| v)
     };
     let (audio_src, note) = match (vid, cooling) {
         (Some(v), _) => (
@@ -3583,11 +3567,7 @@ use std::time::{Duration, Instant};
 /// what the client offers.
 #[cfg(feature = "songnestpy")]
 fn audio_ext(mime: &str) -> &'static str {
-    if mime.contains("mp4") {
-        "m4a"
-    } else {
-        "webm"
-    }
+    if mime.contains("mp4") { "m4a" } else { "webm" }
 }
 
 /// Resolved stream: playable URL + mime. yt-dlp prints a `-g` URL (always
@@ -3680,11 +3660,7 @@ async fn resolve_url(s: &AppState, id: &str, fresh: bool) -> anyhow::Result<Stri
 /// Mime of the cached resolve, if any (set by resolve_url).
 #[cfg(feature = "songnestpy")]
 fn cached_mime(s: &AppState, id: &str) -> Option<String> {
-    s.urls
-        .lock()
-        .unwrap()
-        .get(id)
-        .map(|(_, m, _)| m.clone())
+    s.urls.lock().unwrap().get(id).map(|(_, m, _)| m.clone())
 }
 
 async fn stream(State(s): State<AppState>, Path(id): Path<String>, req: Request<Body>) -> Response {
@@ -3822,10 +3798,19 @@ mod downloader_tests {
 
     #[test]
     fn date_versions_compare_numerically() {
-        assert_eq!(cmp_date_version("2025.01.26", "2025.01.26"), Ordering::Equal);
-        assert_eq!(cmp_date_version("2026.08.19", "2025.01.26"), Ordering::Greater);
+        assert_eq!(
+            cmp_date_version("2025.01.26", "2025.01.26"),
+            Ordering::Equal
+        );
+        assert_eq!(
+            cmp_date_version("2026.08.19", "2025.01.26"),
+            Ordering::Greater
+        );
         assert_eq!(cmp_date_version("2025.01.9", "2025.01.26"), Ordering::Less);
-        assert_eq!(cmp_date_version("2026.08.19", "2026.08.19.1"), Ordering::Less);
+        assert_eq!(
+            cmp_date_version("2026.08.19", "2026.08.19.1"),
+            Ordering::Less
+        );
     }
 
     #[test]
@@ -3859,14 +3844,18 @@ mod downloader_tests {
             supported,
             path: name.to_string(),
         };
-        let all = vec![mk("bun", true), mk("quickjs", true), mk("node", true), mk("deno", true)];
+        let all = vec![
+            mk("bun", true),
+            mk("quickjs", true),
+            mk("node", true),
+            mk("deno", true),
+        ];
         // auto follows wiki order regardless of probe order
         assert_eq!(
             pick_runtime(&all, "auto", None).map(|v| v.0),
             Some("deno".to_string())
         );
-        let no_deno: Vec<RuntimeInfo> =
-            all.into_iter().filter(|r| r.name != "deno").collect();
+        let no_deno: Vec<RuntimeInfo> = all.into_iter().filter(|r| r.name != "deno").collect();
         assert_eq!(
             pick_runtime(&no_deno, "auto", None).map(|v| v.0),
             Some("node".to_string())
@@ -4054,10 +4043,7 @@ mod downloader_tests {
         assert!(get_match(&db, 123).is_none());
         // fresh match with the current algo: hits
         put_match(&db, 123, "right-video", 80);
-        assert_eq!(
-            get_match(&db, 123),
-            Some(("right-video".to_string(), 80))
-        );
+        assert_eq!(get_match(&db, 123), Some(("right-video".to_string(), 80)));
     }
 
     #[test]
@@ -4104,12 +4090,18 @@ mod downloader_tests {
             parse_progress("[download]  42.0% of  3.29MiB at  322.00KiB/s ETA 00:00"),
             Some(42)
         );
-        assert_eq!(parse_progress("[download] 100% of 3.29MiB in 00:11"), Some(100));
+        assert_eq!(
+            parse_progress("[download] 100% of 3.29MiB in 00:11"),
+            Some(100)
+        );
         assert_eq!(parse_progress("[download] 100.0% of ~ 5.00MiB"), Some(100));
         // over-100 clamps, non-progress lines miss
         assert_eq!(parse_progress("[download] 100.5% of 1MiB"), Some(100));
         assert_eq!(parse_progress("[youtube] Downloading webpage"), None);
-        assert_eq!(parse_progress("ERROR: Sign in to confirm you're not a bot"), None);
+        assert_eq!(
+            parse_progress("ERROR: Sign in to confirm you're not a bot"),
+            None
+        );
         assert_eq!(parse_progress(""), None);
     }
 
@@ -4123,7 +4115,10 @@ mod downloader_tests {
         let tmp = job_tmp_dir(&base, 7);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(format!("{tmp}/vid9.m4a"), b"audio").unwrap();
-        assert_eq!(promote_download(&base, 7, &format!("{tmp}/vid9.m4a")), format!("{base}/vid9.m4a"));
+        assert_eq!(
+            promote_download(&base, 7, &format!("{tmp}/vid9.m4a")),
+            format!("{base}/vid9.m4a")
+        );
         assert!(std::path::Path::new(&format!("{base}/vid9.m4a")).exists());
         assert!(!std::path::Path::new(&tmp).exists());
         // stale sweep removes .tmp-* dirs only
@@ -4234,7 +4229,10 @@ mod downloader_tests {
         assert_eq!(seen_a, vec![5, 100, 100]);
         assert_eq!(seen_b, vec![5, 100, 100]);
         // each fake run sleeps ~1s: true overlap finishes well under 2x
-        assert!(elapsed < std::time::Duration::from_secs(4), "took {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(4),
+            "took {elapsed:?}"
+        );
         assert!(std::path::Path::new(&final_a).exists());
         assert!(std::path::Path::new(&final_b).exists());
         assert!(!std::path::Path::new(&job_tmp_dir(&base, 101)).exists());

@@ -5,6 +5,6 @@
 # every client behind this proxy. Per-user throttling is a TODO (see
 # crates/accounts/src/lib.rs).
 
-accounts.example.com {
+api.songnest.smasduq.xyz {
 	reverse_proxy 127.0.0.1:8788
 }

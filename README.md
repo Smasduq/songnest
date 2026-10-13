@@ -105,6 +105,7 @@ Environment variables (full list in `crates/accounts/.env.example`):
 |---|---|---|
 | `DATABASE_URL` | — (required) | Postgres connection |
 | `SONGNEST_JWT_SECRET` | — (required, ≥32 bytes) | Access-token HMAC secret |
+| `SONGNEST_GITHUB_WEBHOOK_SECRET` | unset | Optional GitHub App webhook HMAC secret; set this to enable webhook verification |
 | `SONGNEST_ACCOUNTS_BIND` | `127.0.0.1:8788` | Bind address (keep loopback) |
 | `SONGNEST_ACCESS_TTL_SECS` | `900` | Access-token lifetime |
 | `SONGNEST_REFRESH_TTL_SECS` | `2592000` | Refresh-token lifetime |
@@ -117,6 +118,7 @@ API reference (JSON; errors are `{ "error": "<showable message>" }`):
 | Method & path | Auth | Description |
 |---|---|---|
 | `GET /health` | — | Liveness (pings the DB) |
+| `POST /webhooks/github` | GitHub HMAC signature | Verifies GitHub deliveries; responds `pong` to `ping` and acknowledges other events without processing them |
 | `POST /auth/signup` | — (rate-limited) | `{email, password}` → `201` + tokens |
 | `POST /auth/login` | — (rate-limited) | `{email, password}` → `200` + tokens |
 | `POST /auth/refresh` | — (rate-limited) | `{refresh_token}` → rotated pair |
@@ -145,6 +147,9 @@ Deployment (`deploy/`): `Dockerfile.accounts` (build on the ARM VM),
 `songnest-accounts.service` (systemd), `Caddyfile` (HTTPS proxy), and
 `backup-accounts-db.sh` (nightly `pg_dump` cron). Email verification and
 password reset are TODOs (`POST /auth/...` reserved in code comments).
+The GitHub App webhook URL is `https://api.songnest.smasduq.xyz/webhooks/github`.
+Configure the same webhook secret in GitHub and `SONGNEST_GITHUB_WEBHOOK_SECRET`;
+the endpoint currently acknowledges events but only handles the `ping` response.
 
 Known limitations: sync trusts device clocks for `updated_at` (skewed
 clocks can misorder concurrent two-device edits); the per-IP rate limiter
