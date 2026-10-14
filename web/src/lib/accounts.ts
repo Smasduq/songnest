@@ -77,9 +77,13 @@ export class AccountsError extends Error {
     | "logged-out"
     | "invalid"
     | "server";
-  constructor(code: AccountsError["code"], message: string) {
+  /** Optional link to show alongside the message (e.g. a login URL the
+   *  app couldn't open automatically — the user can open it by hand). */
+  readonly url?: string;
+  constructor(code: AccountsError["code"], message: string, url?: string) {
     super(message);
     this.code = code;
+    this.url = url;
   }
 }
 
@@ -301,14 +305,25 @@ async function invokeNative<T>(cmd: string, args?: Record<string, unknown>): Pro
 
 /** Open a URL in the system browser (Tauri) or a new tab (web).
  *  OAuth providers block embedded webviews, so this must never
- *  navigate the app's own webview away. */
+ *  navigate the app's own webview away. In the native app a failure
+ *  throws (with the URL attached) instead of silently doing nothing —
+ *  the loopback listener still captures a manually-opened link. */
 async function openSystemBrowser(url: string): Promise<void> {
-  try {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
-  } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
+  if (isNativeApp()) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+      return;
+    } catch (e: unknown) {
+      const detail = typeof e === "string" ? e : e instanceof Error ? e.message : "unknown error";
+      throw new AccountsError(
+        "invalid",
+        `Couldn't open your browser (${detail}). Open this link by hand instead:`,
+        url,
+      );
+    }
   }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 interface AuthorizeUrl {

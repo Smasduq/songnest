@@ -51,6 +51,10 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
   const [unreachableUrl, setUnreachableUrl] = useState<string | null>(null);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  /** Login link the app couldn't open itself (native openUrl failure) —
+   *  shown with a copy button so login is never dead-ended. */
+  const [oauthUrl, setOauthUrl] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   // GitHub device flow: code shown to the user, polled until approved.
   const [device, setDevice] = useState<GithubDeviceStart | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -130,6 +134,8 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
     if (oauthBusy) return;
     setOauthBusy(true);
     setOauthError(null);
+    setOauthUrl(null);
+    setCopiedUrl(false);
     try {
       const session = await start();
       if (session === null) {
@@ -147,6 +153,9 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
       setOauthError(
         e instanceof AccountsError ? e.message : "Login failed — try again.",
       );
+      if (e instanceof AccountsError && e.url !== undefined) {
+        setOauthUrl(e.url);
+      }
     }
   }
 
@@ -161,6 +170,8 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
   async function runDeviceFlow(): Promise<void> {
     setOauthBusy(true);
     setOauthError(null);
+    setOauthUrl(null);
+    setCopiedUrl(false);
     setDeviceError(null);
     setCopiedCode(false);
     try {
@@ -246,14 +257,25 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
     setCopiedCode(false);
   }
 
-  /** Open the device approval page: system browser in Tauri, new tab otherwise. */
+  /** Open a link: system browser in Tauri, new tab otherwise. Throws
+   *  with the URL attached when the native open fails, so callers can
+   *  offer a copy-link fallback instead of failing silently. */
   async function openVerificationUri(uri: string): Promise<void> {
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(uri);
+      return;
     } catch {
-      window.open(uri, "_blank", "noopener,noreferrer");
+      // Fall through to the guarded fallbacks below.
     }
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      throw new AccountsError(
+        "invalid",
+        "Couldn't open your browser. Copy this link instead:",
+        uri,
+      );
+    }
+    window.open(uri, "_blank", "noopener,noreferrer");
   }
 
   function useLocalServer(): void {
@@ -323,11 +345,25 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
                 </p>
                 <button
                   type="button"
-                  onClick={() => void openVerificationUri(device.verification_uri)}
+                  onClick={() =>
+                    void openVerificationUri(device.verification_uri).catch(() =>
+                      setOauthUrl(device.verification_uri),
+                    )
+                  }
                   className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
                 >
                   Open github.com/login/device
                 </button>
+                {oauthUrl !== null && (
+                  <button
+                    type="button"
+                    title="Tap to copy the link"
+                    onClick={() => void copyText(oauthUrl).then(setCopiedUrl)}
+                    className="max-w-full truncate text-center font-mono text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  >
+                    {copiedUrl ? "Link copied — open it in any browser." : oauthUrl}
+                  </button>
+                )}
                 <p className="text-center text-xs text-muted-foreground">
                   Waiting for approval… this closes on its own.
                 </p>
@@ -358,6 +394,18 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
       {oauthError !== null && (
         <p className="mx-auto mt-4 max-w-sm text-center text-xs text-destructive">
           {oauthError}
+        </p>
+      )}
+      {oauthUrl !== null && (
+        <p className="mx-auto mt-2 max-w-sm text-center">
+          <button
+            type="button"
+            title="Tap to copy the link"
+            onClick={() => void copyText(oauthUrl).then(setCopiedUrl)}
+            className="max-w-full truncate text-center font-mono text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            {copiedUrl ? "Link copied — open it in any browser on this device." : oauthUrl}
+          </button>
         </p>
       )}
       {unreachableUrl !== null && unreachableUrl !== BUILD_ACCOUNTS_URL && (

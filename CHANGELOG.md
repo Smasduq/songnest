@@ -1,10 +1,18 @@
 # Changelog
 
 Songnest is a cross-platform music library and player built in Rust.
-Releases are cut from tags like `v0.1.0-alpha.2`.
+Releases are cut from tags like `v0.1.0`.
 
-## Unreleased
+## v0.1.0 — 2026-10-14
 
+- Hosted accounts (Neon Postgres + Vercel): email/password sign-up and
+  sign-in, GitHub and Google login (redirect on web, loopback + device
+  flows on desktop/mobile), liked-song sync across devices, editable
+  usernames, and profile photos stored in Neon Object Storage.
+- Desktop and mobile bundles talk to the production API; local `vite dev`
+  keeps using the loopback servers.
+- Linux AppImage bundles the GStreamer media framework, fixing the
+  WebKitWebProcess crash on every song play.
 - Background playback on both platforms: Android plays through a native
   Media3 service (notification, lockscreen controls, audio focus, survives
   backgrounding); desktop hides to the system tray instead of quitting on

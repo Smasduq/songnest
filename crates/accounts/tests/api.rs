@@ -167,10 +167,7 @@ fn unique_email(tag: &str) -> String {
 /// names would stay reserved after the first run ("username is taken").
 /// Mixed-case input also covers that the server echoes case exactly.
 fn unique_username(tag: &str) -> String {
-    format!(
-        "{tag}{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..8]
-    )
+    format!("{tag}{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
 }
 
 #[tokio::test]

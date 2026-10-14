@@ -2057,7 +2057,7 @@ dependencies = [
 
 [[package]]
 name = "songnest"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -2068,7 +2068,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-accounts"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 dependencies = [
  "argon2",
  "axum 0.8.9",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -2105,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-extract"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "songnest-server"
-version = "0.1.0-alpha.2"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
