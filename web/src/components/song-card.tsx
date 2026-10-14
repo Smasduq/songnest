@@ -40,6 +40,9 @@ interface Props {
   liked: boolean;
   dl: DlState;
   dlProgress: number;
+  /** Persistently downloaded (on disk) — survives list re-renders,
+   *  unlike the ephemeral per-row `dl` progress state. */
+  downloaded: boolean;
   active?: boolean;
   /** yt-dlp is resolving this song's stream (shows a spinner on the art). */
   resolving?: boolean;
@@ -60,6 +63,7 @@ export function SongCard({
   liked,
   dl,
   dlProgress,
+  downloaded,
   active = false,
   resolving = false,
   swipeLeft,
@@ -373,7 +377,7 @@ export function SongCard({
           Queued
         </span>
       )}
-      {dl === "done" && (
+      {downloaded && dl !== "working" && dl !== "queued" && (
         <span title="Downloaded" className="flex flex-shrink-0">
           <Check className="h-4 w-4 text-foreground" />
         </span>
@@ -440,12 +444,12 @@ export function SongCard({
                 downloadableDz === null ||
                 dl === "working" ||
                 dl === "queued" ||
-                dl === "done"
+                downloaded
               }
               onClick={() => pick(onDownload)}
               className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-primary/5 disabled:opacity-40"
             >
-              {dl === "done" ? (
+              {downloaded ? (
                 <Check className="h-4 w-4" />
               ) : (
                 <Download className="h-4 w-4" />
@@ -454,7 +458,7 @@ export function SongCard({
                 ? `Downloading ${dlProgress}%`
                 : dl === "queued"
                   ? "Queued"
-                  : dl === "done"
+                  : downloaded
                     ? "Downloaded"
                     : dl === "error"
                       ? "Retry download"

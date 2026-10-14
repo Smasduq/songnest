@@ -1,7 +1,30 @@
 # Changelog
 
 Songnest is a cross-platform music library and player built in Rust.
-Releases are cut from tags like `v0.1.0`.
+Releases are cut from tags like `v0.2.0`.
+
+## v0.2.0 — 2026-10-14
+
+- In-app updates: new App updates page (sidebar, settings, `#update`).
+  Desktop installs signed updater bundles in place with progress and
+  relaunch; mobile and browser get one Update button that picks the right
+  file automatically. `latest.json` is published with every release.
+- Downloaded state is persistent everywhere: song cards, the now-playing
+  sheet, and the desktop sidebar all read one registry seeded from the
+  on-disk library, so Downloaded survives re-renders and restarts (and
+  reverts when a track is deleted).
+- Edit-profile modal: change username and email together, with per-field
+  errors; the session and header update immediately (`PUT /me/email`).
+- GitHub device flow copies the code to the clipboard automatically (tap
+  to copy again); provider login failures report specific messages
+  instead of the generic password error.
+- Android: local builds sign with the release keystore, so updates
+  install over the old app after one final reinstall; native audio
+  plugin targets SDK 26/36 (compileSdk 36, minSdk 26).
+- Release pipeline signs desktop updater artifacts and Android APKs from
+  GitHub secrets; the accounts API redeploys on release publish.
+- Release notes are generated from this changelog plus post-tag commits
+  (appended at the bottom), so late fixes never miss the release page.
 
 ## v0.1.0 — 2026-10-14
 

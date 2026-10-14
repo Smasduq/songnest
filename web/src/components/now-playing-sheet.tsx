@@ -11,6 +11,7 @@ import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
 import {
   ChevronDown,
+  Check,
   Download,
   Heart,
   ListMusic,
@@ -30,6 +31,7 @@ export function NowPlayingSheet({
   liked,
   downloadable,
   downloading,
+  downloaded,
   onToggleLike,
   onDownload,
 }: {
@@ -37,6 +39,7 @@ export function NowPlayingSheet({
   liked: boolean;
   downloadable: boolean;
   downloading: boolean;
+  downloaded: boolean;
   onToggleLike: () => void;
   onDownload: () => void;
 }) {
@@ -227,11 +230,18 @@ export function NowPlayingSheet({
                     <BurstButton
                       layout="icon"
                       iconClassName="h-5 w-5"
-                      label="Download"
+                      label={downloaded ? "Downloaded" : "Download"}
                       busyLabel="Downloading"
                       busy={downloading}
+                      disabled={downloaded}
                       onAction={onDownload}
-                      idleIcon={<Download className="h-5 w-5" aria-hidden />}
+                      idleIcon={
+                        downloaded ? (
+                          <Check className="h-5 w-5" aria-hidden />
+                        ) : (
+                          <Download className="h-5 w-5" aria-hidden />
+                        )
+                      }
                     />
                   )}
                 </div>
@@ -280,11 +290,18 @@ export function NowPlayingSheet({
                     <BurstButton
                       layout="icon"
                       iconClassName="h-6 w-6"
-                      label="Download"
+                      label={downloaded ? "Downloaded" : "Download"}
                       busyLabel="Downloading"
                       busy={downloading}
+                      disabled={downloaded}
                       onAction={onDownload}
-                      idleIcon={<Download className="h-6 w-6" aria-hidden />}
+                      idleIcon={
+                        downloaded ? (
+                          <Check className="h-6 w-6" aria-hidden />
+                        ) : (
+                          <Download className="h-6 w-6" aria-hidden />
+                        )
+                      }
                     />
                   )}
                 </div>

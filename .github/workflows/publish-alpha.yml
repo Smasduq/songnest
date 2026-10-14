@@ -1,18 +1,18 @@
 name: 'publish-alpha'
 
-# Release builds for Songnest v0.1.0 (previously alpha-only).
-# Triggers on tag push like `v0.1.0`, or manually via workflow_dispatch.
+# Release builds for Songnest.
+# Triggers on version tag push like `v0.2.0`, or manually via workflow_dispatch.
 # All jobs upload to the SAME GitHub release (tauri-action finds it by tagName).
 on:
   push:
     tags:
-      - 'v0.1.0'
+      - 'v0.2.0'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish (e.g. v0.1.0)'
+        description: 'Release tag to publish (e.g. v0.2.0)'
         required: true
-        default: 'v0.1.0'
+        default: 'v0.2.0'
 
 jobs:
   publish-desktop:
@@ -81,10 +81,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
-          tagName: v0.1.0
-          releaseName: 'Songnest v0.1.0'
+          tagName: v0.2.0
+          releaseName: 'Songnest v0.2.0'
           releaseBody: |
-            Songnest 0.1.0 — hosted accounts with GitHub/Google login and liked-song sync, profile photos, background playback, and fixed Linux audio. See CHANGELOG.md and errors.md for known issues.
+            Publishing — full notes are attached by the release-notes job from CHANGELOG.md.
             Desktop bundles for macOS (arm64 + x64), Linux, Windows.
           releaseDraft: false
           prerelease: false
@@ -157,10 +157,10 @@ jobs:
           SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
         with:
           projectPath: web
-          tagName: v0.1.0
-          releaseName: 'Songnest v0.1.0'
+          tagName: v0.2.0
+          releaseName: 'Songnest v0.2.0'
           releaseBody: |
-            Songnest 0.1.0 — Android APK (on-device yt-dlp via SongnestPy).
+            Publishing — full notes are attached by the release-notes job from CHANGELOG.md.
           releaseDraft: false
           prerelease: false
           retryAttempts: 2
@@ -254,4 +254,51 @@ jobs:
           print(json.dumps({k: v["url"] for k, v in platforms.items()}, indent=2))
           EOF
           gh release upload "$TAG" /tmp/latest.json --repo "$REPO" --clobber
+
+  # Release notes are generated, never hardcoded: the CHANGELOG.md section
+  # for this tag, plus any commits that landed after the tag (appended at
+  # the bottom under "Late changes"). Re-running the workflow refreshes
+  # the notes, so late fixes are never lost from the release page.
+  publish-release-notes:
+    needs: [publish-desktop, publish-android, publish-updater-json]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: compose and attach release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF' > /tmp/notes.md
+          import os, re, subprocess
+          tag = os.environ["TAG"]
+          version = tag.lstrip("v")
+          text = open("CHANGELOG.md").read()
+          m = re.search(rf"^## {re.escape(version)}\b.*?(?=^## |\Z)", text, re.M | re.S)
+          section = m.group(0).strip() if m else f"## {version}"
+          print(f"Songnest {version}")
+          print()
+          print(section)
+          log = subprocess.run(
+              ["git", "log", f"{tag}..HEAD", "--oneline", "--no-decorate"],
+              capture_output=True, text=True,
+          ).stdout.strip()
+          if log:
+              print()
+              print("### Late changes")
+              print()
+              print("Commits that landed after the tag was cut:")
+              print()
+              for line in log.splitlines():
+                  print(f"- {line}")
+          EOF
+          cat /tmp/notes.md
+          gh release edit "$TAG" --repo "$REPO" --title "Songnest $TAG" --notes-file /tmp/notes.md
 

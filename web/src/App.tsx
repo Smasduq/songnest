@@ -181,9 +181,73 @@ export default function App() {
   // playback actions (stable refs from the store — safe to call anywhere)
   const store = usePlayer;
 
+  /** Persistently downloaded Deezer IDs (survives list re-renders and
+   *  restarts). The per-row `dl` map only tracks live progress; this set
+   *  is what the UI reads for "Downloaded". */
+  const DOWNLOADED_KEY = "songnest-downloaded-dz";
+  const [downloadedDz, setDownloadedDz] = useState<Set<number>>(() => {
+    try {
+      const raw = window.localStorage.getItem(DOWNLOADED_KEY);
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      return new Set(Array.isArray(parsed) ? parsed.filter((n): n is number => typeof n === "number") : []);
+    } catch {
+      return new Set<number>();
+    }
+  });
+
+  function persistDownloaded(next: Set<number>): void {
+    try {
+      window.localStorage.setItem(DOWNLOADED_KEY, JSON.stringify([...next]));
+    } catch {
+      // Storage full/blocked: in-memory state still works this session.
+    }
+  }
+
+  function markDownloaded(dz: number): void {
+    // Functional update: success handlers run after awaits, so the
+    // rendered closure may be stale (concurrent downloads must not drop
+    // each other's marks). The localStorage write is idempotent.
+    setDownloadedDz((prev) => {
+      if (prev.has(dz)) return prev;
+      const next = new Set(prev).add(dz);
+      persistDownloaded(next);
+      return next;
+    });
+  }
+
+  function unmarkDownloaded(dz: number): void {
+    setDownloadedDz((prev) => {
+      if (!prev.has(dz)) return prev;
+      const next = new Set(prev);
+      next.delete(dz);
+      persistDownloaded(next);
+      return next;
+    });
+  }
+
   const refreshLibrary = useCallback(async () => {
     try {
-      store.getState().setLibrary(await fetchLibrary());
+      const library = await fetchLibrary();
+      store.getState().setLibrary(library);
+      // Seed the downloaded set from what's on disk (covers installs
+      // from before this registry existed, and other devices' files
+      // are naturally excluded — localStorage is per device).
+      const ids = library
+        .map((t) => t.deezerId)
+        .filter((d): d is number => typeof d === "number");
+      if (ids.length > 0) {
+        setDownloadedDz((prev) => {
+          if (ids.every((id) => prev.has(id))) return prev;
+          const next = new Set(prev);
+          for (const id of ids) next.add(id);
+          try {
+            window.localStorage.setItem(DOWNLOADED_KEY, JSON.stringify([...next]));
+          } catch {
+            // Best effort.
+          }
+          return next;
+        });
+      }
       setLoadError(null);
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "library failed");
@@ -676,6 +740,7 @@ export default function App() {
         setDl((prev) => ({ ...prev, [mapKey]: { state: "working", progress } }))
       );
       setDl((prev) => ({ ...prev, [mapKey]: { state: "done", progress: 100 } }));
+      markDownloaded(dz);
       showToast("Downloaded");
       await refreshLibrary();
     } catch (e: unknown) {
@@ -709,11 +774,14 @@ export default function App() {
   );
 
   /** True when the song exists as a file: library row, finished queue job,
-   *  or a Deezer id already in the library. */
+   *  a Deezer id already in the library, or the persistent download
+   *  registry (marks survive list re-renders and restarts). */
   function isDownloaded(song: Song, mapKey: string): boolean {
     if (song.id.startsWith("db-")) return true;
     if (dlFor(mapKey).state === "done") return true;
-    return song.deezerId != null && libraryDz.has(song.deezerId);
+    const dz = song.deezerId;
+    if (dz === null || dz === undefined) return false;
+    return libraryDz.has(dz) || downloadedDz.has(dz);
   }
 
   async function deleteSong(song: Song) {
@@ -725,6 +793,8 @@ export default function App() {
       showToast("Delete failed");
       return;
     }
+    const dz = dzOf(song);
+    if (dz !== null) unmarkDownloaded(dz);
     store.getState().removeFromQueue(song.id);
     await refreshLibrary();
     await refreshLikes();
@@ -755,6 +825,7 @@ export default function App() {
   ) {
     const key = likeKeyFor(song);
     const d = dlFor(mapKey);
+    const downloaded = isDownloaded(song, mapKey);
     const onDownloadNow = () => {
       if (downloadableDz !== null) downloadSong(downloadableDz, mapKey);
     };
@@ -766,6 +837,7 @@ export default function App() {
         liked={key !== null && likes.has(key)}
         dl={d.state}
         dlProgress={d.progress}
+        downloaded={downloaded}
         active={active}
         resolving={
           resolving &&
@@ -815,6 +887,18 @@ export default function App() {
           }
         )
   );
+
+  /** Now-playing download state (sheet + desktop sidebar share it): the
+   *  active track has no list row, so derive progress + persistence here. */
+  const activeDz = activeTrack !== undefined ? dzOf(activeTrack) : null;
+  const activeDlKey = activeTrack !== undefined ? `np-${activeTrack.id}` : "";
+  const activeDlState = activeTrack !== undefined ? dl[activeDlKey]?.state : undefined;
+  const activeDownloading = activeDlState === "working" || activeDlState === "queued";
+  const activeDownloaded =
+    activeTrack !== undefined &&
+    (activeTrack.id.startsWith("db-") ||
+      activeDlState === "done" ||
+      (activeDz !== null && (libraryDz.has(activeDz) || downloadedDz.has(activeDz))));
 
   if (isAuthRoute) {
     return (
@@ -1202,7 +1286,8 @@ return (
             downloadable={
               activeTrack !== undefined && dzOf(activeTrack) !== null
             }
-            downloading={false}
+            downloading={activeDownloading}
+            downloaded={activeDownloaded}
             onToggleLike={() => {
               if (activeTrack !== undefined) toggleLike(activeTrack);
             }}
@@ -1284,11 +1369,8 @@ return (
             downloadable={
               activeTrack !== undefined && dzOf(activeTrack) !== null
             }
-            downloading={
-              activeTrack !== undefined &&
-              (dl[`np-${activeTrack.id}`]?.state === "working" ||
-                dl[`np-${activeTrack.id}`]?.state === "queued")
-            }
+            downloading={activeDownloading}
+            downloaded={activeDownloaded}
             onToggleLike={() => {
               if (activeTrack !== undefined) toggleLike(activeTrack);
             }}

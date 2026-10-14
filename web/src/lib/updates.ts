@@ -30,7 +30,7 @@ const CACHE_KEY = "songnest-update-check-v1";
 const CACHE_TTL_MS = 60 * 60 * 1000;
 /** Fallback when the Tauri runtime is unreachable (browser dev). Keep in
  *  sync with package.json / tauri.conf.json. */
-const FALLBACK_VERSION = "0.1.0-alpha.2";
+const FALLBACK_VERSION = "0.2.0";
 
 interface CacheEntry {
   fetchedAt: number;

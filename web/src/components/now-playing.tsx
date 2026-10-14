@@ -3,7 +3,7 @@ import { EmptyState } from "@/components/empty-state";
 import { QueueList } from "@/components/queue-list";
 import { formatTime, type Song } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
-import { Download, Heart, ListMusic, Loader2, Music, RefreshCw } from "lucide-react";
+import { Check, Download, Heart, ListMusic, Loader2, Music, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
   liked: boolean;
   downloadable: boolean;
   downloading: boolean;
+  downloaded: boolean;
   onToggleLike: () => void;
   onRetryMatch: () => void;
   onDownload: () => void;
@@ -31,6 +32,7 @@ export function NowPlaying({
   liked,
   downloadable,
   downloading,
+  downloaded,
   onToggleLike,
   onRetryMatch,
   onDownload,
@@ -107,12 +109,19 @@ export function NowPlaying({
             {downloadable && (
               <BurstButton
                 layout="pill"
-                label="Download"
+                label={downloaded ? "Downloaded" : "Download"}
                 busyLabel="Downloading"
                 busy={downloading}
+                disabled={downloaded}
                 onAction={onDownload}
-                idleIcon={<Download className="h-4 w-4" aria-hidden />}
-                text="Download"
+                idleIcon={
+                  downloaded ? (
+                    <Check className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Download className="h-4 w-4" aria-hidden />
+                  )
+                }
+                text={downloaded ? "Downloaded" : "Download"}
                 busyText="Working…"
               />
             )}
