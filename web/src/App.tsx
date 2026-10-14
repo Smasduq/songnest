@@ -404,14 +404,14 @@ export default function App() {
     }
   }, [query]);
 
-  async function playHit(hit: SearchHit) {
+  function playHit(hit: SearchHit) {
     // Optimistic: Now Playing updates on the tapped metadata instantly;
     // yt-dlp resolves the stream in the background (see store.playDz).
     // The sheet stays closed — it opens from the mini-player.
+    // NOTE: hits/query are intentionally kept so the search results stay
+    // visible while the tapped song plays.
     const hint = hitToSong(hit);
     void store.getState().playDz(hit.dz, hint);
-    setHits([]);
-    setQuery("");
   }
 
   function playSong(song: Song) {
