@@ -401,7 +401,11 @@ export function NowPlayingSheet({
                 <h3 className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
                   Lyrics
                 </h3>
-                <LyricsPanel track={track} />
+                <LyricsPanel
+                  track={track}
+                  size="large"
+                  scrollClassName="max-h-72"
+                />
               </div>
             )}
 

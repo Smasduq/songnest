@@ -15,6 +15,7 @@ import {
 } from "@/native/background-player";
 import { audio, usePlayer } from "@/player/store";
 import { SparklesText } from "@/components/ui/sparkles-text";
+import { useArtworkColors } from "@/lib/artwork-colors";
 
 type Status =
   | "loading"
@@ -59,6 +60,8 @@ export function LyricsPanel({
   size?: "compact" | "large";
 }) {
   const large = size === "large";
+  // Sparkles borrow their palette from the current artwork.
+  const artworkColors = useArtworkColors(track.coverUrl);
   const playing = usePlayer((s) => s.playing);
   const [status, setStatus] = useState<Status>("loading");
   const [lines, setLines] = useState<LyricLine[]>([]);
@@ -185,6 +188,7 @@ export function LyricsPanel({
         <SparklesText
           text="Instrumental"
           sparklesCount={large ? 12 : 8}
+          colors={artworkColors}
           className={
             large
               ? "text-center text-2xl font-medium uppercase tracking-[0.2em] text-muted-foreground"
@@ -282,6 +286,7 @@ export function LyricsPanel({
                   as={<span />}
                   text={l.text === "" ? "· · ·" : l.text}
                   sparklesCount={large ? 10 : 6}
+                  colors={artworkColors}
                   className={
                     large
                       ? "text-2xl font-semibold tracking-tight md:text-[28px] md:leading-[1.35]"
