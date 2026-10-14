@@ -6,8 +6,8 @@ body:
   - type: textarea
     id: summary
     attributes:
-      label: Summary
-      description: What went wrong, in one or two sentences.
+      label: What went wrong?
+      description: One or two sentences, plus what you expected instead.
       placeholder: Playback stops a few seconds into every song.
     validations:
       required: true
@@ -15,41 +15,13 @@ body:
     id: steps
     attributes:
       label: Steps to reproduce
-      description: Numbered steps so we can see the bug happen too.
+      description: Numbered steps so we can see it happen too.
       placeholder: |
         1. Open Songnest
         2. Search for a song
         3. Press play
     validations:
       required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
-      description: What did you think would happen?
-      placeholder: The song plays all the way through.
-    validations:
-      required: true
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-      description: What happened instead?
-      placeholder: The music stops after a few seconds.
-    validations:
-      required: true
-  - type: dropdown
-    id: scope
-    attributes:
-      label: How often does it happen?
-      description: This one answer tells us a lot about where the problem is.
-      options:
-        - Every song
-        - Only some songs
-        - Only one song
-        - I'm not sure
-    validations:
-      required: false
   - type: dropdown
     id: os
     attributes:
@@ -64,41 +36,24 @@ body:
     validations:
       required: true
   - type: input
-    id: os-version
-    attributes:
-      label: OS version
-      description: For example Windows 11, macOS 15, Ubuntu 24.04, Android 14. "Don't know" is fine.
-    validations:
-      required: false
-  - type: input
     id: version
     attributes:
       label: Songnest version
-      placeholder: v0.1.0
-    validations:
-      required: true
-  - type: dropdown
-    id: install
-    attributes:
-      label: How did you install it?
-      options:
-        - songnest.smasduq.xyz download
-        - built from source
-        - other
+      placeholder: v0.2.0 (see App updates page, or the download filename)
     validations:
       required: true
   - type: textarea
     id: media
     attributes:
       label: Screenshots, screen recording, or error output
-      description: A picture or short video helps a lot, but only if it's easy for you.
+      description: Only if it's easy for you.
     validations:
       required: false
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: "Songnest doesn't write a log file, but you can still grab output — Android: `adb logcat | grep SongnestPy`; desktop: launch the app from a terminal and copy what appears. Paste it here if you managed to."
+      description: "Songnest doesn't write a log file, but output helps — Android: `adb logcat | grep SongnestPy`; desktop: launch the app from a terminal and copy what appears. Paste it here if you managed to."
       render: shell
     validations:
       required: false
