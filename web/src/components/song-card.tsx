@@ -290,10 +290,10 @@ export function SongCard({
             onSwipeLeft();
           }
         }}
-        className={`group/card relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border-0 p-3 backdrop-blur-xl active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
+        className={`group/card relative flex touch-pan-y cursor-grab items-center gap-3 overflow-hidden rounded-2xl border-0 p-3 backdrop-blur-xl transition-colors duration-150 active:cursor-grabbing sm:gap-4 sm:rounded-3xl sm:p-4 ${
           active
             ? "bg-foreground/[0.08]"
-            : "bg-transparent hover:bg-background/60"
+            : "bg-transparent hover:bg-foreground/[0.06]"
         }`}
       ><button
         type="button"
