@@ -281,7 +281,7 @@ jobs:
           tag = os.environ["TAG"]
           version = tag.lstrip("v")
           text = open("CHANGELOG.md").read()
-          m = re.search(rf"^## {re.escape(version)}\b.*?(?=^## |\Z)", text, re.M | re.S)
+          m = re.search(rf"^## v?{re.escape(version)}\b.*?(?=^## |\Z)", text, re.M | re.S)
           section = m.group(0).strip() if m else f"## {version}"
           print(f"Songnest {version}")
           print()
