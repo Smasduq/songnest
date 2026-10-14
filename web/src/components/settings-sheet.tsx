@@ -12,12 +12,14 @@ export function SettingsSheet({
   onPickTheme,
   onOpenAccount,
   onOpenDiagnostics,
+  onOpenUpdates,
 }: {
   onClose: () => void;
   theme: Theme;
   onPickTheme: (t: Theme) => void;
   onOpenAccount: () => void;
   onOpenDiagnostics: () => void;
+  onOpenUpdates: () => void;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -75,6 +77,10 @@ export function SettingsSheet({
             }}
             onOpenDiagnostics={() => {
               onOpenDiagnostics();
+              onClose();
+            }}
+            onOpenUpdates={() => {
+              onOpenUpdates();
               onClose();
             }}
           />

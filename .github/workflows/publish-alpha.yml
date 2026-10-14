@@ -7,7 +7,12 @@ on:
   push:
     tags:
       - 'v0.1.0'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
 
 jobs:
   publish-desktop:
@@ -72,6 +77,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
           tagName: v0.1.0
@@ -159,4 +166,92 @@ jobs:
           retryAttempts: 2
           mobile: 'android'
           args: '--apk -f android-backend'
+
+  # In-place desktop updates: build latest.json from the signed updater
+  # bundles (*.sig siblings) that tauri-action uploaded, and attach it to
+  # the same release. The app's updater endpoint reads
+  # .../releases/latest/download/latest.json. Platforms without a signed
+  # bundle are omitted (those devices keep the manual download flow).
+  publish-updater-json:
+    needs: [publish-desktop]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: build and upload latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sigs && cd /tmp/sigs
+          gh release download "$TAG" --repo "$REPO" --pattern '*.sig' --clobber
+          META="$(gh release view "$TAG" --repo "$REPO" --json tagName,publishedAt,body)"
+          python3 - "$META" <<'EOF'
+          import json, os, sys
+
+          meta = json.loads(sys.argv[1])
+          tag = meta["tagName"]
+          base = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}"
+
+          def sig_for(bundle: str) -> str | None:
+              p = f"/tmp/sigs/{bundle}.sig"
+              try:
+                  with open(p) as f:
+                      return f.read().strip()
+              except OSError:
+                  return None
+
+          names = sorted(os.listdir("/tmp/sigs"))
+          bundles = [n[:-4] for n in names if n.endswith(".sig")]
+
+          def pick(pred):
+              for b in bundles:
+                  if pred(b):
+                      return b
+              return None
+
+          low = lambda b: b.lower()
+          mac_arm = pick(lambda b: b.endswith(".app.tar.gz") and ("aarch64" in low(b) or "arm64" in low(b)))
+          mac_x64 = pick(lambda b: b.endswith(".app.tar.gz") and ("x86_64" in low(b) or "x64" in low(b) or "intel" in low(b)))
+          # Fallback: unmarked dmg goes to the missing arch slot.
+          unmarked = [b for b in bundles if b.endswith(".app.tar.gz") and b not in (mac_arm, mac_x64)]
+          if mac_arm is None and unmarked:
+              mac_arm = unmarked.pop(0)
+          if mac_x64 is None and unmarked:
+              mac_x64 = unmarked.pop(0)
+          linux = pick(lambda b: b.endswith(".AppImage.tar.gz"))
+          windows = pick(lambda b: b.endswith(".nsis.zip")) or pick(lambda b: b.endswith(".msi.zip"))
+
+          platforms = {}
+          for key, bundle in (
+              ("darwin-aarch64", mac_arm),
+              ("darwin-x86_64", mac_x64),
+              ("linux-x86_64", linux),
+              ("windows-x86_64", windows),
+          ):
+              if bundle is None:
+                  print(f"::warning::no signed bundle for {key}")
+                  continue
+              sig = sig_for(bundle)
+              if not sig:
+                  print(f"::warning::missing sig for {bundle}")
+                  continue
+              platforms[key] = {"signature": sig, "url": f"{base}/{bundle}"}
+
+          if not platforms:
+              sys.exit("no signed updater bundles found — refusing to publish latest.json")
+
+          latest = {
+              "version": tag,
+              "notes": (meta.get("body") or "")[:4000],
+              "pub_date": meta.get("publishedAt"),
+              "platforms": platforms,
+          }
+          with open("/tmp/latest.json", "w") as f:
+              json.dump(latest, f, indent=2)
+          print(json.dumps({k: v["url"] for k, v in platforms.items()}, indent=2))
+          EOF
+          gh release upload "$TAG" /tmp/latest.json --repo "$REPO" --clobber
 

@@ -1,4 +1,4 @@
-import { Check, Monitor, Moon, Sun, Wrench, CircleUserRound, Palette } from "lucide-react";
+import { ArrowDownToLine, Check, Monitor, Moon, Sun, Wrench, CircleUserRound, Palette } from "lucide-react";
 import type { Theme } from "@/components/header";
 
 const THEMES: { id: Theme; label: string; icon: typeof Sun }[] = [
@@ -26,6 +26,7 @@ export function SettingsPanel({
   showProfileLabel = false,
   onOpenAccount,
   onOpenDiagnostics,
+  onOpenUpdates,
 }: {
   theme: Theme;
   onPickTheme: (t: Theme) => void;
@@ -33,6 +34,7 @@ export function SettingsPanel({
   showProfileLabel?: boolean;
   onOpenAccount: () => void;
   onOpenDiagnostics: () => void;
+  onOpenUpdates: () => void;
 }) {
   return (
     <div className="space-y-5">
@@ -84,6 +86,15 @@ export function SettingsPanel({
       >
         <Wrench className="h-4 w-4" aria-hidden />
         Downloader diagnostics
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenUpdates}
+        className="flex w-full items-center gap-2.5 rounded-2xl bg-foreground/5 px-4 py-3 text-left text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowDownToLine className="h-4 w-4" aria-hidden />
+        App updates
       </button>
     </div>
   );

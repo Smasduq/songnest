@@ -25,6 +25,8 @@ tauri-plugin-native-audio = { path = "plugins/native-audio" }
 songnest-server = { path = "../../crates/server" }
 tokio = { version = "1", features = ["full"] }
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2.13.3"
+tauri-plugin-process = "2.4.0"
 
 [features]
 default = ["custom-protocol"]

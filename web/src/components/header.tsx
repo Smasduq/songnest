@@ -42,6 +42,7 @@ export function Header({
   onOpenDiagnostics,
   accountEmail,
   onOpenAccount,
+  onOpenUpdates,
   className,
   page,
 }: {
@@ -54,8 +55,9 @@ export function Header({
   onOpenDiagnostics: () => void;
   accountEmail: string | null;
   onOpenAccount: () => void;
+  onOpenUpdates: () => void;
   className?: string;
-  page?: "home" | "search" | "library" | "liked" | "diagnostics" | "profile";
+  page?: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update";
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -234,6 +236,10 @@ export function Header({
                   onOpenDiagnostics={() => {
                     setOpen(false);
                     onOpenDiagnostics();
+                  }}
+                  onOpenUpdates={() => {
+                    setOpen(false);
+                    onOpenUpdates();
                   }}
                 />
               </motion.div>

@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, Search, Settings, X } from "lucide-react";
 
 interface Props {
-  page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile";
-  onNavigate: (page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile") => void;
+  page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update";
+  onNavigate: (page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update") => void;
   query: string;
   onQueryChange: (q: string) => void;
   onSubmitSearch: () => void;
@@ -40,7 +40,9 @@ export function MobileHeader({
           ? "Diagnostics"
           : page === "profile"
             ? "Profile"
-            : "Home";
+            : page === "update"
+              ? "App updates"
+              : "Home";
 
   const isSearchPage = page === "search";
 

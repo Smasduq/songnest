@@ -1,6 +1,6 @@
-import { CircleUserRound, Heart, Home, Library, Search, Wrench } from "lucide-react";
+import { CircleUserRound, Download, Heart, Home, Library, Search, Wrench } from "lucide-react";
 
-export type Page = "home" | "library" | "liked" | "search" | "diagnostics" | "profile";
+export type Page = "home" | "library" | "liked" | "search" | "diagnostics" | "profile" | "update";
 
 interface Props {
   page: Page;
@@ -61,6 +61,14 @@ export function Sidebar({
       >
         <Wrench className="h-4 w-4" />
         Diagnostics
+      </button>
+      <button
+        type="button"
+        onClick={() => onNavigate("update")}
+        className={linkCls(page === "update")}
+      >
+        <Download className="h-4 w-4" />
+        App updates
       </button>
       <button
         type="button"

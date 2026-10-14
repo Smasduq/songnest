@@ -10,6 +10,7 @@ import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
 import ProfilePage from "@/pages/profile";
 import AuthPage from "@/pages/auth";
+import UpdatePage from "@/pages/update";
 import {
   AccountsError,
   dropPushed,
@@ -257,6 +258,7 @@ export default function App() {
     function applyHash() {
       const hash = window.location.hash;
       if (hash === "#diagnostics") go("diagnostics");
+      else if (hash === "#update") go("update");
       else if (
         hash === "#profile" ||
         hash === "#account" ||
@@ -849,6 +851,7 @@ return (
         onOpenDiagnostics={() => go("diagnostics")}
         accountEmail={account?.email ?? null}
         onOpenAccount={handleOpenAccount}
+        onOpenUpdates={() => go("update")}
         className="hidden md:flex"
         page={page}
       />
@@ -1177,6 +1180,8 @@ return (
               <Diagnostics onToast={showToast} />
             </div>
           )}
+
+          {page === "update" && <UpdatePage />}
             </motion.div>
           </AnimatePresence>
         </CustomScroller>
@@ -1260,6 +1265,7 @@ return (
             onPickTheme={setTheme}
             onOpenAccount={handleOpenAccount}
             onOpenDiagnostics={() => go("diagnostics")}
+            onOpenUpdates={() => go("update")}
           />
         )}
       </AnimatePresence>
