@@ -489,19 +489,39 @@ export async function finishGithubLogin(code: string, state: string | null): Pro
   return (await finishOAuthLogin(code, state)).session;
 }
 
-/** Refresh the access token. Returns null when the refresh is dead. */
+/** Refresh the access token.
+ *
+ *  Returns the rotated pair, or null when the refresh token is dead
+ *  (expired, revoked, unknown → 401). Transient failures (offline,
+ *  unreachable, rate-limited, server errors) throw — callers must NOT
+ *  treat those as logout, or a hiccup signs the user out. */
 async function refreshSession(refreshToken: string): Promise<Session | null> {
   const { status, json } = await request("/auth/refresh", {
     method: "POST",
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
   if (status === 200) return toSession(json as PairResponse);
-  return null;
+  if (status === 401) return null;
+  if (status === 429) {
+    throw new AccountsError(
+      "rate-limited",
+      "Too many attempts — wait a minute and try again."
+    );
+  }
+  if (status >= 500) {
+    throw new AccountsError("server", "The server had a problem — try again in a bit.");
+  }
+  return failFor(status, json, "Couldn't refresh your login.");
 }
 
 /**
  * Session with a fresh access token (refreshes when <60s remain).
- * Throws `logged-out` (and clears storage) when refresh fails.
+ *
+ * Only a dead refresh clears storage (`logged-out`): refresh tokens live
+ * 30 days and slide on every rotation, so an active user stays signed
+ * in. Transient refresh failures propagate as retryable errors with
+ * stored tokens intact — the sync engine backs off and the UI shows the
+ * message instead of dropping the session.
  */
 export async function ensureSession(): Promise<Session> {
   const session = await loadSession();
@@ -514,23 +534,20 @@ export async function ensureSession(): Promise<Session> {
     await clearSession();
     throw new AccountsError("logged-out", "You're logged out — log in to sync.");
   }
+  let next: Session | null;
   try {
-    const next = await refreshSession(refreshToken);
-    if (next === null) {
-      await clearSession();
-      throw new AccountsError("logged-out", "Your login expired — please log in again.");
-    }
-    return next;
+    next = await refreshSession(refreshToken);
   } catch (e) {
-    if (e instanceof AccountsError && (e.code === "offline" || e.code === "unreachable")) {
-      // Keep the old (possibly stale) token for local use; sync retries later.
-      return session;
-    }
-    await clearSession();
-    throw e instanceof AccountsError
-      ? e
-      : new AccountsError("logged-out", "You're logged out — log in to sync.");
+    if (e instanceof AccountsError) throw e;
+    // Secret-store hiccup (e.g. locked keychain), not a dead login:
+    // keep stored tokens so the next attempt can still refresh.
+    throw new AccountsError("server", "Couldn't read your saved login — try again.");
   }
+  if (next === null) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return next;
 }
 
 /** Log out: revoke the refresh token (best effort), then wipe storage. */
