@@ -16,6 +16,12 @@ function SiteFooter() {
           <a className="hover:text-white" href={`${REPO_URL}/blob/main/SECURITY.md`} target="_blank" rel="noreferrer">
             Security
           </a>
+          <a className="hover:text-white" href="#privacy">
+            Privacy
+          </a>
+          <a className="hover:text-white" href="#terms">
+            Terms
+          </a>
         </nav>
       </div>
     </footer>

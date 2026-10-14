@@ -282,9 +282,16 @@ const OAUTH_PROVIDER_KEY = "songnest-oauth-provider";
 export type OAuthProvider = "github" | "google";
 
 /** True inside the Tauri bundle (desktop or mobile), where the webview
- *  origin is app-internal and OAuth must use the loopback flow. */
+ *  origin is app-internal and OAuth must use the loopback flow.
+ *
+ *  Checks the v1 and v2 bridge globals AND the bundle origins themselves:
+ *  depending on `withGlobalTauri`, `__TAURI__` may be absent while the app
+ *  is still native — but the origin never lies. */
 function isNativeApp(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
+  if (typeof window === "undefined") return false;
+  if ("__TAURI__" in window || "__TAURI_INTERNALS__" in window) return true;
+  if (window.location.protocol === "tauri:") return true;
+  return window.location.hostname === "tauri.localhost";
 }
 
 async function invokeNative<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

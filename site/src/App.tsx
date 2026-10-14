@@ -7,14 +7,35 @@ import DownloadLatest from './components/DownloadLatest.tsx'
 import PackageManagers from './components/PackageManagers.tsx'
 import Faq from './components/Faq.tsx'
 import SiteFooter from './components/SiteFooter.tsx'
+import Privacy from './pages/Privacy.tsx'
+import Terms from './pages/Terms.tsx'
 import { fetchReleases, type Release } from './lib/releases.ts'
 
 const ReleaseList = lazy(() => import('./components/ReleaseList.tsx'))
+
+type SitePage = 'home' | 'privacy' | 'terms'
+
+function pageFromHash(): SitePage {
+  const hash = window.location.hash.replace(/^#/, '').split('?')[0]
+  if (hash === 'privacy') return 'privacy'
+  if (hash === 'terms') return 'terms'
+  return 'home'
+}
 
 export default function App() {
   const [releases, setReleases] = useState<Release[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState<SitePage>(() => pageFromHash())
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setPage(pageFromHash())
+      window.scrollTo(0, 0)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -39,6 +60,16 @@ export default function App() {
   }, [])
 
   const latest = useMemo(() => releases[0] ?? null, [releases])
+
+  if (page !== 'home') {
+    return (
+      <div id="top" className="min-h-dvh bg-[#171717] text-[#f5f5f4]">
+        <SiteHeader />
+        <main>{page === 'privacy' ? <Privacy /> : <Terms />}</main>
+        <SiteFooter />
+      </div>
+    )
+  }
 
   return (
     <div id="top" className="min-h-dvh bg-[#171717] text-[#f5f5f4]">

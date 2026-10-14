@@ -43,6 +43,9 @@ function SongnestLogo() {
   );
 }
 
+/** Public site hosting the Privacy Policy and Terms of Service. */
+const SITE_URL = "https://songnest.smasduq.xyz";
+
 export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Session) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<AuthMode>("signup");
   const [unreachableUrl, setUnreachableUrl] = useState<string | null>(null);
@@ -280,6 +283,25 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
         onGoogle={() => void handleOAuth(startGoogleLogin)}
         oauthBusy={oauthBusy}
       />
+      <p className="mx-auto mt-4 max-w-sm text-center text-xs text-muted-foreground">
+        By continuing, you agree to our{" "}
+        <button
+          type="button"
+          onClick={() => void openVerificationUri(`${SITE_URL}/#privacy`)}
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Privacy Policy
+        </button>{" "}
+        and{" "}
+        <button
+          type="button"
+          onClick={() => void openVerificationUri(`${SITE_URL}/#terms`)}
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Terms of Service
+        </button>
+        .
+      </p>
       {device !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="relative mx-2 flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border-4 border-border bg-card/80 p-8">
