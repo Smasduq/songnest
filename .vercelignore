@@ -1,0 +1,12 @@
+# Vercel uploads the whole repo for CLI deploys; the songnest project only
+# builds crates/accounts (Root Directory). Exclude everything the Rust
+# builder never touches so uploads stay small and fast.
+# NOTE: crates/** must stay (cargo workspace resolution needs every member
+# manifest), as must the root Cargo.toml / Cargo.lock.
+web/
+site/
+music/
+*.db
+*.sqlite
+*.log
+cookies*.txt

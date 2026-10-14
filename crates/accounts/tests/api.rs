@@ -163,6 +163,16 @@ fn unique_email(tag: &str) -> String {
     format!("{tag}-{}@example.com", uuid::Uuid::new_v4())
 }
 
+/// Unique handle per run: the suite targets a persistent branch, so fixed
+/// names would stay reserved after the first run ("username is taken").
+/// Mixed-case input also covers that the server echoes case exactly.
+fn unique_username(tag: &str) -> String {
+    format!(
+        "{tag}{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    )
+}
+
 #[tokio::test]
 async fn signup_login_like_unlike_sync_flow() {
     let Some((client, _)) = boot(1000).await else {
@@ -320,21 +330,23 @@ async fn username_set_change_history_flow() {
     }
 
     // Set → visible via /me.
+    let handle1 = unique_username("Tuser");
     let (status, first) = client
-        .put_authed("/me/username", access, &json!({"username": "SmasDuq"}))
+        .put_authed("/me/username", access, &json!({"username": handle1}))
         .await;
     assert_eq!(status, 200, "{first}");
-    assert_eq!(first["username"], "SmasDuq");
+    assert_eq!(first["username"], handle1);
     let (status, me) = client.get("/me", access).await;
     assert_eq!(status, 200, "{me}");
-    assert_eq!(me["username"], "SmasDuq");
+    assert_eq!(me["username"], handle1);
 
     // Change → new current; old name stays reserved (case-insensitive).
+    let handle2 = unique_username("tuser");
     let (status, second) = client
-        .put_authed("/me/username", access, &json!({"username": "smasduq2"}))
+        .put_authed("/me/username", access, &json!({"username": handle2}))
         .await;
     assert_eq!(status, 200, "{second}");
-    assert_eq!(second["username"], "smasduq2");
+    assert_eq!(second["username"], handle2);
 
     let email2 = unique_email("handle2");
     let (status, signup2) = client
@@ -345,7 +357,11 @@ async fn username_set_change_history_flow() {
         .await;
     assert_eq!(status, 201, "{signup2}");
     let access2 = signup2["access_token"].as_str().expect("access token");
-    for taken in ["smasduq", "SMASDUQ", "smasduq2"] {
+    for taken in [
+        handle1.to_lowercase(),
+        handle1.to_uppercase(),
+        handle2.clone(),
+    ] {
         let (status, dup) = client
             .put_authed("/me/username", access2, &json!({"username": taken}))
             .await;
@@ -357,7 +373,7 @@ async fn username_set_change_history_flow() {
     let res = client
         .http
         .put(format!("{}/me/username", client.base))
-        .json(&json!({"username": "nobody"}))
+        .json(&json!({"username": unique_username("nobody")}))
         .send()
         .await
         .expect("request");
