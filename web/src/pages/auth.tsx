@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { AuthComponent, type AuthMode } from "@/components/ui/sign-up";
 import {
   AccountsError,
-  LOCAL_ACCOUNTS_URL,
+  BUILD_ACCOUNTS_URL,
   finishOAuthLogin,
   getAccountsUrl,
   login,
@@ -113,9 +113,9 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
       setUnreachableUrl(null);
       onAuthed(session);
     } catch (e) {
-      // The build already targets the local API; a stale runtime override
-      // (e.g. a hosted URL from earlier testing) is the usual cause of
-      // "can't reach the server" — offer a one-click way back to local.
+      // A runtime override pointing at a dead server is the usual cause
+      // of "can't reach the server" — offer a one-click way back to the
+      // URL baked into this build.
       if (e instanceof AccountsError && e.code === "unreachable") {
         setUnreachableUrl(getAccountsUrl());
       }
@@ -338,7 +338,7 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
           {oauthError}
         </p>
       )}
-      {unreachableUrl !== null && unreachableUrl !== LOCAL_ACCOUNTS_URL && (
+      {unreachableUrl !== null && unreachableUrl !== BUILD_ACCOUNTS_URL && (
         <p className="mx-auto mt-4 max-w-sm text-center text-xs text-muted-foreground">
           Trying {unreachableUrl} —{" "}
           <button
@@ -346,7 +346,7 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
             onClick={useLocalServer}
             className="underline underline-offset-2 hover:text-foreground"
           >
-            use the local server instead
+            use the built-in server instead
           </button>
         </p>
       )}

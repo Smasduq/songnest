@@ -9,6 +9,10 @@ async fn main() -> Result<(), Error> {
     let pool = db::connect_config(&config).await?;
     let app = ServiceBuilder::new()
         .layer(VercelLayer::new())
-        .service(router(AppState { pool, config, storage }));
+        .service(router(AppState {
+            pool,
+            config,
+            storage,
+        }));
     vercel_runtime::run(app).await
 }

@@ -52,10 +52,7 @@ pub fn validate_username(raw: &str) -> Result<String, &'static str> {
 }
 
 /// Current handle for a user, if any.
-pub async fn current_username(
-    pool: &Pool,
-    user_id: Uuid,
-) -> Result<Option<String>, sqlx::Error> {
+pub async fn current_username(pool: &Pool, user_id: Uuid) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT username FROM usernames WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
     )

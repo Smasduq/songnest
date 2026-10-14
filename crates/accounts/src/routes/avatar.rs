@@ -40,9 +40,9 @@ pub async fn put_avatar(
             "avatar is too large",
         )));
     }
-    let (content_type, ext) = sniff_image(&body).ok_or(AppError::Auth(
-        AuthError::InvalidInput("avatar must be a JPEG, PNG, WebP, or GIF image"),
-    ))?;
+    let (content_type, ext) = sniff_image(&body).ok_or(AppError::Auth(AuthError::InvalidInput(
+        "avatar must be a JPEG, PNG, WebP, or GIF image",
+    )))?;
 
     let key = format!("avatars/{user_id}/{}.{}", Uuid::new_v4(), ext);
     storage

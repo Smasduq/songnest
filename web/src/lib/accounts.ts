@@ -29,6 +29,12 @@ const BUILD_DEFAULT =
   (import.meta.env.VITE_ACCOUNTS_URL as string | undefined) ??
   LOCAL_ACCOUNTS_URL;
 
+/** The accounts URL baked into this build: the local API for dev builds,
+ *  the production API for bundled builds (`VITE_ACCOUNTS_URL` set at
+ *  build time). A runtime override (see `setAccountsUrl`) takes
+ *  precedence; `resetAccountsUrl` returns to this. */
+export const BUILD_ACCOUNTS_URL = BUILD_DEFAULT;
+
 export function getAccountsUrl(): string {
   try {
     return (
@@ -393,15 +399,18 @@ async function startNativeOAuthLogin(provider: OAuthProvider): Promise<Session> 
   if (callback.code === undefined || callback.code === null || callback.code === "") {
     throw new AccountsError("invalid", "Login failed — try again.");
   }
-  return (await finishOAuthLogin(callback.code, callback.state ?? null)).session;
+  return (await finishOAuthLogin(callback.code, callback.state ?? null, redirect_uri)).session;
 }
 
 /** Finish OAuth login after the redirect back with `?code=…`. Verifies
  *  the stored `state`, then exchanges the code for a Songnest session.
+ *  `redirectUri` must be the exact URI the provider authorized (the
+ *  loopback URI for native logins) — providers reject a mismatch.
  *  Returns the provider so callers can show the right errors. */
 export async function finishOAuthLogin(
   code: string,
   state: string | null,
+  redirectUri: string = oauthRedirectUri(),
 ): Promise<{ session: Session; provider: OAuthProvider }> {
   let provider: OAuthProvider = "github";
   try {
@@ -417,7 +426,7 @@ export async function finishOAuthLogin(
   }
   const { status, json } = await request(`/auth/${provider}/callback`, {
     method: "POST",
-    body: JSON.stringify({ code, redirect_uri: oauthRedirectUri() }),
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
   });
   try {
     window.sessionStorage.removeItem(OAUTH_STATE_KEY);
@@ -485,8 +494,12 @@ export async function pollGithubDevice(device_code: string): Promise<Session | n
 }
 
 /** Finish GitHub login (provider-aware; see finishOAuthLogin). */
-export async function finishGithubLogin(code: string, state: string | null): Promise<Session> {
-  return (await finishOAuthLogin(code, state)).session;
+export async function finishGithubLogin(
+  code: string,
+  state: string | null,
+  redirectUri?: string,
+): Promise<Session> {
+  return (await finishOAuthLogin(code, state, redirectUri)).session;
 }
 
 /** Refresh the access token.

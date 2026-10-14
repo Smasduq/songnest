@@ -35,14 +35,12 @@ pub async fn set_username(
 ) -> Result<Json<UserView>, AppError> {
     let user_id = authenticate(&headers, &state.config.jwt_secret)?;
     let name = validate_username(&body.username).map_err(AuthError::InvalidInput)?;
-    if let Err(e) = sqlx::query(
-        "INSERT INTO usernames (id, user_id, username) VALUES ($1, $2, $3)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(user_id)
-    .bind(&name)
-    .execute(&state.pool)
-    .await
+    if let Err(e) = sqlx::query("INSERT INTO usernames (id, user_id, username) VALUES ($1, $2, $3)")
+        .bind(Uuid::new_v4())
+        .bind(user_id)
+        .bind(&name)
+        .execute(&state.pool)
+        .await
     {
         if is_unique_violation(&e) {
             return Err(AppError::Auth(AuthError::InvalidInput("username is taken")));

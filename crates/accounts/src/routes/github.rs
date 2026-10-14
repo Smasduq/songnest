@@ -59,9 +59,14 @@ pub async fn start(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<StartQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let client_id = state.config.github_client_id.clone().ok_or(AppError::Auth(
-        AuthError::InvalidInput("github login is not configured"),
-    ))?;
+    let client_id =
+        state
+            .config
+            .github_client_id
+            .clone()
+            .ok_or(AppError::Auth(AuthError::InvalidInput(
+                "github login is not configured",
+            )))?;
     let redirect = validate_redirect(&query.redirect_uri)?;
     let state_param = Uuid::new_v4().to_string().replace('-', "");
     let url = format!(
@@ -70,9 +75,7 @@ pub async fn start(
         urlencode(&redirect),
         state_param,
     );
-    Ok(Json(StartResponse {
-        authorize_url: url,
-    }))
+    Ok(Json(StartResponse { authorize_url: url }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,9 +146,7 @@ pub struct DeviceStartResponse {
 
 /// `POST /auth/github/device/start` → code for the user to enter at
 /// `verification_uri`. No callback URL involved.
-pub async fn device_start(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+pub async fn device_start(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let (client_id, _) = github_credentials(&state)?;
     let res: GitHubDeviceCodeResponse = reqwest::Client::new()
         .post("https://github.com/login/device/code")
@@ -283,7 +284,10 @@ async fn github_identity(
             "github app can't read emails — set Account > Email addresses to Read-only",
         )));
     }
-    let emails: Vec<GitHubEmail> = emails_res.json().await.map_err(|_| provider_unreachable())?;
+    let emails: Vec<GitHubEmail> = emails_res
+        .json()
+        .await
+        .map_err(|_| provider_unreachable())?;
     let email = emails
         .iter()
         .find(|e| e.primary && e.verified)
@@ -301,9 +305,7 @@ async fn github_identity(
 /// OAuth failures are client-visible 400s (never the generic password
 /// 401): they describe the provider call, not stored credentials.
 fn provider_unreachable() -> AppError {
-    AppError::Auth(AuthError::InvalidInput(
-        "couldn't reach github — try again",
-    ))
+    AppError::Auth(AuthError::InvalidInput("couldn't reach github — try again"))
 }
 
 /// Find by `github_id`, else link onto a matching email, else create a

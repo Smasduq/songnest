@@ -85,7 +85,13 @@ impl Client {
         (status, json)
     }
 
-    async fn put_bytes(&self, path: &str, token: Option<&str>, content_type: &str, bytes: Vec<u8>) -> (u16, Value) {
+    async fn put_bytes(
+        &self,
+        path: &str,
+        token: Option<&str>,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> (u16, Value) {
         let mut req = self
             .http
             .put(format!("{}{path}", self.base))
@@ -299,7 +305,14 @@ async fn username_set_change_history_flow() {
     assert!(signup["user"]["username"].is_null());
 
     // Invalid shapes are rejected with a showable message.
-    for bad in ["ab", "a".repeat(31).as_str(), "-lead", "trail-", "has space", "admin"] {
+    for bad in [
+        "ab",
+        "a".repeat(31).as_str(),
+        "-lead",
+        "trail-",
+        "has space",
+        "admin",
+    ] {
         let (status, _) = client
             .put_authed("/me/username", access, &json!({"username": bad}))
             .await;

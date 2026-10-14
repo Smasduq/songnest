@@ -22,5 +22,10 @@ async fn main() -> Result<(), AppError> {
         );
     }
     let pool = db::connect_config(&config).await?;
-    songnest_accounts::run(AppState { pool, config, storage }).await
+    songnest_accounts::run(AppState {
+        pool,
+        config,
+        storage,
+    })
+    .await
 }

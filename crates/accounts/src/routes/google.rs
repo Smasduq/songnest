@@ -39,9 +39,14 @@ pub async fn start(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<StartQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let client_id = state.config.google_client_id.clone().ok_or(AppError::Auth(
-        AuthError::InvalidInput("google login is not configured"),
-    ))?;
+    let client_id =
+        state
+            .config
+            .google_client_id
+            .clone()
+            .ok_or(AppError::Auth(AuthError::InvalidInput(
+                "google login is not configured",
+            )))?;
     let redirect = validate_redirect(&query.redirect_uri)?;
     let state_param = Uuid::new_v4().to_string().replace('-', "");
     let url = format!(
@@ -50,9 +55,7 @@ pub async fn start(
         urlencode(&redirect),
         state_param,
     );
-    Ok(Json(StartResponse {
-        authorize_url: url,
-    }))
+    Ok(Json(StartResponse { authorize_url: url }))
 }
 
 #[derive(Debug, Deserialize)]

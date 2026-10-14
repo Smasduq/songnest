@@ -79,8 +79,14 @@ fn api_router() -> Router<AppState> {
         // GitHub device flow polls every few seconds — it lives outside the
         // per-IP auth budget (device codes are unguessable, polling a dead
         // code just 410s). The redirect flow stays rate-limited above.
-        .route("/auth/github/device/start", post(routes::github::device_start))
-        .route("/auth/github/device/poll", post(routes::github::device_poll))
+        .route(
+            "/auth/github/device/start",
+            post(routes::github::device_start),
+        )
+        .route(
+            "/auth/github/device/poll",
+            post(routes::github::device_poll),
+        )
         .route(
             "/me/avatar",
             put(routes::avatar::put_avatar).delete(routes::avatar::delete_avatar),

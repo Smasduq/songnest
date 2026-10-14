@@ -77,9 +77,7 @@ impl IntoResponse for AppError {
             AppError::StorageUnavailable => {
                 (StatusCode::SERVICE_UNAVAILABLE, "avatars unavailable")
             }
-            AppError::StorageFailed(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal error")
-            }
+            AppError::StorageFailed(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
         };
         (status, Json(json!({ "error": message }))).into_response()
     }

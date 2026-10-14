@@ -77,24 +77,32 @@ pub async fn oauth_loopback_wait(
 
 async fn serve_one(
     listener: tokio::net::TcpListener,
-    tx: tokio::sync::oneshot::Sender<OAuthCallback>,
+    mut tx: tokio::sync::oneshot::Sender<OAuthCallback>,
 ) {
     let outcome = tokio::time::timeout(Duration::from_secs(LISTEN_BUDGET_SECS), async {
         loop {
-            let (stream, _) = listener.accept().await.map_err(|_| ())?;
+            // A superseding login drops our receiver: exit instead of
+            // squatting on the port until the budget runs out.
+            let stream = tokio::select! {
+                _ = tx.closed() => return None,
+                res = listener.accept() => match res {
+                    Ok((stream, _)) => stream,
+                    Err(_) => continue,
+                },
+            };
             match read_callback(stream).await {
                 // Valid callback (code or provider error): answer and stop.
-                Ok(Some(result)) => return Ok::<OAuthCallback, ()>(result),
-                // Valid HTTP hit for some other path: answer 404, keep waiting.
-                Ok(None) => {}
-                // Malformed/failed connection: ignore, keep waiting.
-                Err(()) => {}
+                Ok(Some(result)) => return Some(result),
+                // Other paths / malformed hits: answered inside, keep waiting.
+                Ok(None) | Err(()) => {}
             }
         }
     })
     .await;
     let result = match outcome {
-        Ok(Ok(result)) => result,
+        Ok(Some(result)) => result,
+        // Budget spent (or task ended after a normal finish): report a
+        // provider-side failure, not a crash.
         _ => OAuthCallback {
             code: None,
             state: None,

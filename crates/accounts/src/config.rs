@@ -84,9 +84,7 @@ impl Config {
         if avatar_max_bytes > max_body_bytes {
             return Err(AppError::from(ConfigError::Invalid {
                 var: "SONGNEST_AVATAR_MAX_BYTES".to_owned(),
-                reason: format!(
-                    "must fit inside SONGNEST_MAX_BODY_BYTES ({max_body_bytes})"
-                ),
+                reason: format!("must fit inside SONGNEST_MAX_BODY_BYTES ({max_body_bytes})"),
             }));
         }
         Ok(Self {

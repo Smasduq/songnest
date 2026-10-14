@@ -16,8 +16,7 @@ use std::time::Duration;
 use aws_sdk_s3::{
     Client as S3Client,
     config::{
-        BehaviorVersion, Builder as S3ConfigBuilder, Credentials, Region,
-        timeout::TimeoutConfig,
+        BehaviorVersion, Builder as S3ConfigBuilder, Credentials, Region, timeout::TimeoutConfig,
     },
 };
 
@@ -42,8 +41,7 @@ impl Storage {
         let endpoint = std::env::var("AWS_ENDPOINT_URL_S3")
             .ok()
             .filter(|s| !s.trim().is_empty())?;
-        let region =
-            std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_owned());
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_owned());
         // Generous timeouts: the first TLS + SigV4 connection to Object
         // Storage can take several seconds (cold handshake, far region),
         // and the SDK default (~3s connect) turns that into a 500 on
