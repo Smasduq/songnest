@@ -1,0 +1,5 @@
+[songnest]
+name=Songnest
+baseurl=https://raw.githubusercontent.com/Smasduq/songnest/pkg/rpms
+enabled=1
+gpgcheck=0

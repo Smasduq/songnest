@@ -1,0 +1,15 @@
+Package: songnest
+Version: 0.1.0
+Architecture: amd64
+Maintainer: songnest
+Installed-Size: 29811
+Depends: libappindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0
+Filename: pool/Songnest_0.1.0_amd64.deb
+Size: 9880260
+MD5sum: abc573a31b1f46131c16b212acd3d018
+SHA1: ac1d958a288c02a01f98f4aaf494a9ccaaaa166b
+SHA256: ff8b70a0980af6b59f44603ab115190a2845df1c1af826217fa9b44a0ccb6e98
+Priority: optional
+Description: (none)
+ (none)
+
