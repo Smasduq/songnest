@@ -13,6 +13,7 @@ import {
   preferNativeTransport,
 } from "@/native/background-player";
 import { audio, usePlayer } from "@/player/store";
+import { SparklesText } from "@/components/ui/sparkles-text";
 
 type Status =
   | "loading"
@@ -162,9 +163,13 @@ export function LyricsPanel({ track }: { track: Song }) {
   }
   if (status === "instrumental") {
     return (
-      <p className="py-4 text-center text-sm uppercase tracking-[0.2em] text-muted-foreground">
-        Instrumental
-      </p>
+      <div className="flex justify-center py-4">
+        <SparklesText
+          text="Instrumental"
+          sparklesCount={8}
+          className="text-center text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground"
+        />
+      </div>
     );
   }
   if (status === "missing") {
@@ -218,7 +223,16 @@ export function LyricsPanel({ track }: { track: Song }) {
                     : "text-muted-foreground"
               }`}
             >
-              {l.text === "" ? "· · ·" : l.text}
+              {isActive ? (
+                <SparklesText
+                  as={<span />}
+                  text={l.text === "" ? "· · ·" : l.text}
+                  sparklesCount={6}
+                  className="text-[15px] leading-snug"
+                />
+              ) : (
+                l.text === "" ? "· · ·" : l.text
+              )}
             </button>
           );
         })}
