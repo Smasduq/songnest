@@ -115,6 +115,21 @@ export async function searchSongs(q: string): Promise<SearchHit[]> {
   return (await r.json()) as SearchHit[];
 }
 
+/** Lightweight typeahead for the search bar (cheap per keystroke).
+ *  Same shape as `searchSongs` but capped to ~6 hits, no contributor
+ *  enrichment. Aborts via `signal` when the user keeps typing. */
+export async function fetchAutocomplete(
+  q: string,
+  signal?: AbortSignal
+): Promise<SearchHit[]> {
+  const r = await fetch(
+    `${apiBase()}/api/autocomplete?q=${encodeURIComponent(q)}`,
+    { signal }
+  );
+  if (!r.ok) throw new Error(`autocomplete: ${r.status}`);
+  return (await r.json()) as SearchHit[];
+}
+
 /** Resolve one exact Deezer track to playable audio (full song only). */
 export async function resolveTrack(dz: number, fresh = false): Promise<Song> {
   const r = await fetch(
@@ -406,6 +421,103 @@ export function dzOf(song: Song): number | null {
   if (!song.id.startsWith("dz-")) return null;
   const n = Number(song.id.slice(3));
   return Number.isInteger(n) ? n : null;
+}
+
+/** Time-synced lyrics for one track (LRCLIB via the on-device server). */
+export interface LyricLine {
+  ms: number;
+  text: string;
+}
+
+export interface LyricsResponse {
+  synced: LyricLine[] | null;
+  plain: string | null;
+  instrumental: boolean;
+  offset_ms: number;
+  from_cache?: boolean;
+}
+
+function lyricsQuery(song: Song): string {
+  const p = new URLSearchParams({
+    key: song.id,
+    artist: song.artist,
+    title: song.title,
+    album: song.album,
+    duration: String(Math.round(song.duration)),
+  });
+  const dz = song.deezerId ?? dzOf(song);
+  if (dz !== null && dz !== undefined) p.set("dz", String(dz));
+  return p.toString();
+}
+
+/** Last line with ms <= position (binary search). -1 when none yet. */
+export function activeLyricIndex(
+  lines: LyricLine[],
+  positionMs: number
+): number {
+  let lo = 0;
+  let hi = lines.length - 1;
+  let ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].ms <= positionMs) {
+      ans = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return ans;
+}
+
+export async function fetchLyrics(song: Song): Promise<LyricsResponse> {
+  // Tauri shell first (one get_lyrics entry point; same Rust path on
+  // Android since the server runs in-process there), plain HTTP fallback.
+  try {
+    if (typeof window !== "undefined" && "__TAURI__" in window) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const dz = song.deezerId ?? dzOf(song);
+      return (await invoke("get_lyrics", {
+        trackId: song.id,
+        artist: song.artist,
+        title: song.title,
+        album: song.album,
+        duration: song.duration,
+        dz: dz ?? null,
+      })) as LyricsResponse;
+    }
+  } catch {
+    // fall through to HTTP
+  }
+  const r = await fetch(`${apiBase()}/api/lyrics?${lyricsQuery(song)}`);
+  if (r.status === 404) throw new Error("No lyrics found");
+  if (!r.ok) throw new Error(`lyrics: ${r.status}`);
+  return (await r.json()) as LyricsResponse;
+}
+
+export async function setLyricOffset(
+  key: string,
+  offsetMs: number
+): Promise<number> {
+  try {
+    if (typeof window !== "undefined" && "__TAURI__" in window) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const j = (await invoke("set_lyric_offset", {
+        trackId: key,
+        offsetMs,
+      })) as { offset_ms: number };
+      return j.offset_ms;
+    }
+  } catch {
+    // fall through to HTTP
+  }
+  const r = await fetch(`${apiBase()}/api/lyrics/offset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, offset_ms: offsetMs }),
+  });
+  if (!r.ok) throw new Error(`offset: ${r.status}`);
+  return ((await r.json()) as { offset_ms: number }).offset_ms;
 }
 
 export function formatTime(totalSeconds: number): string {

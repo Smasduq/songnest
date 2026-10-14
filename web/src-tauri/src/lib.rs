@@ -5,6 +5,7 @@ use tauri::{Manager, RunEvent};
 
 mod oauth;
 mod player;
+mod lyrics;
 
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
 
@@ -165,6 +166,8 @@ fn builder() {
             secret_set,
             secret_get,
             secret_delete,
+            lyrics::get_lyrics,
+            lyrics::set_lyric_offset,
             oauth::oauth_loopback_begin,
             oauth::oauth_loopback_wait
         ])

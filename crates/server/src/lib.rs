@@ -1308,7 +1308,221 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
         album TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '',
         liked_at INTEGER NOT NULL)",
     )?;
+    // lyrics cache: key is the frontend track id ("dz:<id>" or "db:<id>").
+    // Raw LRC + plain text verbatim, fetched_at (unix secs), and the user's
+    // per-track sync offset in ms. Checked first so lyrics work offline.
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS lyrics (
+        key TEXT PRIMARY KEY, lrc TEXT, plain TEXT,
+        instrumental INTEGER NOT NULL DEFAULT 0,
+        fetched_at INTEGER NOT NULL, offset_ms INTEGER NOT NULL DEFAULT 0)",
+    )?;
     Ok(())
+}
+
+/// One cached lyrics row: raw LRC, plain text, instrumental flag, offset.
+fn lyrics_cached(
+    db: &Db,
+    key: &str,
+) -> Option<(Option<String>, Option<String>, bool, i64)> {
+    db.lock().unwrap().query_row(
+        "SELECT lrc, plain, instrumental, offset_ms FROM lyrics WHERE key = ?1",
+        [key],
+        |r| {
+            let lrc: Option<String> = r.get(0)?;
+            let plain: Option<String> = r.get(1)?;
+            let inst: i64 = r.get(2)?;
+            let offset: i64 = r.get(3)?;
+            Ok((lrc, plain, inst != 0, offset))
+        },
+    ).ok().filter(|(lrc, plain, inst, _)| {
+        *inst || lrc.as_deref().is_some_and(|s| !s.trim().is_empty())
+            || plain.as_deref().is_some_and(|s| !s.trim().is_empty())
+    })
+}
+
+fn lyrics_store(
+    db: &Db,
+    key: &str,
+    lrc: Option<&str>,
+    plain: Option<&str>,
+    instrumental: bool,
+) {
+    let _ = db.lock().unwrap().execute(
+        "INSERT INTO lyrics (key, lrc, plain, instrumental, fetched_at, offset_ms)
+         VALUES (?1, ?2, ?3, ?4, strftime('%s','now'), 0)
+         ON CONFLICT(key) DO UPDATE SET
+           lrc = excluded.lrc, plain = excluded.plain,
+           instrumental = excluded.instrumental, fetched_at = excluded.fetched_at",
+        rusqlite::params![key, lrc, plain, i64::from(instrumental)],
+    );
+}
+
+fn lyrics_set_offset(db: &Db, key: &str, offset_ms: i64) {
+    let offset_ms = offset_ms.clamp(-5000, 5000);
+    let db = db.lock().unwrap();
+    let n = db.execute(
+        "UPDATE lyrics SET offset_ms = ?1 WHERE key = ?2",
+        rusqlite::params![offset_ms, key],
+    ).unwrap_or(0);
+    if n == 0 {
+        let _ = db.execute(
+            "INSERT INTO lyrics (key, lrc, plain, instrumental, fetched_at, offset_ms)
+             VALUES (?1, NULL, NULL, 0, strftime('%s','now'), ?2)
+             ON CONFLICT(key) DO UPDATE SET offset_ms = excluded.offset_ms",
+            rusqlite::params![key, offset_ms],
+        );
+    }
+}
+
+/// Best-effort lyrics prefetch for a finished download. Never fails the job:
+/// a slow LRCLIB must not block the queue worker.
+async fn prefetch_lyrics(
+    db: &Db,
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: u32,
+    keys: &[String],
+) {
+    for k in keys {
+        if lyrics_cached(db, k).is_some() {
+            continue;
+        }
+    }
+    let keys: Vec<String> = keys
+        .iter()
+        .filter(|k| lyrics_cached(db, k).is_none())
+        .cloned()
+        .collect();
+    if keys.is_empty() {
+        return;
+    }
+    let fetched =
+        tokio::time::timeout(std::time::Duration::from_secs(15), songnest_core::lyrics::fetch_lyrics_raw(artist, title, album, duration))
+            .await
+            .ok()
+            .flatten();
+    let Some((lrc, plain, instrumental)) = fetched else {
+        return;
+    };
+    for k in &keys {
+        lyrics_store(db, k, lrc.as_deref(), plain.as_deref(), instrumental);
+    }
+}
+
+/// GET /api/lyrics?key=<track id>&artist=&title=&album=&duration=<secs>[&dz=]
+///
+/// Cache first (offline): a stored row is returned without touching the
+/// network. Otherwise LRCLIB is fetched via `songnest-core` and cached.
+async fn api_lyrics(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let key = q.get("key").cloned().unwrap_or_default();
+    let dz = q.get("dz").cloned().unwrap_or_default();
+    let dz_key = if dz.is_empty() {
+        None
+    } else {
+        Some(format!("dz-{dz}"))
+    };
+    // Cache first: exact key, then the dz twin ("db-7" <-> "dz-123").
+    for cand in [key.clone(), dz_key.clone().unwrap_or_default()] {
+        if cand.is_empty() {
+            continue;
+        }
+        if let Some((lrc, plain, instrumental, offset)) = lyrics_cached(&s.db, &cand) {
+            let synced = lrc
+                .as_deref()
+                .map(songnest_core::lyrics::parse_lrc)
+                .filter(|v| !v.is_empty());
+            if instrumental {
+                return Json(serde_json::json!({
+                    "instrumental": true, "synced": null, "plain": null,
+                    "offset_ms": offset, "from_cache": true,
+                }))
+                .into_response();
+            }
+            return Json(serde_json::json!({
+                "instrumental": false,
+                "synced": synced.map(|v| v.iter().map(|l| serde_json::json!({"ms": l.ms, "text": l.text})).collect::<Vec<_>>()),
+                "plain": plain, "offset_ms": offset, "from_cache": true,
+            }))
+            .into_response();
+        }
+    }
+    if key.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    // Resolve metadata: explicit query wins; "db-<id>" rows can omit it.
+    let mut artist = q.get("artist").cloned().unwrap_or_default();
+    let mut title = q.get("title").cloned().unwrap_or_default();
+    let mut album = q.get("album").cloned().unwrap_or_default();
+    let mut duration: u32 = q.get("duration").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if (artist.is_empty() || title.is_empty()) && key.starts_with("db-") {
+        if let Ok(n) = key[3..].parse::<i64>() {
+            let row: Option<(String, String, String, i64)> = s.db.lock().unwrap()
+                .query_row(
+                    "SELECT title, artist, album, duration FROM tracks WHERE id = ?1",
+                    [n],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                ).ok();
+            if let Some((t, a, al, d)) = row {
+                if title.is_empty() { title = t; }
+                if artist.is_empty() { artist = a; }
+                if album.is_empty() { album = al; }
+                if duration == 0 { duration = d.max(0) as u32; }
+            }
+        }
+    }
+    if artist.trim().is_empty() || title.trim().is_empty() || duration == 0 {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let fetched = songnest_core::lyrics::fetch_lyrics_raw(&artist, &title, &album, duration).await;
+    let Some((lrc, plain, instrumental)) = fetched else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    lyrics_store(&s.db, &key, lrc.as_deref(), plain.as_deref(), instrumental);
+    if let Some(dk) = dz_key.filter(|d| d != &key) {
+        if lyrics_cached(&s.db, &dk).is_none() {
+            lyrics_store(&s.db, &dk, lrc.as_deref(), plain.as_deref(), instrumental);
+        }
+    }
+    let offset: i64 = lyrics_cached(&s.db, &key).map(|r| r.3).unwrap_or(0);
+    if instrumental {
+        return Json(serde_json::json!({
+            "instrumental": true, "synced": null, "plain": null,
+            "offset_ms": offset, "from_cache": false,
+        }))
+        .into_response();
+    }
+    let synced = lrc
+        .as_deref()
+        .map(songnest_core::lyrics::parse_lrc)
+        .filter(|v| !v.is_empty());
+    Json(serde_json::json!({
+        "instrumental": false,
+        "synced": synced.map(|v| v.iter().map(|l| serde_json::json!({"ms": l.ms, "text": l.text})).collect::<Vec<_>>()),
+        "plain": plain, "offset_ms": offset, "from_cache": false,
+    }))
+    .into_response()
+}
+
+/// POST /api/lyrics/offset {"key": "db-7", "offset_ms": 200}
+async fn api_lyrics_offset(
+    State(s): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let key = body.get("key").and_then(|v| v.as_str()).unwrap_or_default();
+    let Some(off) = body.get("offset_ms").and_then(|v| v.as_i64()) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if key.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    lyrics_set_offset(&s.db, key, off);
+    let offset = lyrics_cached(&s.db, key).map(|r| r.3).unwrap_or(off.clamp(-5000, 5000));
+    Json(serde_json::json!({"key": key, "offset_ms": offset})).into_response()
 }
 
 /// Bump when the search queries or scorer change: cached rows stamped with
@@ -1936,6 +2150,20 @@ async fn run_job(s: &AppState, job_id: i64, dzid: u64) {
             ],
         )
         .ok();
+    // 5. lyrics at download time (best-effort): the row is cached under both
+    // the dz key and the new db id so playback works offline later.
+    {
+        let db_id: Option<i64> = s.db.lock().unwrap().query_row(
+            "SELECT id FROM tracks WHERE video_id = ?1",
+            [&video_id],
+            |r| r.get(0),
+        ).ok();
+        let mut keys = vec![format!("dz-{}", dz)];
+        if let Some(id) = db_id {
+            keys.push(format!("db-{id}"));
+        }
+        prefetch_lyrics(&s.db, &artist, &title, &album, duration, &keys).await;
+    }
     set_job(&s.db, job_id, "done", 100, None);
 }
 
@@ -2487,6 +2715,50 @@ async fn api_search(
                     "dz": t.id,
                     "title": t.title,
                     "artist": display_artists(t),
+                    "album": t.album.title,
+                    "duration": t.duration,
+                    "cover": t.album.cover_big,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+/// Lightweight typeahead for the search bar: single Deezer `/search`
+/// request capped to 6 rows and no per-track contributor enrichment
+/// (unlike `/api/search`), so it's cheap enough to call per keystroke
+/// (debounced, min 2 chars). NOTE: Deezer has no `/suggest` endpoint —
+/// it answers 600 "Unknown path components", hence `/search` here.
+async fn api_autocomplete(
+    State(s): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let query = q.get("q").cloned().unwrap_or_default();
+    if query.trim().chars().count() < 2 {
+        return Json(Vec::<serde_json::Value>::new()).into_response();
+    }
+    let Ok(resp) = s
+        .http
+        .get("https://api.deezer.com/search")
+        .query(&[("q", &query), ("limit", &"6".to_string())])
+        .send()
+        .await
+    else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let Ok(res): Result<DzSearch, _> = resp.json().await else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    Json(
+        res.data
+            .into_iter()
+            .take(6)
+            .map(|t| {
+                serde_json::json!({
+                    "dz": t.id,
+                    "title": if t.title_short.is_empty() { t.title } else { t.title_short },
+                    "artist": t.artist.name,
                     "album": t.album.title,
                     "duration": t.duration,
                     "cover": t.album.cover_big,
@@ -3204,7 +3476,10 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/library", get(api_library))
         .route("/api/library/refresh-artists", post(api_refresh_artists))
         .route("/api/search", get(api_search))
+        .route("/api/autocomplete", get(api_autocomplete))
         .route("/api/resolve", get(api_resolve))
+        .route("/api/lyrics", get(api_lyrics))
+        .route("/api/lyrics/offset", post(api_lyrics_offset))
         .layer(CorsLayer::very_permissive())
         .with_state(state);
     // LAN binding so phones on the same WiFi can reach the API/QrReader

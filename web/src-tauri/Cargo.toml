@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 keyring = "4"
 # Background playback on phones: Media3 ExoPlayer + MediaSessionService
 # (Android) / AVPlayer (iOS). Vendored fork (path dep) of

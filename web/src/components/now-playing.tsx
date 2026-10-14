@@ -1,5 +1,6 @@
 import { BurstButton } from "@/components/burst-button";
 import { EmptyState } from "@/components/empty-state";
+import { LyricsPanel } from "@/components/lyrics-panel";
 import { QueueList } from "@/components/queue-list";
 import { formatTime, type Song } from "@/lib/api";
 import { Marquee } from "@/components/marquee";
@@ -136,6 +137,12 @@ export function NowPlaying({
               Not the right song? Try another match
             </button>
           )}
+          <div>
+            <h3 className="mb-2 text-sm font-semibold tracking-wide text-muted-foreground">
+              Lyrics
+            </h3>
+            <LyricsPanel track={track} />
+          </div>
         </div>
       ) : (
         <EmptyState

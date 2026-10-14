@@ -4088,9 +4088,10 @@ dependencies = [
 
 [[package]]
 name = "songnest"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "keyring",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "songnest-server",
@@ -4100,6 +4101,17 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tokio",
+]
+
+[[package]]
+name = "songnest-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -4130,6 +4142,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "songnest-core",
  "songnest-extract",
  "tokio",
  "tower",

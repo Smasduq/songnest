@@ -14,6 +14,7 @@ default = []
 songnestpy = ["songnest-extract/songnestpy"]
 
 [dependencies]
+songnest-core = { path = "../core", version = "0.1.0" }
 songnest-extract = { path = "../extract", version = "0.1.0" }
 tokio.workspace = true
 reqwest.workspace = true

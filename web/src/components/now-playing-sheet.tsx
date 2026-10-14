@@ -4,6 +4,7 @@ import { motion, useDragControls } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { BurstButton } from "@/components/burst-button";
 import { EmptyState } from "@/components/empty-state";
+import { LyricsPanel } from "@/components/lyrics-panel";
 import { QueueList } from "@/components/queue-list";
 import { SeekBar } from "@/components/seek-bar";
 import { formatTime } from "@/lib/api";
@@ -393,6 +394,14 @@ export function NowPlayingSheet({
                   <ListMusic className="h-4 w-4" />
                   Queue ({queuedCount})
                 </Button>
+              </div>
+            )}
+            {!full && (
+              <div data-no-dismiss-drag>
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  Lyrics
+                </h3>
+                <LyricsPanel track={track} />
               </div>
             )}
 

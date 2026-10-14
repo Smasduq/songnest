@@ -42,6 +42,13 @@ let nativePlaying = false;
 let nativePos = 0;
 let nativeDur = 0;
 let nativeReady = false;
+/**
+ * Last native position update (performance.now()). The native player only
+ * emits state events sparsely, so the lyrics view interpolates between
+ * 150ms polls (see nativePositionSmooth + ensurePositionPoll).
+ */
+let lastNativeAt = 0;
+let pollTimer: number | undefined;
 /** Set when native init definitively failed: fall back to `<audio>`. */
 let nativeFailed = false;
 let initPromise: Promise<void> | null = null;
@@ -71,6 +78,19 @@ export function nativePosition(): number {
   return nativePos;
 }
 
+/**
+ * Interpolated native position (seconds): last emitted position plus wall
+ * clock elapsed since that update while playing. The Android WebView only
+ * gets position events every 100-200ms, so the lyrics rAF loop reads this
+ * instead of the raw value to stay smooth between updates.
+ */
+export function nativePositionSmooth(): number {
+  if (!nativePlaying || lastNativeAt === 0) return nativePos;
+  const dt = (performance.now() - lastNativeAt) / 1000;
+  if (!(dt > 0) || dt > 5) return nativePos;
+  return nativeDur > 0 ? Math.min(nativePos + dt, nativeDur) : nativePos + dt;
+}
+
 export function nativeDuration(): number {
   return nativeDur;
 }
@@ -93,6 +113,7 @@ function fail(message: string): void {
 function applyNativeState(st: NativeAudioState): void {
   nativePos = st.currentTime;
   nativeDur = st.duration;
+  lastNativeAt = performance.now();
   useTime.setState({ currentTime: nativePos, duration: nativeDur });
   if (st.status === "playing") {
     nativePlaying = true;
@@ -128,6 +149,26 @@ async function ensureInit(): Promise<boolean> {
   return nativeActive;
 }
 
+/** 150ms position pump while the native engine plays: keeps useTime +
+ *  lyrics interpolation fresh between sparse state events. Started once. */
+function ensurePositionPoll(): void {
+  if (pollTimer !== undefined) return;
+  pollTimer = window.setInterval(() => {
+    if (!nativePlaying || !nativeActive) return;
+    plugin()
+      .then((na) => na.getState())
+      .then((st) => {
+        nativePos = st.currentTime;
+        nativeDur = st.duration;
+        lastNativeAt = performance.now();
+        useTime.setState({ currentTime: nativePos, duration: nativeDur });
+      })
+      .catch(() => {
+        // transient JNI miss — next tick retries
+      });
+  }, 150);
+}
+
 async function doInit(): Promise<void> {
   try {
     const na = await plugin();
@@ -135,6 +176,7 @@ async function doInit(): Promise<void> {
     applyNativeState(await na.initialize());
     nativeActive = true;
     nativeReady = true;
+    ensurePositionPoll();
   } catch (e: unknown) {
     console.error(e);
     nativeActive = false;
