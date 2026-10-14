@@ -28,9 +28,20 @@ Planned or experimental:
 
 ## Screenshots
 
-Current prototype (desktop library view):
+Desktop library, now playing, and profile:
 
 ![Songnest desktop library](docs/screenshots/desktop-library.png)
+![Songnest desktop profile](docs/screenshots/desktop-profile.png)
+
+Sign-in (email, Google, GitHub):
+
+![Songnest sign-in](docs/screenshots/signin.png)
+
+Mobile library, now playing, and queue:
+
+![Songnest mobile library](docs/screenshots/mobile-library.png)
+![Songnest mobile now playing](docs/screenshots/mobile-now-playing.png)
+![Songnest mobile queue](docs/screenshots/mobile-queue.png)
 
 ## Quick start
 
