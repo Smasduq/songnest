@@ -26,7 +26,9 @@ import {
  * OAuth (GitHub + Google): the provider button redirects via
  * `GET /auth/<provider>/start`; the provider returns to `/?code=…&state=…`
  * and this page exchanges the code via `POST /auth/<provider>/callback`.
- * The secret never leaves the accounts server.
+ * The secret never leaves the accounts server. In Tauri bundles the same
+ * buttons run the loopback flow instead (local callback server, system
+ * browser) and log in without leaving the app.
  *
  * No props required besides `onAuthed`; renders full-screen.
  */
@@ -121,13 +123,19 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
     }
   }
 
-  async function handleOAuth(start: () => Promise<void>): Promise<void> {
+  async function handleOAuth(start: () => Promise<Session | null>): Promise<void> {
     if (oauthBusy) return;
     setOauthBusy(true);
     setOauthError(null);
     try {
-      await start();
-      // Redirects away; busy stays true until navigation.
+      const session = await start();
+      if (session === null) {
+        // Web flow: navigated away; busy stays true until navigation.
+        return;
+      }
+      // Native flow: loopback login completed in-app.
+      setOauthBusy(false);
+      onAuthed(session);
     } catch (e) {
       setOauthBusy(false);
       if (e instanceof AccountsError && e.code === "unreachable") {

@@ -275,10 +275,39 @@ const OAUTH_PROVIDER_KEY = "songnest-oauth-provider";
 
 export type OAuthProvider = "github" | "google";
 
-/** Start OAuth login: ask the API for the provider authorize URL, remember
- *  `state` + provider for the CSRF check, then redirect there. */
-async function startOAuthLogin(provider: OAuthProvider): Promise<void> {
-  const redirect_uri = oauthRedirectUri();
+/** True inside the Tauri bundle (desktop or mobile), where the webview
+ *  origin is app-internal and OAuth must use the loopback flow. */
+function isNativeApp(): boolean {
+  return typeof window !== "undefined" && "__TAURI__" in window;
+}
+
+async function invokeNative<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
+/** Open a URL in the system browser (Tauri) or a new tab (web).
+ *  OAuth providers block embedded webviews, so this must never
+ *  navigate the app's own webview away. */
+async function openSystemBrowser(url: string): Promise<void> {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+interface AuthorizeUrl {
+  url: string;
+  state: string | null;
+}
+
+/** Ask the API for the provider authorize URL for `redirect_uri`. */
+async function fetchAuthorizeUrl(
+  provider: OAuthProvider,
+  redirect_uri: string
+): Promise<AuthorizeUrl> {
   const { status, json } = await request(
     `/auth/${provider}/start?redirect_uri=${encodeURIComponent(redirect_uri)}`,
     { method: "GET" },
@@ -290,8 +319,9 @@ async function startOAuthLogin(provider: OAuthProvider): Promise<void> {
   if (typeof url !== "string" || url === "") {
     throw new AccountsError("server", "Login isn't available right now.");
   }
+  let state: string | null = null;
   try {
-    const state = new URL(url).searchParams.get("state");
+    state = new URL(url).searchParams.get("state");
     if (state !== null) {
       window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
       window.sessionStorage.setItem(OAUTH_PROVIDER_KEY, provider);
@@ -299,7 +329,71 @@ async function startOAuthLogin(provider: OAuthProvider): Promise<void> {
   } catch {
     // Non-fatal: the callback still exchanges the code without the check.
   }
+  return { url, state };
+}
+
+/** Start OAuth login: ask the API for the provider authorize URL, remember
+ *  `state` + provider for the CSRF check, then redirect there. */
+async function startOAuthLogin(provider: OAuthProvider): Promise<void> {
+  const { url } = await fetchAuthorizeUrl(provider, oauthRedirectUri());
   window.location.href = url;
+}
+
+interface NativeOAuthCallback {
+  code?: string | null;
+  state?: string | null;
+  error?: string | null;
+}
+
+/** Native OAuth login (Tauri desktop + mobile) via loopback.
+ *
+ *  Bundle origins (`tauri://…`, `http://tauri.localhost`) are rejected
+ *  by providers and unreachable from the system browser, so the app
+ *  serves one loopback callback (`http://127.0.0.1:<port>/callback` —
+ *  accepted by Desktop-type OAuth clients without registration),
+ *  opens the provider page in the system browser, and exchanges the
+ *  captured code. Resolves with the Songnest session. */
+async function startNativeOAuthLogin(provider: OAuthProvider): Promise<Session> {
+  let port: number;
+  try {
+    port = await invokeNative<number>("oauth_loopback_begin");
+  } catch {
+    throw new AccountsError(
+      "invalid",
+      "Couldn't start login on this device — try again."
+    );
+  }
+  const redirect_uri = `http://127.0.0.1:${port}/callback`;
+  const { url } = await fetchAuthorizeUrl(provider, redirect_uri);
+  await openSystemBrowser(url);
+  let callback: NativeOAuthCallback;
+  try {
+    callback = await invokeNative<NativeOAuthCallback>("oauth_loopback_wait", {
+      timeoutSecs: 300,
+    });
+  } catch (e) {
+    // Rust-side messages are plain, user-safe strings (timeout, busy…).
+    throw new AccountsError(
+      "invalid",
+      typeof e === "string" ? e : "Login failed — try again."
+    );
+  }
+  if (
+    callback.error !== undefined &&
+    callback.error !== null &&
+    callback.error !== ""
+  ) {
+    throw new AccountsError(
+      "invalid",
+      callback.error === "access_denied"
+        ? "Login was cancelled with the provider — try again when ready."
+        : "Login failed with the provider — try again."
+    );
+  }
+  if (callback.code === undefined || callback.code === null || callback.code === "") {
+    throw new AccountsError("invalid", "Login failed — try again.");
+  }
+  return (await finishOAuthLogin(callback.code, callback.state ?? null)).session;
 }
 
 /** Finish OAuth login after the redirect back with `?code=…`. Verifies
@@ -340,14 +434,22 @@ export function githubRedirectUri(): string {
   return oauthRedirectUri();
 }
 
-/** Start GitHub login via redirect (see startOAuthLogin). */
-export async function startGithubLogin(): Promise<void> {
-  return startOAuthLogin("github");
+/** Start GitHub login via redirect (see startOAuthLogin). In the native
+ *  app this completes the loopback flow and resolves with the session;
+ *  on the web it navigates away and resolves null. */
+export async function startGithubLogin(): Promise<Session | null> {
+  if (isNativeApp()) return startNativeOAuthLogin("github");
+  await startOAuthLogin("github");
+  return null;
 }
 
-/** Start Google login (see startOAuthLogin). */
-export async function startGoogleLogin(): Promise<void> {
-  return startOAuthLogin("google");
+/** Start Google login (see startOAuthLogin). In the native app this
+ *  completes the loopback flow and resolves with the session; on the
+ *  web it navigates away and resolves null. */
+export async function startGoogleLogin(): Promise<Session | null> {
+  if (isNativeApp()) return startNativeOAuthLogin("google");
+  await startOAuthLogin("google");
+  return null;
 }
 
 /** Device-flow session from `POST /auth/github/device/start`. */

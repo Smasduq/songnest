@@ -84,7 +84,7 @@ async fn serve_one(
             let (stream, _) = listener.accept().await.map_err(|_| ())?;
             match read_callback(stream).await {
                 // Valid callback (code or provider error): answer and stop.
-                Ok(Some(result)) => return Ok(result),
+                Ok(Some(result)) => return Ok::<OAuthCallback, ()>(result),
                 // Valid HTTP hit for some other path: answer 404, keep waiting.
                 Ok(None) => {}
                 // Malformed/failed connection: ignore, keep waiting.

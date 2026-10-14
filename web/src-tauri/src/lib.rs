@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, RunEvent};
 
+mod oauth;
 mod player;
 
 type ChildSlot = Arc<Mutex<Option<std::process::Child>>>;
@@ -157,10 +158,13 @@ fn builder() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_native_audio::init())
+        .manage(oauth::OAuthSlot::default())
         .invoke_handler(tauri::generate_handler![
             secret_set,
             secret_get,
-            secret_delete
+            secret_delete,
+            oauth::oauth_loopback_begin,
+            oauth::oauth_loopback_wait
         ])
         .setup(move |app| {
             // Tray + close-to-hide (desktop): the background player shell.
