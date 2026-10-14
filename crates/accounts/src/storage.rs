@@ -11,9 +11,14 @@
 //! disabled (`None`) and avatar endpoints answer 503 — the rest of the
 //! API keeps working (local dev without storage).
 
+use std::time::Duration;
+
 use aws_sdk_s3::{
     Client as S3Client,
-    config::{BehaviorVersion, Builder as S3ConfigBuilder, Credentials, Region},
+    config::{
+        BehaviorVersion, Builder as S3ConfigBuilder, Credentials, Region,
+        timeout::TimeoutConfig,
+    },
 };
 
 /// Authenticated Object Storage handle (cloneable pool of connections).
@@ -39,11 +44,21 @@ impl Storage {
             .filter(|s| !s.trim().is_empty())?;
         let region =
             std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_owned());
+        // Generous timeouts: the first TLS + SigV4 connection to Object
+        // Storage can take several seconds (cold handshake, far region),
+        // and the SDK default (~3s connect) turns that into a 500 on
+        // avatar upload. Uploads are ≤512 KiB, so 30s per attempt is
+        // plenty even on poor connections.
+        let timeouts = TimeoutConfig::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .operation_attempt_timeout(Duration::from_secs(30))
+            .build();
         let conf = S3ConfigBuilder::new()
             .behavior_version(BehaviorVersion::latest())
             .credentials_provider(Credentials::new(key, secret, None, None, "neon-storage"))
             .region(Region::new(region))
             .endpoint_url(endpoint.clone())
+            .timeout_config(timeouts)
             // Required: Neon uses path-style addressing.
             .force_path_style(true)
             .build();
