@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Minus, Plus } from "lucide-react";
 
 import {
   activeLyricIndex,
@@ -46,7 +47,18 @@ function seekToMs(ms: number): void {
  * Time-synced lyrics view. Driven by requestAnimationFrame while playing
  * (timeupdate is too coarse at ~4Hz); position = player + user offset.
  */
-export function LyricsPanel({ track }: { track: Song }) {
+export function LyricsPanel({
+  track,
+  scrollClassName,
+  size = "compact",
+}: {
+  track: Song;
+  /** override the scroll-container height (page uses a taller one) */
+  scrollClassName?: string;
+  /** large: roomy editorial lyrics for the desktop page; compact: mobile sheet */
+  size?: "compact" | "large";
+}) {
+  const large = size === "large";
   const playing = usePlayer((s) => s.playing);
   const [status, setStatus] = useState<Status>("loading");
   const [lines, setLines] = useState<LyricLine[]>([]);
@@ -156,32 +168,54 @@ export function LyricsPanel({ track }: { track: Song }) {
 
   if (status === "loading") {
     return (
-      <p className="py-4 text-center text-sm text-muted-foreground">
+      <p
+        className={
+          large
+            ? "py-16 text-center text-[15px] text-muted-foreground"
+            : "py-4 text-center text-sm text-muted-foreground"
+        }
+      >
         Finding lyrics…
       </p>
     );
   }
   if (status === "instrumental") {
     return (
-      <div className="flex justify-center py-4">
+      <div className={large ? "flex justify-center py-16" : "flex justify-center py-4"}>
         <SparklesText
           text="Instrumental"
-          sparklesCount={8}
-          className="text-center text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground"
+          sparklesCount={large ? 12 : 8}
+          className={
+            large
+              ? "text-center text-2xl font-medium uppercase tracking-[0.2em] text-muted-foreground"
+              : "text-center text-sm font-bold uppercase tracking-[0.2em] text-muted-foreground"
+          }
         />
       </div>
     );
   }
   if (status === "missing") {
     return (
-      <p className="py-4 text-center text-sm text-muted-foreground">
+      <p
+        className={
+          large
+            ? "py-16 text-center text-[15px] text-muted-foreground"
+            : "py-4 text-center text-sm text-muted-foreground"
+        }
+      >
         No lyrics found
       </p>
     );
   }
   if (status === "error") {
     return (
-      <p className="py-4 text-center text-sm text-muted-foreground">
+      <p
+        className={
+          large
+            ? "py-16 text-center text-[15px] text-muted-foreground"
+            : "py-4 text-center text-sm text-muted-foreground"
+        }
+      >
         Lyrics unavailable — check connection.
       </p>
     );
@@ -189,17 +223,27 @@ export function LyricsPanel({ track }: { track: Song }) {
   if (status === "plain") {
     return (
       <div className="space-y-2">
-        <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">
+        <p
+          className={
+            large
+              ? "max-w-2xl whitespace-pre-line text-lg leading-loose text-foreground/90 md:text-xl"
+              : "whitespace-pre-line text-sm leading-relaxed text-foreground/90"
+          }
+        >
           {plain}
         </p>
       </div>
     );
   }
   return (
-    <div className="space-y-2">
+    <div className={large ? "space-y-4" : "space-y-2"}>
       <div
         data-no-dismiss-drag
-        className="scroller max-h-64 space-y-1 overflow-y-auto rounded-2xl border border-border/40 bg-background/40 p-3"
+        className={
+          large
+            ? `scroller space-y-1 overflow-y-auto bg-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_bottom,transparent,black_6%,black_94%,transparent)] ${scrollClassName ?? "max-h-64"}`
+            : `scroller space-y-1 overflow-y-auto rounded-2xl border border-border/40 bg-background/40 p-3 ${scrollClassName ?? "max-h-64"}`
+        }
       >
         {lines.map((l, i) => {
           const isActive = i === active;
@@ -215,20 +259,34 @@ export function LyricsPanel({ track }: { track: Song }) {
                 setActive(-1);
                 seekToMs(l.ms);
               }}
-              className={`block w-full rounded-lg px-2 py-1 text-left text-[15px] leading-snug transition-colors ${
-                isActive
-                  ? "bg-primary/10 font-semibold text-foreground"
-                  : isPast
-                    ? "text-muted-foreground/60"
-                    : "text-muted-foreground"
-              }`}
+              className={
+                large
+                  ? `block w-full rounded-2xl px-4 py-2 text-left text-2xl font-medium tracking-tight transition-all duration-300 md:text-[28px] md:leading-[1.35] ${
+                      isActive
+                        ? "scale-[1.01] text-foreground"
+                        : isPast
+                          ? "text-muted-foreground/40"
+                          : "text-muted-foreground/75 hover:text-muted-foreground"
+                    }`
+                  : `block w-full rounded-lg px-2 py-1 text-left text-[15px] leading-snug transition-colors ${
+                      isActive
+                        ? "bg-primary/10 font-semibold text-foreground"
+                        : isPast
+                          ? "text-muted-foreground/60"
+                          : "text-muted-foreground"
+                    }`
+              }
             >
               {isActive ? (
                 <SparklesText
                   as={<span />}
                   text={l.text === "" ? "· · ·" : l.text}
-                  sparklesCount={6}
-                  className="text-[15px] leading-snug"
+                  sparklesCount={large ? 10 : 6}
+                  className={
+                    large
+                      ? "text-2xl font-semibold tracking-tight md:text-[28px] md:leading-[1.35]"
+                      : "text-[15px] leading-snug"
+                  }
                 />
               ) : (
                 l.text === "" ? "· · ·" : l.text
@@ -237,7 +295,34 @@ export function LyricsPanel({ track }: { track: Song }) {
           );
         })}
       </div>
-      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+      {large ? (
+        <div className="flex items-center justify-between pt-2 text-[13px]">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void nudge(-100)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-3.5 py-1.5 font-medium text-muted-foreground backdrop-blur transition hover:border-border hover:text-foreground active:scale-95 disabled:opacity-50"
+          >
+            <Minus className="size-3.5" aria-hidden="true" />
+            100ms
+          </button>
+          <span className="tabular-nums text-muted-foreground/70">
+            {offsetMs === 0 ? "in sync" : `${offsetMs > 0 ? "+" : ""}${offsetMs}ms`}
+          </span>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void nudge(100)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-3.5 py-1.5 font-medium text-muted-foreground backdrop-blur transition hover:border-border hover:text-foreground active:scale-95 disabled:opacity-50"
+          >
+            <Plus className="size-3.5" aria-hidden="true" />
+            100ms
+          </button>
+        </div>
+      ) : (
+      <div
+        className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
+      >
         <span className="tabular-nums">
           {offsetMs === 0 ? "in sync" : `${offsetMs > 0 ? "+" : ""}${offsetMs}ms`}
         </span>
@@ -258,6 +343,7 @@ export function LyricsPanel({ track }: { track: Song }) {
           +100ms
         </button>
       </div>
+      )}
     </div>
   );
 }
