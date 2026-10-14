@@ -42,6 +42,11 @@ pub struct Config {
     /// Both unset = GitHub login disabled (endpoints answer 503).
     pub github_client_id: Option<String>,
     pub github_client_secret: Option<String>,
+    /// Google OAuth client for "Login with Google" (same flow shape:
+    /// `GET /auth/google/start`, `POST /auth/google/callback`).
+    /// Both unset = Google login disabled.
+    pub google_client_id: Option<String>,
+    pub google_client_secret: Option<String>,
     /// Access-token lifetime.
     pub access_ttl: Duration,
     /// Refresh-token lifetime.
@@ -98,6 +103,12 @@ impl Config {
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
             github_client_secret: std::env::var("SONGNEST_GITHUB_CLIENT_SECRET")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
+            google_client_id: std::env::var("SONGNEST_GOOGLE_CLIENT_ID")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
+            google_client_secret: std::env::var("SONGNEST_GOOGLE_CLIENT_SECRET")
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
             access_ttl: Duration::from_secs(parse_env(

@@ -262,59 +262,129 @@ export async function login(email: string, password: string): Promise<Session> {
   return failFor(status, json, "Couldn't log you in.");
 }
 
-/** Callback URL sent to GitHub. Root origin keeps SPA serving simple:
- *  GitHub redirects to `/?code=…&state=…` and the app finishes login. */
-export function githubRedirectUri(): string {
+/** Callback URL sent to OAuth providers. Root origin keeps receiving
+ *  simple: the provider redirects to `/?code=…&state=…` and the app
+ *  finishes login. Works for browser dev, Tauri dev (localhost:1420),
+ *  and Tauri bundles (`tauri://localhost` / `http://tauri.localhost`). */
+export function oauthRedirectUri(): string {
   return `${window.location.origin}/`;
 }
 
-/** Start GitHub login: ask the API for the authorize URL, remember `state`
- *  for CSRF check, then redirect the browser there. */
-export async function startGithubLogin(): Promise<void> {
-  const redirect_uri = githubRedirectUri();
+const OAUTH_STATE_KEY = "songnest-oauth-state";
+const OAUTH_PROVIDER_KEY = "songnest-oauth-provider";
+
+export type OAuthProvider = "github" | "google";
+
+/** Start OAuth login: ask the API for the provider authorize URL, remember
+ *  `state` + provider for the CSRF check, then redirect there. */
+async function startOAuthLogin(provider: OAuthProvider): Promise<void> {
+  const redirect_uri = oauthRedirectUri();
   const { status, json } = await request(
-    `/auth/github/start?redirect_uri=${encodeURIComponent(redirect_uri)}`,
+    `/auth/${provider}/start?redirect_uri=${encodeURIComponent(redirect_uri)}`,
     { method: "GET" },
   );
   if (status !== 200) {
-    return failFor(status, json, "GitHub login isn't available right now.");
+    return failFor(status, json, "Login isn't available right now.");
   }
   const url = (json as { authorize_url?: string }).authorize_url;
   if (typeof url !== "string" || url === "") {
-    throw new AccountsError("server", "GitHub login isn't available right now.");
+    throw new AccountsError("server", "Login isn't available right now.");
   }
   try {
     const state = new URL(url).searchParams.get("state");
-    if (state !== null) window.sessionStorage.setItem("songnest-github-state", state);
+    if (state !== null) {
+      window.sessionStorage.setItem(OAUTH_STATE_KEY, state);
+      window.sessionStorage.setItem(OAUTH_PROVIDER_KEY, provider);
+    }
   } catch {
     // Non-fatal: the callback still exchanges the code without the check.
   }
   window.location.href = url;
 }
 
-/** Finish GitHub login after the redirect back with `?code=…`. Verifies
- *  the stored `state`, then exchanges the code for a Songnest session. */
-export async function finishGithubLogin(code: string, state: string | null): Promise<Session> {
+/** Finish OAuth login after the redirect back with `?code=…`. Verifies
+ *  the stored `state`, then exchanges the code for a Songnest session.
+ *  Returns the provider so callers can show the right errors. */
+export async function finishOAuthLogin(
+  code: string,
+  state: string | null,
+): Promise<{ session: Session; provider: OAuthProvider }> {
+  let provider: OAuthProvider = "github";
   try {
-    const expected = window.sessionStorage.getItem("songnest-github-state");
+    const storedProvider = window.sessionStorage.getItem(OAUTH_PROVIDER_KEY);
+    if (storedProvider === "google") provider = "google";
+    const expected = window.sessionStorage.getItem(OAUTH_STATE_KEY);
     if (expected !== null && state !== null && expected !== state) {
-      throw new AccountsError("invalid", "GitHub login expired — try again.");
+      throw new AccountsError("invalid", "Login expired — try again.");
     }
   } catch (e) {
     if (e instanceof AccountsError) throw e;
     // Storage blocked: continue without the CSRF check.
   }
-  const { status, json } = await request("/auth/github/callback", {
+  const { status, json } = await request(`/auth/${provider}/callback`, {
     method: "POST",
-    body: JSON.stringify({ code, redirect_uri: githubRedirectUri() }),
+    body: JSON.stringify({ code, redirect_uri: oauthRedirectUri() }),
   });
   try {
-    window.sessionStorage.removeItem("songnest-github-state");
+    window.sessionStorage.removeItem(OAUTH_STATE_KEY);
+    window.sessionStorage.removeItem(OAUTH_PROVIDER_KEY);
   } catch {
     // Best effort.
   }
+  if (status === 200) return { session: await toSession(json as PairResponse), provider };
+  return failFor(status, json, "Couldn't log you in.");
+}
+
+/** @deprecated Use oauthRedirectUri. */
+export function githubRedirectUri(): string {
+  return oauthRedirectUri();
+}
+
+/** Start GitHub login via redirect (see startOAuthLogin). */
+export async function startGithubLogin(): Promise<void> {
+  return startOAuthLogin("github");
+}
+
+/** Start Google login (see startOAuthLogin). */
+export async function startGoogleLogin(): Promise<void> {
+  return startOAuthLogin("google");
+}
+
+/** Device-flow session from `POST /auth/github/device/start`. */
+export interface GithubDeviceStart {
+  user_code: string;
+  verification_uri: string;
+  device_code: string;
+  expires_in: number;
+  interval: number;
+}
+
+/** Start GitHub device login: no callback URL needed. Shows `user_code`
+ *  to the user, who approves at `verification_uri` in any browser. */
+export async function startGithubDevice(): Promise<GithubDeviceStart> {
+  const { status, json } = await request("/auth/github/device/start", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (status === 200) return json as GithubDeviceStart;
+  return failFor(status, json, "GitHub login isn't available right now.");
+}
+
+/** Poll once after device approval. Returns the session when approved,
+ *  `null` while still pending. Throws when expired/denied (stop polling). */
+export async function pollGithubDevice(device_code: string): Promise<Session | null> {
+  const { status, json } = await request("/auth/github/device/poll", {
+    method: "POST",
+    body: JSON.stringify({ device_code }),
+  });
   if (status === 200) return toSession(json as PairResponse);
-  return failFor(status, json, "Couldn't log you in with GitHub.");
+  if (status === 202) return null;
+  return failFor(status, json, "GitHub login expired or was denied.");
+}
+
+/** Finish GitHub login (provider-aware; see finishOAuthLogin). */
+export async function finishGithubLogin(code: string, state: string | null): Promise<Session> {
+  return (await finishOAuthLogin(code, state)).session;
 }
 
 /** Refresh the access token. Returns null when the refresh is dead. */
@@ -409,6 +479,7 @@ export interface UserProfile {
   id: string;
   email: string;
   avatar_url: string | null;
+  username: string | null;
 }
 
 export async function fetchProfile(): Promise<UserProfile> {
@@ -419,8 +490,8 @@ export async function fetchProfile(): Promise<UserProfile> {
     session.accessToken
   );
   if (status === 200) {
-    const body = json as { id: string; email: string; avatar_url?: string | null };
-    return { id: body.id, email: body.email, avatar_url: body.avatar_url ?? null };
+    const body = json as { id: string; email: string; avatar_url?: string | null; username?: string | null };
+    return { id: body.id, email: body.email, avatar_url: body.avatar_url ?? null, username: body.username ?? null };
   }
   if (status === 401) {
     await clearSession();
@@ -473,6 +544,63 @@ export async function deleteAvatar(): Promise<void> {
     throw new AccountsError("logged-out", "Your login expired — please log in again.");
   }
   return failFor(status, json, "Couldn't remove your picture.");
+}
+
+/**
+ * Set or change the account email (`PUT /me/email`). Returns the updated
+ * profile view. Throws `logged-out` on stale sessions, otherwise a
+ * showable AccountsError (invalid / already in use / unavailable).
+ */
+export async function changeEmail(email: string): Promise<{ email: string; username: string | null }> {
+  const session = await ensureSession();
+  const { status, json } = await request(
+    "/me/email",
+    { method: "PUT", body: JSON.stringify({ email }) },
+    session.accessToken
+  );
+  if (status === 200) {
+    const body = json as { email: string; username?: string | null };
+    return { email: body.email, username: body.username ?? null };
+  }
+  if (status === 401) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return failFor(status, json, "Couldn't change your email.");
+}
+
+/** Persist an email change to the cached session (profile edits). */
+export async function updateStoredEmail(email: string): Promise<void> {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    if (raw === null) return;
+    const meta = JSON.parse(raw) as StoredMeta;
+    meta.email = email;
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(meta));
+  } catch {
+    // Best effort: in-memory session still carries the new email.
+  }
+}
+/**
+ * Set or change the public handle (`PUT /me/username`). Returns the saved
+ * handle. Throws `logged-out` on stale sessions, otherwise a showable
+ * AccountsError ("username is taken", validation, unavailable).
+ */
+export async function setUsername(username: string): Promise<string> {
+  const session = await ensureSession();
+  const { status, json } = await request(
+    "/me/username",
+    { method: "PUT", body: JSON.stringify({ username }) },
+    session.accessToken
+  );
+  if (status === 200) {
+    return (json as { username?: string }).username ?? username.trim();
+  }
+  if (status === 401) {
+    await clearSession();
+    throw new AccountsError("logged-out", "Your login expired — please log in again.");
+  }
+  return failFor(status, json, "Couldn't save your username.");
 }
 
 /** Pull changes after `since`. Returns changes + new cursor. */

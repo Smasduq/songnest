@@ -26,6 +26,8 @@ fn test_config(database_url: String, auth_per_minute: u64) -> Config {
         github_webhook_secret: Some("test-webhook-secret".to_owned()),
         github_client_id: None,
         github_client_secret: None,
+        google_client_id: None,
+        google_client_secret: None,
         access_ttl: Duration::from_secs(900),
         refresh_ttl: Duration::from_secs(3600),
         max_body_bytes: 1024 * 1024,
@@ -103,6 +105,20 @@ impl Client {
             .http
             .delete(format!("{}{path}", self.base))
             .bearer_auth(token)
+            .send()
+            .await
+            .expect("request");
+        let status = res.status().as_u16();
+        let json: Value = res.json().await.unwrap_or(Value::Null);
+        (status, json)
+    }
+
+    async fn put_authed(&self, path: &str, token: &str, body: &Value) -> (u16, Value) {
+        let res = self
+            .http
+            .put(format!("{}{path}", self.base))
+            .bearer_auth(token)
+            .json(body)
             .send()
             .await
             .expect("request");
@@ -264,6 +280,126 @@ async fn signup_login_like_unlike_sync_flow() {
         .post("/auth/refresh", &json!({"refresh_token": refresh}))
         .await;
     assert_eq!(status, 401, "{again}");
+}
+
+#[tokio::test]
+async fn username_set_change_history_flow() {
+    let Some((client, _)) = boot(1000).await else {
+        eprintln!("SKIPPED: set TEST_DATABASE_URL to run live-DB tests");
+        return;
+    };
+    let (status, signup) = client
+        .post(
+            "/auth/signup",
+            &json!({"email": unique_email("handle"), "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 201, "{signup}");
+    let access = signup["access_token"].as_str().expect("access token");
+    assert!(signup["user"]["username"].is_null());
+
+    // Invalid shapes are rejected with a showable message.
+    for bad in ["ab", "a".repeat(31).as_str(), "-lead", "trail-", "has space", "admin"] {
+        let (status, _) = client
+            .put_authed("/me/username", access, &json!({"username": bad}))
+            .await;
+        assert_eq!(status, 400, "{bad}");
+    }
+
+    // Set → visible via /me.
+    let (status, first) = client
+        .put_authed("/me/username", access, &json!({"username": "SmasDuq"}))
+        .await;
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(first["username"], "SmasDuq");
+    let (status, me) = client.get("/me", access).await;
+    assert_eq!(status, 200, "{me}");
+    assert_eq!(me["username"], "SmasDuq");
+
+    // Change → new current; old name stays reserved (case-insensitive).
+    let (status, second) = client
+        .put_authed("/me/username", access, &json!({"username": "smasduq2"}))
+        .await;
+    assert_eq!(status, 200, "{second}");
+    assert_eq!(second["username"], "smasduq2");
+
+    let email2 = unique_email("handle2");
+    let (status, signup2) = client
+        .post(
+            "/auth/signup",
+            &json!({"email": email2, "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 201, "{signup2}");
+    let access2 = signup2["access_token"].as_str().expect("access token");
+    for taken in ["smasduq", "SMASDUQ", "smasduq2"] {
+        let (status, dup) = client
+            .put_authed("/me/username", access2, &json!({"username": taken}))
+            .await;
+        assert_eq!(status, 400, "{dup}");
+        assert_eq!(dup["error"], "username is taken");
+    }
+
+    // Unauthenticated writes are rejected.
+    let res = client
+        .http
+        .put(format!("{}/me/username", client.base))
+        .json(&json!({"username": "nobody"}))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(res.status().as_u16(), 401);
+}
+
+#[tokio::test]
+async fn email_change_flow() {
+    let Some((client, _)) = boot(1000).await else {
+        eprintln!("SKIPPED: set TEST_DATABASE_URL to run live-DB tests");
+        return;
+    };
+    let (status, signup) = client
+        .post(
+            "/auth/signup",
+            &json!({"email": unique_email("chg"), "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 201, "{signup}");
+    let access = signup["access_token"].as_str().expect("access token");
+
+    // Invalid and taken addresses fail showably.
+    let (status, bad) = client
+        .put_authed("/me/email", access, &json!({"email": "not-an-email"}))
+        .await;
+    assert_eq!(status, 400, "{bad}");
+
+    let other = unique_email("other");
+    let (status, _) = client
+        .post(
+            "/auth/signup",
+            &json!({"email": other, "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let (status, taken) = client
+        .put_authed("/me/email", access, &json!({"email": other}))
+        .await;
+    assert_eq!(status, 400, "{taken}");
+    assert_eq!(taken["error"], "email is already in use");
+
+    // Change → visible via /me, and password login follows the new email.
+    let fresh = unique_email("fresh");
+    let (status, changed) = client
+        .put_authed("/me/email", access, &json!({"email": fresh}))
+        .await;
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!(changed["email"], fresh);
+    let (status, login) = client
+        .post(
+            "/auth/login",
+            &json!({"email": fresh, "password": "password-123"}),
+        )
+        .await;
+    assert_eq!(status, 200, "{login}");
 }
 
 #[tokio::test]

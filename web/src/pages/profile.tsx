@@ -18,8 +18,10 @@ import {
   AVATAR_ACCEPT,
   AVATAR_MAX_BYTES,
   AccountsError,
+  changeEmail,
   deleteAvatar,
   fetchProfile,
+  setUsername,
   uploadAvatar,
   type Session,
 } from "@/lib/accounts";
@@ -65,6 +67,7 @@ export default function ProfilePage({
   onSignOut,
   onSyncNow,
   onLoggedOut,
+  onEmailChanged,
 }: {
   account: Session | null;
   syncing: boolean;
@@ -76,11 +79,13 @@ export default function ProfilePage({
   onSignOut: () => void;
   onSyncNow: () => void;
   onLoggedOut: () => void;
+  onEmailChanged: (email: string) => void;
 }) {
   const [remoteProfile, setRemoteProfile] = useState<{
     userId: string;
     email: string;
     avatarUrl: string | null;
+    username: string | null;
   } | null>(null);
   const [profileNotice, setProfileNotice] = useState<{
     userId: string;
@@ -89,6 +94,12 @@ export default function ProfilePage({
   const [uploading, setUploading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileEditError, setProfileEditError] = useState<string | null>(null);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const accountUserId = account?.userId ?? null;
@@ -103,6 +114,7 @@ export default function ProfilePage({
           userId: accountUserId,
           email: profile.email,
           avatarUrl: profile.avatar_url,
+          username: profile.username,
         });
         setProfileNotice(null);
       },
@@ -146,7 +158,7 @@ export default function ProfilePage({
       setRemoteProfile((profile) =>
         profile?.userId === userId
           ? { ...profile, avatarUrl: url }
-          : { userId, email, avatarUrl: url }
+          : { userId, email, avatarUrl: url, username: profile?.username ?? null }
       );
       setPhotoMessage("Your profile photo has been updated.");
     } catch (error: unknown) {
@@ -176,7 +188,7 @@ export default function ProfilePage({
       setRemoteProfile((profile) =>
         profile?.userId === userId
           ? { ...profile, avatarUrl: null }
-          : { userId, email, avatarUrl: null }
+          : { userId, email, avatarUrl: null, username: profile?.username ?? null }
       );
       setPhotoMessage("Your profile photo has been removed.");
     } catch (error: unknown) {
@@ -191,6 +203,77 @@ export default function ProfilePage({
       );
     } finally {
       setUploading(false);
+    }
+  }
+
+  function openEditProfile(currentUsername: string | null, currentEmail: string): void {
+    setProfileEditError(null);
+    setEditUsername(currentUsername ?? "");
+    setEditEmail(currentEmail);
+    setShowEditProfile(true);
+  }
+
+  function closeEditProfile(): void {
+    if (savingProfile) return;
+    setShowEditProfile(false);
+    setProfileEditError(null);
+  }
+
+  async function handleSaveProfile(): Promise<void> {
+    if (account === null || savingProfile) return;
+    const { userId } = account;
+    setProfileEditError(null);
+    const nextEmail = editEmail.trim();
+    const nextUsername = editUsername.trim();
+    if (!/\S+@\S+\.\S+/.test(nextEmail)) {
+      setProfileEditError("Enter a valid email address.");
+      return;
+    }
+    if (nextUsername !== "" && (nextUsername.length < 3 || nextUsername.length > 30)) {
+      setProfileEditError("Username must be 3–30 characters.");
+      return;
+    }
+    // Empty username field = leave the handle unchanged (handles are
+    // append-only; there is no removal).
+    const usernameChanged = nextUsername !== "" && nextUsername !== username;
+    const emailChanged = nextEmail.toLowerCase() !== account.email.toLowerCase();
+    if (!usernameChanged && !emailChanged) {
+      setShowEditProfile(false);
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      if (emailChanged) {
+        const view = await changeEmail(nextEmail);
+        setRemoteProfile((profile) =>
+          profile?.userId === userId
+            ? { ...profile, email: view.email, username: view.username }
+            : { userId, email: view.email, avatarUrl: null, username: view.username }
+        );
+        onEmailChanged(view.email);
+      }
+      if (usernameChanged) {
+        const saved = await setUsername(nextUsername);
+        setRemoteProfile((profile) =>
+          profile?.userId === userId
+            ? { ...profile, username: saved }
+            : { userId, email: nextEmail, avatarUrl: null, username: saved }
+        );
+      }
+      setProfileMessage("Your profile has been updated.");
+      setShowEditProfile(false);
+    } catch (error: unknown) {
+      if (error instanceof AccountsError && error.code === "logged-out") {
+        onLoggedOut();
+        return;
+      }
+      setProfileEditError(
+        error instanceof AccountsError
+          ? error.message
+          : "Couldn't save your profile. Please try again."
+      );
+    } finally {
+      setSavingProfile(false);
     }
   }
 
@@ -248,6 +331,7 @@ export default function ProfilePage({
 
   const email = currentProfile?.email ?? account.email;
   const avatarUrl = currentProfile?.avatarUrl ?? null;
+  const username = currentProfile?.username ?? null;
   const initial = (email.trim()[0] ?? "?").toUpperCase();
   const hasPendingChanges = pendingCount > 0;
 
@@ -306,7 +390,7 @@ export default function ProfilePage({
               {email}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Your music, your space.
+              {username !== null ? `@${username}` : "No username yet — set one below."}
             </p>
             {loading && (
               <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -443,12 +527,38 @@ export default function ProfilePage({
             <UserRound className="h-4 w-4" aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted-foreground">Username</p>
+            <p className="mt-0.5 truncate text-sm font-medium text-foreground">
+              {username !== null ? `@${username}` : "Not set"}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex items-center gap-3 border-t border-border/50 pt-4">
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-2xl bg-foreground/5 text-muted-foreground">
+            <UserRound className="h-4 w-4" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">Account email</p>
             <p className="mt-0.5 truncate text-sm font-medium text-foreground">{email}</p>
           </div>
           <span className="rounded-full bg-foreground/5 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
             Signed in
           </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => openEditProfile(username, email)}
+          className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full border border-border/60 bg-background/70 px-5 text-sm font-semibold text-foreground transition-colors hover:bg-foreground/5"
+        >
+          Edit profile
+        </button>
+        <div aria-live="polite">
+          {profileMessage !== null && (
+            <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Check className="h-4 w-4 text-primary" aria-hidden />
+              {profileMessage}
+            </p>
+          )}
         </div>
         <div className="mt-4 border-t border-border/50 pt-4">
           <AnimatePresence mode="wait" initial={false}>
@@ -500,6 +610,63 @@ export default function ProfilePage({
           </AnimatePresence>
         </div>
       </div>
+      {showEditProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="relative mx-2 flex w-full max-w-sm flex-col gap-4 rounded-2xl border-4 border-border bg-card/95 p-6 sm:p-8">
+            <p className="text-lg font-semibold tracking-tight text-foreground">Edit profile</p>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Username</span>
+              <input
+                value={editUsername}
+                onChange={(e) => setEditUsername(e.target.value)}
+                placeholder="e.g. smasduq"
+                maxLength={30}
+                disabled={savingProfile}
+                className="h-11 rounded-full border border-border/60 bg-background/70 px-4 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Email</span>
+              <input
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="you@example.com"
+                disabled={savingProfile}
+                className="h-11 rounded-full border border-border/60 bg-background/70 px-4 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
+              />
+            </label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Username: 3–30 characters, letters/numbers/_ . - · Old names stay reserved.
+              Leave blank to keep the current handle.
+            </p>
+            {profileEditError !== null && (
+              <p className="flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-none" aria-hidden />
+                {profileEditError}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={savingProfile}
+                onClick={closeEditProfile}
+                className="min-h-11 flex-1 rounded-full border border-border/60 px-4 text-sm font-medium text-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingProfile}
+                onClick={() => void handleSaveProfile()}
+                className="min-h-11 flex-1 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {savingProfile ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

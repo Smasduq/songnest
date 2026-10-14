@@ -108,6 +108,7 @@ Environment variables (full list in `crates/accounts/.env.example`):
 | `SONGNEST_JWT_SECRET` | — (required, ≥32 bytes) | Access-token HMAC secret |
 | `SONGNEST_GITHUB_WEBHOOK_SECRET` | unset | Optional GitHub App webhook HMAC secret; set this to enable webhook verification |
 | `SONGNEST_GITHUB_CLIENT_ID` / `SONGNEST_GITHUB_CLIENT_SECRET` | unset | GitHub App Client ID + secret for Login with GitHub (General page); unset disables `GET /auth/github/start` + `POST /auth/github/callback` |
+| `SONGNEST_GOOGLE_CLIENT_ID` / `SONGNEST_GOOGLE_CLIENT_SECRET` | unset | Google OAuth client ID + secret for Login with Google (scopes `openid email profile`); unset disables `GET /auth/google/start` + `POST /auth/google/callback` |
 | `SONGNEST_ACCOUNTS_BIND` | `127.0.0.1:8788` | Bind address (keep loopback) |
 | `SONGNEST_ACCESS_TTL_SECS` | `900` | Access-token lifetime |
 | `SONGNEST_REFRESH_TTL_SECS` | `2592000` | Refresh-token lifetime |
@@ -130,13 +131,19 @@ API reference (JSON; errors are `{ "error": "<showable message>" }`):
 | `POST /auth/logout` | — (rate-limited) | `{refresh_token}` → always `200` |
 | `GET /auth/github/start?redirect_uri=<url>` | — (rate-limited) | `{authorize_url}` for Login with GitHub (needs `SONGNEST_GITHUB_CLIENT_ID`) |
 | `POST /auth/github/callback` | — (rate-limited) | `{code, redirect_uri}` → `200` + tokens (find-or-create by GitHub ID, else link by verified email) |
-| `GET /me` | Bearer | `{id, email, avatar_url}` (`avatar_url` is null when unset) |
+| `POST /auth/github/device/start` | — | `{user_code, verification_uri, device_code, expires_in, interval}` — no callback URL needed (needs **Enable Device Flow** on the app) |
+| `POST /auth/github/device/poll` | — | `{device_code}` → `202` `{pending}` until approved, `200` + tokens after, `400` when expired/denied |
+| `GET /auth/google/start?redirect_uri=<url>` | — (rate-limited) | `{authorize_url}` for Login with Google (needs `SONGNEST_GOOGLE_CLIENT_ID`) |
+| `POST /auth/google/callback` | — (rate-limited) | `{code, redirect_uri}` → `200` + tokens (find-or-create by Google sub, else link by verified email) |
+| `GET /me` | Bearer | `{id, email, avatar_url, username}` (`avatar_url`/`username` null when unset) |
+| `PUT /me/username` | Bearer | `{username}` → `200` updated profile; handle rules: 3–30 chars, letters/numbers/`_ . -`, case-insensitive unique forever |
+| `PUT /me/email` | Bearer | `{email}` → `200` updated profile; must be valid and unused |
 | `PUT /me/avatar` | Bearer | Raw JPEG/PNG/WebP/GIF body (≤512 KiB, magic-byte checked) → `200` `{avatar_url}`; stored in Neon Object Storage under a fresh key, old picture removed |
 | `DELETE /me/avatar` | Bearer | Removes the picture → always `200` |
 | `GET /sync/likes?since=<cursor>` | Bearer | Changes after cursor (incl. unlikes), oldest first, + new `cursor` |
 | `POST /sync/likes` | Bearer | `{changes: [{track_id, liked, updated_at, title?, artist?, album?, cover?}]}` → `{cursor, applied, skipped}` (idempotent) |
 
-Token pair shape: `{user: {id, email}, access_token, refresh_token,
+Token pair shape: `{user: {id, email, username}, access_token, refresh_token,
 expires_in}`.
 
 Sync model: one row per `(user, track)`, `liked=false` rows are tombstones

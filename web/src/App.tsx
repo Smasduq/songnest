@@ -25,6 +25,7 @@ import {
   toChange,
   type RemoteLike,
   type Session,
+  updateStoredEmail,
 } from "@/lib/accounts";
 import {
   startLikesSync,
@@ -601,6 +602,10 @@ export default function App() {
   const handleProfileLoggedOut = useCallback(() => {
     setAccount(null);
   }, []);
+  const handleEmailChanged = useCallback((email: string) => {
+    setAccount((prev) => (prev !== null ? { ...prev, email } : prev));
+    void updateStoredEmail(email);
+  }, []);
 
   useEffect(() => {
     // Background worker: auto-sync likes whenever we're online, plus
@@ -1163,6 +1168,7 @@ return (
               onSignOut={() => void handleSignOut()}
               onSyncNow={() => scheduleSync()}
               onLoggedOut={handleProfileLoggedOut}
+              onEmailChanged={handleEmailChanged}
             />
           )}
 

@@ -53,9 +53,11 @@ pub enum AuthError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         // Log the full error server-side; clients get a safe message.
-        // (Auth failures are routine — log at debug to avoid noise.)
+        // (Auth failures are routine — log at debug to avoid noise.
+        // Debug-format carries the variant for diagnosis; variants hold
+        // no secrets — messages are client-safe by construction.)
         match &self {
-            AppError::Auth(_) => tracing::debug!(error = %self, "auth request failed"),
+            AppError::Auth(e) => tracing::debug!(error = ?e, "auth request failed"),
             _ => tracing::error!(error = %self, "request failed"),
         }
         let (status, message) = match &self {

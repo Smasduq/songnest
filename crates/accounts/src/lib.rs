@@ -12,6 +12,7 @@ pub mod ratelimit;
 pub mod routes;
 pub mod storage;
 pub mod tokens;
+pub mod username;
 
 use axum::{
     Router,
@@ -61,6 +62,8 @@ fn auth_router(state: &AppState) -> Router<AppState> {
         .route("/auth/logout", post(routes::auth::logout))
         .route("/auth/github/start", get(routes::github::start))
         .route("/auth/github/callback", post(routes::github::callback))
+        .route("/auth/google/start", get(routes::google::start))
+        .route("/auth/google/callback", post(routes::google::callback))
         .layer(RateLimitLayer::new(
             state.config.auth_per_minute.max(1) as u32,
             Duration::from_secs(60),
@@ -71,6 +74,13 @@ fn auth_router(state: &AppState) -> Router<AppState> {
 fn api_router() -> Router<AppState> {
     Router::new()
         .route("/me", get(routes::auth::me))
+        .route("/me/username", put(routes::username::set_username))
+        .route("/me/email", put(routes::auth::change_email))
+        // GitHub device flow polls every few seconds — it lives outside the
+        // per-IP auth budget (device codes are unguessable, polling a dead
+        // code just 410s). The redirect flow stays rate-limited above.
+        .route("/auth/github/device/start", post(routes::github::device_start))
+        .route("/auth/github/device/poll", post(routes::github::device_poll))
         .route(
             "/me/avatar",
             put(routes::avatar::put_avatar).delete(routes::avatar::delete_avatar),

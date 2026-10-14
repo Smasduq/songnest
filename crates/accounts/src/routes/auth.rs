@@ -15,6 +15,7 @@ use crate::{
     AppState,
     error::{AppError, AuthError},
     password, tokens,
+    username::current_username,
 };
 
 /// A stored refresh token (hashes only — raw values never hit the DB).
@@ -46,6 +47,7 @@ pub struct UserView {
     pub id: Uuid,
     pub email: String,
     pub avatar_url: Option<String>,
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,7 +85,7 @@ pub async fn signup(
         return Err(AppError::Db(e));
     }
 
-    let pair = issue_pair(&state, id, &email, None).await?;
+    let pair = issue_pair(&state, id, &email, None, None).await?;
     Ok((StatusCode::CREATED, Json(pair)))
 }
 
@@ -103,7 +105,8 @@ pub async fn login(
 
     match row {
         Some((id, email, Some(hash))) if password::verify_password(&body.password, &hash) => {
-            Ok(Json(issue_pair(&state, id, &email, None).await?))
+            let username = current_username(&state.pool, id).await?;
+            Ok(Json(issue_pair(&state, id, &email, username, None).await?))
         }
         _ => {
             // Unknown email: still run a verification to avoid leaking
@@ -177,7 +180,8 @@ pub async fn refresh(
         return Err(AppError::Auth(AuthError::Unauthorized));
     };
 
-    let pair = issue_pair(&state, user_id, &email, Some(rotate_from)).await?;
+    let username = current_username(&state.pool, user_id).await?;
+    let pair = issue_pair(&state, user_id, &email, username, Some(rotate_from)).await?;
     revoke_one(&state, rotate_from).await?;
     Ok(Json(pair))
 }
@@ -212,24 +216,63 @@ pub fn authenticate(headers: &axum::http::HeaderMap, jwt_secret: &str) -> Result
     Ok(tokens::verify_access(jwt_secret, token)?.user_id)
 }
 
-/// `GET /me` → the caller's profile (plus avatar URL, if set).
+/// `GET /me` → the caller's profile (plus avatar URL and username, if set).
 pub async fn me(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<UserView>, AppError> {
     let user_id = authenticate(&headers, &state.config.jwt_secret)?;
+    Ok(Json(user_view(&state, user_id).await?))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmailBody {
+    pub email: String,
+}
+
+/// `PUT /me/email` → change the caller's email. Must be valid and unused
+/// (a taken address fails with a showable message; OAuth links keyed by
+/// provider id keep working, they never overwrite email on login).
+pub async fn change_email(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<EmailBody>,
+) -> Result<Json<UserView>, AppError> {
+    let user_id = authenticate(&headers, &state.config.jwt_secret)?;
+    let email = password::normalize_email(&body.email);
+    password::validate_email(&email).map_err(AuthError::InvalidInput)?;
+    if let Err(e) = sqlx::query("UPDATE users SET email = $1 WHERE id = $2")
+        .bind(&email)
+        .bind(user_id)
+        .execute(&state.pool)
+        .await
+    {
+        if is_unique_violation(&e) {
+            return Err(AppError::Auth(AuthError::InvalidInput(
+                "email is already in use",
+            )));
+        }
+        return Err(AppError::Db(e));
+    }
+    Ok(Json(user_view(&state, user_id).await?))
+}
+
+/// Full profile view for a user: email, avatar URL, current handle.
+/// Returns 401 when the user is gone (stale token).
+pub(crate) async fn user_view(state: &AppState, user_id: Uuid) -> Result<UserView, AppError> {
     let row: Option<(Uuid, String, Option<String>)> =
         sqlx::query_as("SELECT id, email, avatar_key FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(&state.pool)
             .await?;
     match row {
-        Some((id, email, avatar_key)) => Ok(Json(UserView {
+        Some((id, email, avatar_key)) => Ok(UserView {
             id,
             email,
             avatar_url: avatar_key
                 .and_then(|key| state.storage.as_ref().map(|s| s.public_url(&key))),
-        })),
+            username: current_username(&state.pool, id).await?,
+        }),
         None => Err(AppError::Auth(AuthError::Unauthorized)),
     }
 }
@@ -240,6 +283,7 @@ pub(crate) async fn issue_pair(
     state: &AppState,
     user_id: Uuid,
     email: &str,
+    username: Option<String>,
     rotated_from: Option<Uuid>,
 ) -> Result<TokenPair, AppError> {
     let access = tokens::mint_access(&state.config.jwt_secret, user_id, state.config.access_ttl)?;
@@ -263,6 +307,7 @@ pub(crate) async fn issue_pair(
             email: email.to_owned(),
             // Fresh credentials carry no avatar; clients read it via /me.
             avatar_url: None,
+            username,
         },
         access_token: access,
         refresh_token: refresh_raw,

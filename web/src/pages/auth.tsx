@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AuthComponent, type AuthMode } from "@/components/ui/sign-up";
 import {
   AccountsError,
   LOCAL_ACCOUNTS_URL,
-  finishGithubLogin,
+  finishOAuthLogin,
   getAccountsUrl,
   login,
+  pollGithubDevice,
   resetAccountsUrl,
   signup,
-  startGithubLogin,
+  startGithubDevice,
+  startGoogleLogin,
+  type GithubDeviceStart,
   type Session,
 } from "@/lib/accounts";
 
@@ -20,9 +23,10 @@ import {
  * signup mode creates the account, login mode signs in. On success the
  * caller (`onAuthed`) runs the first merge + sync.
  *
- * GitHub: the GitHub button redirects to GitHub via
- * `GET /auth/github/start`; GitHub returns to `/?code=…&state=…` and this
- * page exchanges the code via `POST /auth/github/callback`.
+ * OAuth (GitHub + Google): the provider button redirects via
+ * `GET /auth/<provider>/start`; the provider returns to `/?code=…&state=…`
+ * and this page exchanges the code via `POST /auth/<provider>/callback`.
+ * The secret never leaves the accounts server.
  *
  * No props required besides `onAuthed`; renders full-screen.
  */
@@ -40,19 +44,46 @@ function SongnestLogo() {
 export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Session) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<AuthMode>("signup");
   const [unreachableUrl, setUnreachableUrl] = useState<string | null>(null);
-  const [githubBusy, setGithubBusy] = useState(false);
-  const [githubError, setGithubError] = useState<string | null>(null);
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  // GitHub device flow: code shown to the user, polled until approved.
+  const [device, setDevice] = useState<GithubDeviceStart | null>(null);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const pollTimer = useRef<number | undefined>(undefined);
 
-  // OAuth return trip: GitHub lands on `/?code=…&state=…`.
+  function stopDevicePolling(): void {
+    window.clearTimeout(pollTimer.current);
+  }
+
+  useEffect(() => stopDevicePolling, []);
+
+  // OAuth return trip: provider lands on `/?code=…&state=…`.
+  // A denied/cancelled login returns `/?error=…` instead — surface that
+  // as a real failure state, not a silent landing.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    if (code === null || code === "") return;
+    const error = params.get("error");
+    if ((code === null || code === "") && (error === null || error === "")) return;
+    if (code === null || code === "") {
+      setOauthError(
+        error === "access_denied"
+          ? "Login was cancelled on the provider — try again when ready."
+          : "Login failed before reaching Songnest — try again.",
+      );
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete("error");
+      clean.searchParams.delete("error_description");
+      clean.searchParams.delete("state");
+      window.history.replaceState(null, "", clean.toString());
+      return;
+    }
     const state = params.get("state");
-    setGithubBusy(true);
-    setGithubError(null);
-    finishGithubLogin(code, state).then(
-      (session) => {
+    setOauthBusy(true);
+    setOauthError(null);
+    finishOAuthLogin(code, state).then(
+      ({ session }) => {
         // Drop the one-time code from the URL before continuing.
         const clean = new URL(window.location.href);
         clean.searchParams.delete("code");
@@ -61,9 +92,9 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
         onAuthed(session);
       },
       (e: unknown) => {
-        setGithubBusy(false);
-        setGithubError(
-          e instanceof AccountsError ? e.message : "GitHub login failed — try again.",
+        setOauthBusy(false);
+        setOauthError(
+          e instanceof AccountsError ? e.message : "Login failed — try again.",
         );
         const clean = new URL(window.location.href);
         clean.searchParams.delete("code");
@@ -90,21 +121,127 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
     }
   }
 
-  async function handleGithub(): Promise<void> {
-    if (githubBusy) return;
-    setGithubBusy(true);
-    setGithubError(null);
+  async function handleOAuth(start: () => Promise<void>): Promise<void> {
+    if (oauthBusy) return;
+    setOauthBusy(true);
+    setOauthError(null);
     try {
-      await startGithubLogin();
+      await start();
       // Redirects away; busy stays true until navigation.
     } catch (e) {
-      setGithubBusy(false);
+      setOauthBusy(false);
       if (e instanceof AccountsError && e.code === "unreachable") {
         setUnreachableUrl(getAccountsUrl());
       }
-      setGithubError(
+      setOauthError(
+        e instanceof AccountsError ? e.message : "Login failed — try again.",
+      );
+    }
+  }
+
+  /** GitHub via device flow: no callback URL needed. Shows a code, polls
+   *  until the user approves at github.com/login/device. The code is
+   *  copied to the clipboard automatically (tap it to copy again). */
+  async function handleGithubDevice(): Promise<void> {
+    if (oauthBusy || device !== null) return;
+    await runDeviceFlow();
+  }
+
+  async function runDeviceFlow(): Promise<void> {
+    setOauthBusy(true);
+    setOauthError(null);
+    setDeviceError(null);
+    setCopiedCode(false);
+    try {
+      const started = await startGithubDevice();
+      setDevice(started);
+      // Best effort: transient activation usually survives the fetch, so
+      // this succeeds when launched from the button tap. The code stays
+      // tappable as a fallback.
+      setCopiedCode(await copyText(started.user_code));
+      pollDevice(started, Date.now() + started.expires_in * 1000);
+    } catch (e) {
+      setOauthBusy(false);
+      if (e instanceof AccountsError && e.code === "unreachable") {
+        setUnreachableUrl(getAccountsUrl());
+      }
+      setOauthError(
         e instanceof AccountsError ? e.message : "GitHub login failed — try again.",
       );
+    }
+  }
+
+  /** Retry from the modal's error view (bypasses the tap guard). */
+  async function retryDevice(): Promise<void> {
+    stopDevicePolling();
+    setDevice(null);
+    await runDeviceFlow();
+  }
+
+  /** Copy text to the clipboard, with an execCommand fallback. */
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      try {
+        const area = document.createElement("textarea");
+        area.value = text;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(area);
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  function pollDevice(started: GithubDeviceStart, deadline: number): void {
+    stopDevicePolling();
+    if (Date.now() >= deadline) {
+      // Keep the modal open on the error view so the user can retry.
+      setDeviceError("Code expired — get a fresh one below.");
+      return;
+    }
+    pollTimer.current = window.setTimeout(() => {
+      pollGithubDevice(started.device_code).then(
+        (session) => {
+          if (session !== null) {
+            setDevice(null);
+            onAuthed(session);
+            return;
+          }
+          pollDevice(started, deadline);
+        },
+        (e: unknown) => {
+          // Keep the modal open on the error view (denied/expired).
+          setDeviceError(
+            e instanceof AccountsError ? e.message : "GitHub login failed — try again.",
+          );
+        },
+      );
+    }, Math.max(5, started.interval) * 1000);
+  }
+
+  function cancelDevice(): void {
+    stopDevicePolling();
+    setDevice(null);
+    setOauthBusy(false);
+    setDeviceError(null);
+    setCopiedCode(false);
+  }
+
+  /** Open the device approval page: system browser in Tauri, new tab otherwise. */
+  async function openVerificationUri(uri: string): Promise<void> {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(uri);
+    } catch {
+      window.open(uri, "_blank", "noopener,noreferrer");
     }
   }
 
@@ -131,12 +268,66 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
         mode={mode}
         onModeChange={setMode}
         onSubmit={handleSubmit}
-        onGithub={() => void handleGithub()}
-        githubBusy={githubBusy}
+        onGithub={() => void handleGithubDevice()}
+        onGoogle={() => void handleOAuth(startGoogleLogin)}
+        oauthBusy={oauthBusy}
       />
-      {githubError !== null && (
+      {device !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="relative mx-2 flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border-4 border-border bg-card/80 p-8">
+            {deviceError === null ? (
+              <>
+                <p className="text-sm font-medium text-muted-foreground">
+                  Enter this code on GitHub
+                </p>
+                <button
+                  type="button"
+                  title="Tap to copy"
+                  onClick={() => void copyText(device.user_code).then(setCopiedCode)}
+                  className="font-mono text-4xl font-bold tracking-widest text-foreground"
+                >
+                  {device.user_code}
+                </button>
+                <p className="text-center text-xs text-muted-foreground">
+                  {copiedCode ? "Copied — paste it on GitHub." : "Copied to clipboard. Tap the code to copy again."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void openVerificationUri(device.verification_uri)}
+                  className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
+                >
+                  Open github.com/login/device
+                </button>
+                <p className="text-center text-xs text-muted-foreground">
+                  Waiting for approval… this closes on its own.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-lg font-medium text-foreground">GitHub login failed</p>
+                <p className="text-center text-sm text-muted-foreground">{deviceError}</p>
+                <button
+                  type="button"
+                  onClick={() => void retryDevice()}
+                  className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground"
+                >
+                  Get a fresh code
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={cancelDevice}
+              className="text-sm text-foreground/70 transition-colors hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {oauthError !== null && (
         <p className="mx-auto mt-4 max-w-sm text-center text-xs text-destructive">
-          {githubError}
+          {oauthError}
         </p>
       )}
       {unreachableUrl !== null && unreachableUrl !== LOCAL_ACCOUNTS_URL && (

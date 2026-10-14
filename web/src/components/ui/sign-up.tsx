@@ -173,12 +173,13 @@ interface AuthComponentProps {
    * success flow runs (demos only).
    */
   onSubmit?: (email: string, password: string) => Promise<void>;
-  /** GitHub OAuth entrypoint. When absent the GitHub button is inert. */
+  /** OAuth entrypoints. When absent the corresponding button is inert. */
   onGithub?: () => void;
-  githubBusy?: boolean;
+  onGoogle?: () => void;
+  oauthBusy?: boolean;
 }
 
-export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize", mode = "signup", onModeChange, onSubmit, onGithub, githubBusy = false }: AuthComponentProps) => {
+export const AuthComponent = ({ logo = <DefaultLogo />, brandName = "EaseMize", mode = "signup", onModeChange, onSubmit, onGithub, onGoogle, oauthBusy = false }: AuthComponentProps) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -345,8 +346,8 @@ useEffect(() => {
                         <BlurFade delay={0.25 * 1} className="w-full"><div className="text-center"><p className="font-serif font-light text-4xl sm:text-5xl md:text-6xl tracking-tight text-foreground whitespace-nowrap">Get started with Us</p></div></BlurFade>
                         <BlurFade delay={0.25 * 2}><p className="text-sm font-medium text-muted-foreground">Continue with</p></BlurFade>
                         <BlurFade delay={0.25 * 3}><div className="flex items-center justify-center gap-4 w-full">
-                            <GlassButton contentClassName="flex items-center justify-center gap-2" size="sm"><GoogleIcon /><span className="font-semibold text-foreground">Google</span></GlassButton>
-                            <GlassButton contentClassName="flex items-center justify-center gap-2" size="sm" type="button" onClick={onGithub} disabled={onGithub === undefined || githubBusy}><GitHubIcon /><span className="font-semibold text-foreground">{githubBusy ? "…" : "GitHub"}</span></GlassButton>
+                            <GlassButton contentClassName="flex items-center justify-center gap-2" size="sm" type="button" onClick={onGoogle} disabled={onGoogle === undefined || oauthBusy}><GoogleIcon /><span className="font-semibold text-foreground">{oauthBusy ? "…" : "Google"}</span></GlassButton>
+                            <GlassButton contentClassName="flex items-center justify-center gap-2" size="sm" type="button" onClick={onGithub} disabled={onGithub === undefined || oauthBusy}><GitHubIcon /><span className="font-semibold text-foreground">{oauthBusy ? "…" : "GitHub"}</span></GlassButton>
                         </div></BlurFade>
                         <BlurFade delay={0.25 * 4} className="w-[300px]"><div className="flex items-center w-full gap-2 py-2"><hr className="w-full border-border"/><span className="text-xs font-semibold text-muted-foreground">OR</span><hr className="w-full border-border"/></div></BlurFade>
                     </motion.div>}

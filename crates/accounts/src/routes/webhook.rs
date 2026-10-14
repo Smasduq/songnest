@@ -82,6 +82,8 @@ mod tests {
                 github_webhook_secret: secret.map(str::to_owned),
                 github_client_id: None,
                 github_client_secret: None,
+                google_client_id: None,
+                google_client_secret: None,
                 access_ttl: Duration::from_secs(900),
                 refresh_ttl: Duration::from_secs(3600),
                 max_body_bytes: 1024 * 1024,
