@@ -73,6 +73,11 @@ jobs:
             git init -b pkg
             git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Smasduq/songnest.git"
           fi
+          # A failed sparse checkout can leave a repo behind on the wrong
+          # branch (default master): force the pkg branch either way, or
+          # the final push fails with "src refspec pkg does not match any".
+          cd pkg-branch
+          git checkout -B pkg
 
       - name: Install repo tools
         run: |
