@@ -52,14 +52,18 @@ export function LyricsPanel({
   track,
   scrollClassName,
   size = "compact",
+  edgeFade = true,
 }: {
   track: Song;
   /** override the scroll-container height (page uses a taller one) */
   scrollClassName?: string;
   /** large: roomy editorial lyrics for the desktop page; compact: mobile sheet */
   size?: "compact" | "large";
+  /** edge fades on the scroll container (mask + side veils); off in the sheet */
+  edgeFade?: boolean;
 }) {
   const large = size === "large";
+  const fade = large && edgeFade;
   // Sparkles borrow their palette from the current artwork.
   const artworkColors = useArtworkColors(track.coverUrl);
   const playing = usePlayer((s) => s.playing);
@@ -246,7 +250,7 @@ export function LyricsPanel({
         data-no-dismiss-drag
         className={
           large
-            ? `scroller space-y-1 overflow-y-auto bg-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_bottom,transparent,black_6%,black_94%,transparent)] ${scrollClassName ?? "max-h-64"}`
+            ? `scroller space-y-1 overflow-y-auto bg-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${fade ? "[mask-image:linear-gradient(to_bottom,transparent,black_6%,black_94%,transparent)] " : ""}${scrollClassName ?? "max-h-64"}`
             : `scroller space-y-1 overflow-y-auto rounded-2xl border border-border/40 bg-background/40 p-3 ${scrollClassName ?? "max-h-64"}`
         }
       >
@@ -301,7 +305,7 @@ export function LyricsPanel({
           );
         })}
       </div>
-      {large && (
+      {fade && (
         <>
           <div
             aria-hidden

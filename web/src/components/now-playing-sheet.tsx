@@ -405,6 +405,7 @@ export function NowPlayingSheet({
                   track={track}
                   size="large"
                   scrollClassName="max-h-72"
+                  edgeFade={false}
                 />
               </div>
             )}
