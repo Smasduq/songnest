@@ -45,7 +45,7 @@ export function NowPlaying({
   onPrev,
 }: Props) {
   return (
-    <aside className="scroller hidden h-full w-80 flex-shrink-0 flex-col gap-4 rounded-3xl border border-border/40 bg-background/60 p-5 backdrop-blur-xl xl:flex">
+    <aside className="scroller hidden h-full w-80 flex-shrink-0 flex-col gap-4 p-5 xl:flex">
       <h2 className="text-sm font-semibold tracking-wide text-foreground/80">
         Now playing
       </h2>

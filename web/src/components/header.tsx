@@ -115,7 +115,7 @@ export function Header({
   return (
     <header
       id="app-header"
-      className={`glass-bar relative z-50 hidden h-14 flex-shrink-0 items-center gap-3 rounded-3xl border border-border/40 px-4 md:flex ${className ?? ""}`}
+      className={`relative z-50 hidden h-14 flex-shrink-0 items-center gap-3 bg-card px-4 md:flex ${className ?? ""}`}
     >
       {page !== "search" && (
         <span className="w-[104px] flex-shrink-0 overflow-hidden" aria-hidden={overlaid}>

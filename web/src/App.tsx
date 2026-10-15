@@ -979,10 +979,11 @@ return (
         {/* Main content */}
         <CustomScroller
           scrollRef={mainRef}
+          fillet
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          className="space-y-6 md:rounded-3xl md:border md:border-border/40 md:bg-background/40 md:p-4 md:backdrop-blur-xl md:sm:p-6 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)] pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
+          className="space-y-6 md:p-4 md:sm:p-6 max-md:pt-[calc(var(--top-bar-h,0px)+0.75rem)] pb-[calc(var(--bottom-bars-h,0px)+env(safe-area-inset-bottom)+4px)]"
         >
           {dlStatus?.health === "outdated" && (
             <div className="flex items-center gap-3 rounded-2xl border border-border/40 bg-background/60 px-4 py-3 text-sm backdrop-blur-xl md:mx-4">

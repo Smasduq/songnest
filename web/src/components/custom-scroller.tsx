@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function CustomScroller({
   className,
   children,
+  fillet = false,
   scrollRef,
   onTouchStart,
   onTouchMove,
@@ -15,6 +16,8 @@ export function CustomScroller({
 }: {
   className?: string;
   children: React.ReactNode;
+  /** Firefox-style scoop: card fillet tucking main under the header/sidebar joint. */
+  fillet?: boolean;
   scrollRef?: React.Ref<HTMLElement>;
   onTouchStart?: (e: React.TouchEvent) => void;
   onTouchMove?: (e: React.TouchEvent) => void;
@@ -117,6 +120,12 @@ export function CustomScroller({
       >
         {children}
       </main>
+      {fillet && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-0 z-10 hidden h-6 w-6 bg-[radial-gradient(circle_24px_at_0_0,var(--color-card)_22px,transparent_24px)] md:block"
+        />
+      )}
       {showBar && (
         <div
           ref={trackRef}

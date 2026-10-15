@@ -27,7 +27,7 @@ export function Sidebar({
   onOpenAccount,
 }: Props) {
   return (
-    <aside className="scroller flex h-full w-60 flex-shrink-0 flex-col gap-1 rounded-3xl border border-border/40 bg-background/60 p-3 backdrop-blur-xl">
+    <aside className="scroller flex h-full w-60 flex-shrink-0 flex-col gap-1 bg-card p-3">
       <button type="button" onClick={() => onNavigate("home")} className={linkCls(page === "home")}>
         <Home className="h-4 w-4" />
         Home

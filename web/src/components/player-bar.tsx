@@ -84,7 +84,7 @@ export function PlayerBar({ className }: { className?: string }) {
   const volPct = (muted ? 0 : volume) * 100;
 
   return (
-    <footer className={`relative hidden h-20 flex-shrink-0 items-center gap-3 overflow-hidden rounded-3xl border border-border/40 bg-background/70 px-3 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-24 sm:gap-4 sm:px-5 md:flex ${className ?? ""}`}>
+    <footer className={`relative hidden h-20 flex-shrink-0 items-center gap-3 overflow-hidden bg-background px-3 pb-[env(safe-area-inset-bottom)] sm:h-24 sm:gap-4 sm:px-5 md:flex ${className ?? ""}`}>
       {/* ambient: blurred cover glow, hidden when nothing plays */}
       {track !== undefined && track.coverUrl !== "" && (
         <div aria-hidden className="pointer-events-none absolute inset-0">
