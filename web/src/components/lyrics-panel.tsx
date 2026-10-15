@@ -241,6 +241,7 @@ export function LyricsPanel({
   }
   return (
     <div className={large ? "space-y-4" : "space-y-2"}>
+      <div className="relative">
       <div
         data-no-dismiss-drag
         className={
@@ -299,6 +300,19 @@ export function LyricsPanel({
             </button>
           );
         })}
+      </div>
+      {large && (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-background via-background/40 to-transparent md:w-10"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-background via-background/40 to-transparent md:w-10"
+          />
+        </>
+      )}
       </div>
       {large ? (
         <div className="flex items-center justify-between pt-2 text-[13px]">
