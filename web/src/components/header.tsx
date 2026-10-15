@@ -3,6 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { Search, Settings, X } from "lucide-react";
 import { SettingsPanel } from "@/components/settings-panel";
+import { useArtworkColors } from "@/lib/artwork-colors";
+import { useCurrentTrack } from "@/player/store";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -64,6 +66,10 @@ export function Header({
   const menuRef = useRef<HTMLDivElement>(null);
   const slotRef = useRef<HTMLFormElement>(null);
   const reduceMotion = useReducedMotion();
+  // Search button borrows the current artwork's palette (primary when idle).
+  const track = useCurrentTrack();
+  const artwork = useArtworkColors(track?.coverUrl ?? "");
+  const artBg = track?.coverUrl !== undefined && track.coverUrl !== "" ? artwork.first : null;
   // pill widths in px, measured from the in-flow slot (never mutated)
   const [pillW, setPillW] = useState({ rest: 0, expanded: 0 });
   // overlay (pill expands over the wordmark, wordmark fades) only where
@@ -164,7 +170,13 @@ export function Header({
                 : { type: "spring", stiffness: 400, damping: 35 }
             }
             className="flex h-full items-center gap-1 rounded-full border-0 bg-surface/80 py-0 pl-4 pr-1 backdrop-blur focus-within:outline-none"
-            style={{ zIndex: 10 }}
+            style={{
+              zIndex: 10,
+              backgroundColor:
+                artBg !== null
+                  ? `color-mix(in srgb, ${artBg} 22%, transparent)`
+                  : undefined,
+            }}
           >
             <input
               id="songnest-search"
@@ -193,7 +205,12 @@ export function Header({
             <button
               type="submit"
               aria-label="Search"
-              className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+              style={artBg !== null ? { backgroundColor: artBg } : undefined}
+              className={`flex h-8 w-8 flex-none items-center justify-center rounded-full transition ${
+                artBg !== null
+                  ? "text-white hover:brightness-110 active:scale-95"
+                  : "bg-primary text-primary-foreground hover:bg-primary/90"
+              }`}
             >
               <Search className="h-4 w-4" />
             </button>
