@@ -51,6 +51,9 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
   const [unreachableUrl, setUnreachableUrl] = useState<string | null>(null);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  /** Current native-login phase (loopback flow only) so a stall shows
+   *  where it stopped instead of a bare spinner. */
+  const [oauthStep, setOauthStep] = useState<string | null>(null);
   /** Login link the app couldn't open itself (native openUrl failure) —
    *  shown with a copy button so login is never dead-ended. */
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
@@ -136,6 +139,7 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
     setOauthError(null);
     setOauthUrl(null);
     setCopiedUrl(false);
+    setOauthStep(null);
     try {
       const session = await start();
       if (session === null) {
@@ -144,9 +148,11 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
       }
       // Native flow: loopback login completed in-app.
       setOauthBusy(false);
+      setOauthStep(null);
       onAuthed(session);
     } catch (e) {
       setOauthBusy(false);
+      setOauthStep(null);
       if (e instanceof AccountsError && e.code === "unreachable") {
         setUnreachableUrl(getAccountsUrl());
       }
@@ -302,7 +308,7 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
         onModeChange={setMode}
         onSubmit={handleSubmit}
         onGithub={() => void handleGithubDevice()}
-        onGoogle={() => void handleOAuth(startGoogleLogin)}
+        onGoogle={() => void handleOAuth(() => startGoogleLogin(setOauthStep))}
         oauthBusy={oauthBusy}
       />
       <p className="mx-auto mt-4 max-w-sm text-center text-xs text-muted-foreground">
@@ -394,6 +400,11 @@ export default function AuthPage({ onAuthed, onBack }: { onAuthed: (session: Ses
       {oauthError !== null && (
         <p className="mx-auto mt-4 max-w-sm text-center text-xs text-destructive">
           {oauthError}
+        </p>
+      )}
+      {oauthBusy && oauthStep !== null && (
+        <p className="mx-auto mt-4 max-w-sm text-center text-xs text-muted-foreground">
+          {oauthStep}
         </p>
       )}
       {oauthUrl !== null && (

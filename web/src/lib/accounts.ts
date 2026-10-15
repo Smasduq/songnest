@@ -393,8 +393,13 @@ interface NativeOAuthCallback {
  *  serves one loopback callback (`http://127.0.0.1:<port>/callback` —
  *  accepted by Desktop-type OAuth clients without registration),
  *  opens the provider page in the system browser, and exchanges the
- *  captured code. Resolves with the Songnest session. */
-async function startNativeOAuthLogin(provider: OAuthProvider): Promise<Session> {
+ *  captured code. Resolves with the Songnest session. `onStep` reports
+ *  each phase for the UI so a stall is visible instead of a bare spinner. */
+async function startNativeOAuthLogin(
+  provider: OAuthProvider,
+  onStep?: (step: string) => void
+): Promise<Session> {
+  onStep?.("Starting login on this device…");
   let port: number;
   try {
     port = await invokeNative<number>("oauth_loopback_begin");
@@ -405,7 +410,9 @@ async function startNativeOAuthLogin(provider: OAuthProvider): Promise<Session> 
     );
   }
   const redirect_uri = `http://127.0.0.1:${port}/callback`;
+  onStep?.("Contacting the accounts server…");
   const { url } = await fetchAuthorizeUrl(provider, redirect_uri);
+  onStep?.("Opening your browser — approve the login there…");
   await openSystemBrowser(url);
   let callback: NativeOAuthCallback;
   try {
@@ -434,6 +441,7 @@ async function startNativeOAuthLogin(provider: OAuthProvider): Promise<Session> 
   if (callback.code === undefined || callback.code === null || callback.code === "") {
     throw new AccountsError("invalid", "Login failed — try again.");
   }
+  onStep?.("Finishing sign-in…");
   return (await finishOAuthLogin(callback.code, callback.state ?? null, redirect_uri)).session;
 }
 
@@ -490,8 +498,10 @@ export async function startGithubLogin(): Promise<Session | null> {
 /** Start Google login (see startOAuthLogin). In the native app this
  *  completes the loopback flow and resolves with the session; on the
  *  web it navigates away and resolves null. */
-export async function startGoogleLogin(): Promise<Session | null> {
-  if (isNativeApp()) return startNativeOAuthLogin("google");
+export async function startGoogleLogin(
+  onStep?: (step: string) => void
+): Promise<Session | null> {
+  if (isNativeApp()) return startNativeOAuthLogin("google", onStep);
   await startOAuthLogin("google");
   return null;
 }
