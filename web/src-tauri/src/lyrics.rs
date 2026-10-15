@@ -41,11 +41,32 @@ pub async fn get_lyrics(
         .send()
         .await
         .map_err(|e| format!("lyrics server unreachable: {e}"))?;
-    if res.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err("No lyrics found".to_string());
+    let status = res.status();
+    // A 404 from OUR route carries {"error":"lyrics_not_found"} — a bare
+    // 404 means this backend predates the route (stale sidecar/build).
+    if status == reqwest::StatusCode::NOT_FOUND {
+        let ours = res
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("error")
+                    .and_then(|e| e.as_str())
+                    .map(|s| s.to_string())
+            });
+        if ours.as_deref() == Some("lyrics_not_found") {
+            return Err("No lyrics found".to_string());
+        }
+        return Err(
+            "lyrics endpoint missing on this server — update/rebuild the app backend and retry"
+                .to_string(),
+        );
     }
-    if !res.status().is_success() {
-        return Err(format!("lyrics: {}", res.status()));
+    if status == reqwest::StatusCode::BAD_GATEWAY {
+        return Err("lyrics service unavailable — retry later".to_string());
+    }
+    if !status.is_success() {
+        return Err(format!("lyrics: {status}"));
     }
     res.json::<serde_json::Value>()
         .await

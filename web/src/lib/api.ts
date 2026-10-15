@@ -473,6 +473,8 @@ export function activeLyricIndex(
 export async function fetchLyrics(song: Song): Promise<LyricsResponse> {
   // Tauri shell first (one get_lyrics entry point; same Rust path on
   // Android since the server runs in-process there), plain HTTP fallback.
+  // A genuine miss is final (no second request); anything else falls
+  // through in case the proxy and HTTP point at different servers.
   try {
     if (typeof window !== "undefined" && "__TAURI__" in window) {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -486,11 +488,28 @@ export async function fetchLyrics(song: Song): Promise<LyricsResponse> {
         dz: dz ?? null,
       })) as LyricsResponse;
     }
-  } catch {
+  } catch (e: unknown) {
+    // Tauri rejects with the command's Err string directly.
+    const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+    if (msg.includes("No lyrics found")) throw new Error("No lyrics found");
     // fall through to HTTP
   }
   const r = await fetch(`${apiBase()}/api/lyrics?${lyricsQuery(song)}`);
-  if (r.status === 404) throw new Error("No lyrics found");
+  if (r.status === 404) {
+    const body: unknown = await r.json().catch(() => null);
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      (body as { error?: unknown }).error === "lyrics_not_found"
+    ) {
+      throw new Error("No lyrics found");
+    }
+    throw new Error(
+      "lyrics endpoint missing on this server — update the app backend"
+    );
+  }
+  if (r.status === 502 || r.status === 503)
+    throw new Error("lyrics service unavailable — retry later");
   if (!r.ok) throw new Error(`lyrics: ${r.status}`);
   return (await r.json()) as LyricsResponse;
 }

@@ -264,6 +264,7 @@ pub async fn fetch_lyrics(
 ) -> Option<Lyrics> {
     fetch_lyrics_raw(artist, title, album, duration_secs)
         .await
+        .ok()
         .and_then(|(synced_raw, plain_raw, instrumental)| {
             if instrumental {
                 return Some(Lyrics {
@@ -288,6 +289,16 @@ pub async fn fetch_lyrics(
         })
 }
 
+/// Why an LRCLIB lookup failed. Surfaced to the UI so "no lyrics exist"
+/// is never confused with "the service (or this backend) is broken".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsError {
+    /// LRCLIB answered: no lyrics for this track.
+    NotFound,
+    /// Network failure, rate limit (429), or an unexpected response.
+    Unavailable,
+}
+
 /// Same as [`fetch_lyrics`] but keeps the raw LRC string so callers can
 /// cache it verbatim (SQLite) and parse on read.
 pub async fn fetch_lyrics_raw(
@@ -295,8 +306,8 @@ pub async fn fetch_lyrics_raw(
     title: &str,
     album: &str,
     duration_secs: u32,
-) -> Option<(Option<String>, Option<String>, bool)> {
-    let http = client().ok()?;
+) -> Result<(Option<String>, Option<String>, bool), LyricsError> {
+    let http = client().map_err(|_| LyricsError::Unavailable)?;
     let track = normalize_title(title);
     let params: Vec<(&str, String)> = vec![
         ("artist_name", artist.to_string()),
@@ -309,29 +320,33 @@ pub async fn fetch_lyrics_raw(
         .query(&params)
         .send()
         .await
-        .ok()?;
+        .map_err(|_| LyricsError::Unavailable)?;
     if res.status().is_success() {
-        if let Ok(got) = res.json::<LrclibGet>().await {
-            if got.instrumental {
-                return Some((None, None, true));
+        match res.json::<LrclibGet>().await {
+            Ok(got) => {
+                if got.instrumental {
+                    return Ok((None, None, true));
+                }
+                let has_synced = got
+                    .synced_lyrics
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty());
+                let has_plain = got
+                    .plain_lyrics
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty());
+                if !has_synced && !has_plain {
+                    return Err(LyricsError::NotFound);
+                }
+                return Ok((got.synced_lyrics, got.plain_lyrics, false));
             }
-            let has_synced = got
-                .synced_lyrics
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
-            let has_plain = got
-                .plain_lyrics
-                .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
-            if !has_synced && !has_plain {
-                return None;
-            }
-            return Some((got.synced_lyrics, got.plain_lyrics, false));
+            Err(_) => return Err(LyricsError::Unavailable),
         }
-        return None;
     }
     if res.status().as_u16() != 404 {
-        return None;
+        // Rate limit, server error, … — not "no lyrics", must not be
+        // reported (or cached) as a miss.
+        return Err(LyricsError::Unavailable);
     }
     // Fallback: free search, duration-closest hit wins (tolerance ~2s).
     let q = format!("{artist} {track}");
@@ -340,11 +355,11 @@ pub async fn fetch_lyrics_raw(
         .query(&[("q", q)])
         .send()
         .await
-        .ok()?;
+        .map_err(|_| LyricsError::Unavailable)?;
     if !res.status().is_success() {
-        return None;
+        return Err(LyricsError::Unavailable);
     }
-    let hits: Vec<LrclibGet> = res.json().await.ok()?;
+    let hits: Vec<LrclibGet> = res.json().await.map_err(|_| LyricsError::Unavailable)?;
     hits
         .into_iter()
         .filter_map(|h| {
@@ -374,6 +389,7 @@ pub async fn fetch_lyrics_raw(
         })
         .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(_, l)| l)
+        .ok_or(LyricsError::NotFound)
 }
 
 #[cfg(test)]

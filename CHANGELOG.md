@@ -3,6 +3,25 @@
 Songnest is a cross-platform music library and player built in Rust.
 Releases are cut from tags like `v0.2.0`.
 
+## v0.3.0 — 2026-10-15
+
+- Time-synced lyrics (LRCLIB, no key): synced lines with the active line
+  highlighted and auto-centered, click-to-seek, and a per-track ±ms offset
+  saved in SQLite. Plain-lyrics fallback, Instrumental detection, and an
+  honest "not found" — fetches are cached, prefetched at download time,
+  and work offline. Desktop gets a full lyrics page over ambient artwork
+  (player-bar icon); the mobile sheet keeps a large inline panel.
+- Smarter YouTube matching: remixes/live/acoustic versions no longer lose
+  to the plain original, collaborations credit every artist, and stale
+  wrong matches from older scorers are re-searched once automatically.
+  Lyric failures now say what actually happened (no lyrics vs service
+  down vs outdated backend) instead of a blanket "not found".
+- Desktop chrome flattened Firefox-style with the sidebar and header
+  joined; header search tints with the artwork palette.
+- Accounts: visible native-login phase, 20s timeout on API calls, fixed
+  native Google login, live search autocomplete.
+- Search results stay visible while the picked song resolves and plays.
+
 ## v0.2.0 — 2026-10-14
 
 - In-app updates: new App updates page (sidebar, settings, `#update`).

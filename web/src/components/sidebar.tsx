@@ -1,6 +1,6 @@
 import { CircleUserRound, Download, Heart, Home, Library, Search, Wrench } from "lucide-react";
 
-export type Page = "home" | "library" | "liked" | "search" | "diagnostics" | "profile" | "update";
+export type Page = "home" | "library" | "liked" | "search" | "lyrics" | "diagnostics" | "profile" | "update";
 
 interface Props {
   page: Page;

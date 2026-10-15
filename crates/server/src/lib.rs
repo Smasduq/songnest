@@ -246,11 +246,19 @@ fn short_title(t: &DzTrack) -> &str {
 fn search_queries(t: &DzTrack) -> Vec<String> {
     let artists = artist_string(t);
     let title = short_title(t).trim();
-    let mut out = vec![
+    let mut out = Vec::new();
+    // Qualified first: when the full title names a version or a feature
+    // the short title drops ("X (Remix)", "X (feat. B)"), searching only
+    // the short form returns plain originals to choose from.
+    let full = t.title.trim();
+    if !full.is_empty() && full != title {
+        out.push(format!("{artists} - {full}"));
+    }
+    out.extend([
         format!("{artists} - {title}"),
         format!("{artists} {title} official audio"),
         format!("{} {}", t.artist.name, title),
-    ];
+    ]);
     out.iter_mut().for_each(|q| {
         *q = q.split_whitespace().collect::<Vec<_>>().join(" ");
     });
@@ -276,6 +284,9 @@ fn title_coverage(yt_title: &str, t: &DzTrack) -> f32 {
 
 fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     let mut s = 0;
+    // versions the Deezer title demands (remix, live, … — never remaster:
+    // same recording, usually untagged on YouTube, see deezer_versions)
+    let versions = deezer_versions(t);
     // duration: small gaps are pressing/rounding noise, big gaps are a
     // different cut (remix, extended, compilation)
     if let Some(d) = e.duration {
@@ -323,6 +334,16 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         if yt.contains(&artist) {
             s += 10;
         }
+        // Collab fidelity: every credited artist should be named somewhere.
+        // A video naming only the main artist is usually the solo/original
+        // cut, not the collaboration picked on Deezer.
+        for feat in featured_names(t) {
+            if yt.contains(&feat) || chan.contains(&feat) {
+                s += 12;
+            } else {
+                s -= 12;
+            }
+        }
     }
     // the title itself must match: each wanted word found scores up,
     // each missing word scores down hard so a same-artist wrong song
@@ -341,20 +362,123 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     } else if yt.contains("official video") {
         s += 8;
     }
+    // Version fidelity: a Deezer remix/live/acoustic is a different
+    // recording from the plain original — the video must say so too.
+    for v in &versions {
+        if yt.contains(v) {
+            s += 15;
+        } else {
+            s -= 30;
+        }
+    }
+    // Version-looking words are only suspicious when Deezer does NOT name
+    // them: a "remix" tag on a remix track is the correct answer, not a
+    // bootleg signal.
     for bad in [
         "live", "cover", "remix", "lyrics", "karaoke", "slowed", "sped up", "tiktok", "reverb",
         "8d",
     ] {
-        if yt.contains(bad) {
+        if yt.contains(bad) && !versions.iter().any(|v| *v == bad) {
             s -= 20;
         }
     }
     s
 }
 
-/// Confident match: decent score AND at least half the title words present.
+/// Version tags in the Deezer title that denote a *different recording*.
+/// Single words match whole tokens ("Alive" must not demand "live");
+/// "remaster" is deliberately excluded (same recording, rarely tagged).
+fn deezer_versions(t: &DzTrack) -> Vec<&'static str> {
+    const SINGLE: &[&str] = &[
+        "remix", "live", "acoustic", "unplugged", "cover", "karaoke", "slowed", "reverb", "8d",
+        "tiktok", "instrumental", "acapella", "nightcore",
+    ];
+    const PHRASE: &[&str] = &["sped up", "slow reverb", "a cappella"];
+    let full = format!("{} {}", t.title, t.title_short).to_lowercase();
+    let toks: std::collections::HashSet<&str> = full
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut out: Vec<&'static str> =
+        SINGLE.iter().copied().filter(|v| toks.contains(v)).collect();
+    out.extend(PHRASE.iter().copied().filter(|v| full.contains(v)));
+    out
+}
+
+/// Non-main credited artists, lowercase: contributors plus "(feat. X)"
+/// names parsed out of the title itself (payloads without contributors).
+fn featured_names(t: &DzTrack) -> Vec<String> {
+    let main = t.artist.name.trim().to_lowercase();
+    let mut names: Vec<String> = t
+        .contributors
+        .iter()
+        .map(|c| c.name.trim().to_lowercase())
+        .filter(|n| !n.is_empty() && *n != main)
+        .collect();
+    names.extend(feat_from_title(&t.title));
+    names.extend(feat_from_title(&t.title_short));
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|n| *n != main && seen.insert(n.clone()));
+    names
+}
+
+/// "Song (feat. A & B)" -> ["a", "b"]. Only parenthesized/bracketed
+/// credits count, so ordinary words ("defeat") can never match.
+fn feat_from_title(title: &str) -> Vec<String> {
+    let lower = title.to_lowercase();
+    let mut out = Vec::new();
+    for (open, close) in [('(', ')'), ('[', ']')] {
+        let mut search = 0;
+        while let Some(o) = lower[search..].find(open) {
+            let o = search + o;
+            let Some(c) = lower[o..].find(close) else {
+                break;
+            };
+            let c = o + c;
+            let inner = lower[o + 1..c].trim();
+            // "featuring" before "feat": prefix order matters.
+            let mut rest = None;
+            for marker in ["featuring", "feat.", "feat", "ft.", "ft"] {
+                if let Some(r) = inner.strip_prefix(marker) {
+                    rest = Some(r);
+                    break;
+                }
+            }
+            if let Some(r) = rest {
+                let mut parts = vec![r.to_string()];
+                for sep in [" and ", " x ", " feat. ", " ft. ", " with "] {
+                    parts = parts
+                        .iter()
+                        .flat_map(|p| p.split(sep).map(|x| x.to_string()).collect::<Vec<_>>())
+                        .collect();
+                }
+                for p in parts
+                    .iter()
+                    .flat_map(|p| p.split([',', '&', '+', '/', ';']).collect::<Vec<_>>())
+                {
+                    let name = p.trim().trim_matches(['.', ' ']).to_string();
+                    if !name.is_empty() {
+                        out.push(name);
+                    }
+                }
+            }
+            search = c + 1;
+        }
+    }
+    out
+}
+
+/// Confident match: decent score AND at least half the title words present
+/// AND every version the Deezer title demands present in the video title —
+/// otherwise it is the plain original, not our recording.
 fn is_confident(e: &YtEntry, t: &DzTrack, s: i32) -> bool {
-    s >= 25 && title_coverage(&e.title, t) >= 0.5
+    s >= 25 && title_coverage(&e.title, t) >= 0.5 && versioned_title(&e.title, t)
+}
+
+/// Every version tag Deezer names must appear in the video title.
+fn versioned_title(yt_title: &str, t: &DzTrack) -> bool {
+    let yt = yt_title.to_lowercase();
+    deezer_versions(t).iter().all(|v| yt.contains(v))
 }
 
 // ---- downloader: yt-dlp binary, JS runtimes, health, updates ----
@@ -1398,11 +1522,11 @@ async fn prefetch_lyrics(
     if keys.is_empty() {
         return;
     }
-    let fetched =
+    let fetched: Option<(Option<String>, Option<String>, bool)> =
         tokio::time::timeout(std::time::Duration::from_secs(15), songnest_core::lyrics::fetch_lyrics_raw(artist, title, album, duration))
             .await
             .ok()
-            .flatten();
+            .and_then(|r| r.ok());
     let Some((lrc, plain, instrumental)) = fetched else {
         return;
     };
@@ -1479,8 +1603,25 @@ async fn api_lyrics(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let fetched = songnest_core::lyrics::fetch_lyrics_raw(&artist, &title, &album, duration).await;
-    let Some((lrc, plain, instrumental)) = fetched else {
-        return StatusCode::NOT_FOUND.into_response();
+    // Distinct failures, distinct statuses: a genuine miss is 404, but an
+    // LRCLIB outage/rate-limit is 502 — and a bare 404 with no JSON body
+    // means this backend predates the route entirely (stale sidecar).
+    let (lrc, plain, instrumental) = match fetched {
+        Ok(v) => v,
+        Err(songnest_core::lyrics::LyricsError::NotFound) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "lyrics_not_found"})),
+            )
+                .into_response();
+        }
+        Err(songnest_core::lyrics::LyricsError::Unavailable) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": "lyrics_unavailable"})),
+            )
+                .into_response();
+        }
     };
     lyrics_store(&s.db, &key, lrc.as_deref(), plain.as_deref(), instrumental);
     if let Some(dk) = dz_key.filter(|d| d != &key) {
@@ -1529,7 +1670,10 @@ async fn api_lyrics_offset(
 /// an older algo are ignored and re-searched once, so a wrong match made by
 /// a previous version can never stick around. Applies to both backends
 /// (desktop yt-dlp and on-device SongnestPy share this cache).
-const MATCH_ALGO: i64 = 1;
+///
+/// v2: version fidelity (remix/live/… must match) + featured-artist credit
+/// + full-title query for qualified tracks.
+const MATCH_ALGO: i64 = 2;
 
 /// Cached Deezer->YouTube match. `fresh=true` skips the cache, and rows
 /// stamped by an older algo are treated as a miss (re-searched below).
@@ -1601,7 +1745,7 @@ async fn youtube_match(
             }
         }
         let (id, title, sc) = best?;
-        if title_coverage(&title, t) < 0.5 || sc < 25 {
+        if title_coverage(&title, t) < 0.5 || sc < 25 || !versioned_title(&title, t) {
             return None;
         }
         put_match(db, t.id, &id, sc);
@@ -4266,6 +4410,113 @@ mod downloader_tests {
         let t = dz_track("Fola", "Treat U Right", 180);
         assert!(title_coverage("Fola - Treat U Right", &t) >= 0.5);
         assert!(title_coverage("Fola - Alone", &t) < 0.5);
+    }
+
+    #[test]
+    fn remix_beats_original_and_original_is_rejected() {
+        // Deezer names the remix; title_short drops it — the plain
+        // original must lose and fail the version gate.
+        let mut t = dz_track("Ayo", "Something (Remix)", 200);
+        t.title_short = "Something".to_string();
+        let remix = YtEntry {
+            id: "r".to_string(),
+            title: "Ayo - Something (Remix)".to_string(),
+            duration: Some(200.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+        let original = YtEntry {
+            id: "o".to_string(),
+            title: "Ayo - Something (Official Audio)".to_string(),
+            duration: Some(180.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+        assert!(score(&remix, &t) > score(&original, &t));
+        assert!(is_confident(&remix, &t, score(&remix, &t)));
+        assert!(!is_confident(&original, &t, score(&original, &t)));
+    }
+
+    #[test]
+    fn studio_track_still_prefers_studio_over_live() {
+        // The version penalty is one-directional: an untagged Deezer
+        // track must keep rejecting live/bootleg uploads as before.
+        let t = dz_track("Ayo", "Something", 200);
+        let studio = YtEntry {
+            id: "s".to_string(),
+            title: "Ayo - Something (Official Audio)".to_string(),
+            duration: Some(202.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+        let live = YtEntry {
+            id: "l".to_string(),
+            title: "Ayo - Something (Live)".to_string(),
+            duration: Some(200.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+        assert!(score(&studio, &t) > score(&live, &t));
+        assert!(is_confident(&studio, &t, score(&studio, &t)));
+    }
+
+    #[test]
+    fn version_demand_needs_whole_words() {
+        // "Alive" is not a live recording; "Remastered" is the same one.
+        let t = dz_track("Ayo", "Alive", 200);
+        assert!(deezer_versions(&t).is_empty());
+        let t = dz_track("Ayo", "Something - Remastered", 200);
+        assert!(deezer_versions(&t).is_empty());
+        let t = dz_track("Ayo", "Something (Sped Up)", 200);
+        assert!(deezer_versions(&t).contains(&"sped up"));
+    }
+
+    #[test]
+    fn featured_version_beats_solo_original() {
+        // Two credited artists: the video naming both must outscore the
+        // solo cut naming only the main artist.
+        let mut t = dz_track("Fola", "Treat U Right (feat. Young Jonn)", 180);
+        t.title_short = "Treat U Right".to_string();
+        t.contributors = vec![
+            DzContributor {
+                name: "Fola".to_string(),
+            },
+            DzContributor {
+                name: "Young Jonn".to_string(),
+            },
+        ];
+        let feat = YtEntry {
+            id: "f".to_string(),
+            title: "Fola - Treat U Right (feat. Young Jonn)".to_string(),
+            duration: Some(184.0),
+            channel: Some("Fola - Topic".to_string()),
+        };
+        let solo = YtEntry {
+            id: "s".to_string(),
+            title: "Fola - Treat U Right (Official Audio)".to_string(),
+            duration: Some(182.0),
+            channel: Some("Fola - Topic".to_string()),
+        };
+        assert!(score(&feat, &t) > score(&solo, &t));
+        assert!(is_confident(&feat, &t, score(&feat, &t)));
+    }
+
+    #[test]
+    fn feat_names_parse_from_title_without_contributors() {
+        let t = dz_track("Fola", "Treat U Right (feat. Young Jonn)", 180);
+        assert_eq!(featured_names(&t), vec!["young jonn".to_string()]);
+        // ordinary words never count, even containing "feat" letters
+        let t = dz_track("Ayo", "Defeat (Remix)", 200);
+        assert!(featured_names(&t).is_empty());
+    }
+
+    #[test]
+    fn qualified_full_title_leads_queries() {
+        // The full title must be searched too, or candidates are all
+        // plain originals before scoring ever runs.
+        let mut t = dz_track("Ayo", "Something (Remix)", 200);
+        t.title_short = "Something".to_string();
+        let qs = search_queries(&t);
+        assert!(qs[0].contains("Something (Remix)"));
+        // unqualified tracks keep the old order (short title first)
+        let t = dz_track("Fola", "Treat U Right", 180);
+        assert!(search_queries(&t)[0].contains("Treat U Right"));
     }
 
     #[test]

@@ -73,6 +73,7 @@ export function LyricsPanel({
   const [offsetMs, setOffsetMs] = useState(0);
   const [active, setActive] = useState(-1);
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const prevPos = useRef(0);
 
@@ -83,6 +84,7 @@ export function LyricsPanel({
     setLines([]);
     setPlain(null);
     setActive(-1);
+    setErrorMsg(null);
     prevPos.current = 0;
     fetchLyrics(track)
       .then((res) => {
@@ -102,11 +104,13 @@ export function LyricsPanel({
       })
       .catch((e: unknown) => {
         if (!alive) return;
-        setStatus(
-          e instanceof Error && e.message === "No lyrics found"
-            ? "missing"
-            : "error"
-        );
+        const msg = e instanceof Error ? e.message : "lyrics failed";
+        if (msg === "No lyrics found") {
+          setStatus("missing");
+        } else {
+          setErrorMsg(msg);
+          setStatus("error");
+        }
       });
     return () => {
       alive = false;
@@ -224,7 +228,7 @@ export function LyricsPanel({
             : "py-4 text-center text-sm text-muted-foreground"
         }
       >
-        Lyrics unavailable — check connection.
+        {errorMsg ?? "Lyrics unavailable — check connection."}
       </p>
     );
   }

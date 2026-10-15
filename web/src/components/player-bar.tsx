@@ -8,6 +8,7 @@ import { Marquee } from "@/components/marquee";
 import { useCurrentTrack, usePlayer, useTime } from "@/player/store";
 import {
   Loader2,
+  MicVocal,
   Music,
   Pause,
   Play,
@@ -20,7 +21,15 @@ import {
   VolumeX,
 } from "lucide-react";
 
-export function PlayerBar({ className }: { className?: string }) {
+export function PlayerBar({
+  className,
+  onOpenLyrics,
+  lyricsActive,
+}: {
+  className?: string;
+  onOpenLyrics?: () => void;
+  lyricsActive?: boolean;
+}) {
   const track = useCurrentTrack();
   const playing = usePlayer((s) => s.playing);
   const resolving = usePlayer((s) => s.resolving);
@@ -220,6 +229,19 @@ export function PlayerBar({ className }: { className?: string }) {
       </div>
 
       <div className="hidden w-48 items-center gap-2 md:flex">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onOpenLyrics}
+          title="Lyrics"
+          aria-label="Open lyrics"
+          aria-pressed={lyricsActive}
+          className={`h-8 w-8 rounded-full hover:text-foreground ${
+            lyricsActive ? "text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          <MicVocal className="h-4 w-4" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"
