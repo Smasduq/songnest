@@ -1,17 +1,19 @@
 pkgbase = songnest
 	pkgdesc = Music library and player with a pluggable source system (prebuilt binary)
-	pkgver = 0.1.0.alpha.1
+	pkgver = 0.1.0
 	pkgrel = 1
 	url = https://github.com/Smasduq/songnest
 	arch = x86_64
 	license = MIT
 	license = Apache-2.0
-	conflicts = songnest-bin
-	replaces = songnest-bin
 	depends = webkit2gtk-4.1
 	depends = libappindicator-gtk3
 	depends = librsvg
 	depends = openssl
 	optdepends = yt-dlp: optional external resolver (never bundled)
+	conflicts = songnest-bin
+	replaces = songnest-bin
+	source = songnest_0.1.0_amd64.deb::https://github.com/Smasduq/songnest/releases/download/v0.1.0/songnest_0.1.0_amd64.deb
+	sha256sums = ff8b70a0980af6b59f44603ab115190a2845df1c1af826217fa9b44a0ccb6e98
 
 pkgname = songnest

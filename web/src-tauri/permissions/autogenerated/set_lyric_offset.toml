@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-lyric-offset"
+description = "Enables the set_lyric_offset command without any pre-configured scope."
+commands.allow = ["set_lyric_offset"]
+
+[[permission]]
+identifier = "deny-set-lyric-offset"
+description = "Denies the set_lyric_offset command without any pre-configured scope."
+commands.deny = ["set_lyric_offset"]

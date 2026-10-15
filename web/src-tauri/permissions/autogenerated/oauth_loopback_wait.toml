@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-oauth-loopback-wait"
+description = "Enables the oauth_loopback_wait command without any pre-configured scope."
+commands.allow = ["oauth_loopback_wait"]
+
+[[permission]]
+identifier = "deny-oauth-loopback-wait"
+description = "Denies the oauth_loopback_wait command without any pre-configured scope."
+commands.deny = ["oauth_loopback_wait"]
