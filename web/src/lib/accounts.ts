@@ -123,25 +123,38 @@ async function request(
   token?: string
 ): Promise<{ status: number; json: unknown }> {
   let res: Response;
+  // Bound every accounts call: provider authorize fetches have hung
+  // before (spinner forever, no error). Abort → "unreachable" below.
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 20000);
   try {
     res = await fetch(`${getAccountsUrl()}${path}`, {
       ...init,
+      signal: ctrl.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token !== undefined ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
     });
-  } catch {
+  } catch (e) {
     // DNS/refused = server down; the browser reports both as TypeError.
     // Distinguish offline via navigator.onLine (best effort).
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       throw new AccountsError("offline", "You're offline — changes are saved and will sync later.");
     }
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new AccountsError(
+        "unreachable",
+        "The accounts server is taking too long — check your connection and try again."
+      );
+    }
     throw new AccountsError(
       "unreachable",
       "Can't reach the accounts server — check it's running and try again."
     );
+  } finally {
+    window.clearTimeout(timer);
   }
   let json: unknown = null;
   try {
