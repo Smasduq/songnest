@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default capabilities for the main window.",
   "windows": ["main"],
-  "permissions": ["opener:allow-open-url", "core:event:allow-listen", "native-audio:default", "updater:default", "process:default"]
+  "permissions": ["opener:allow-open-url", "core:event:allow-listen", "native-audio:default", "updater:default", "process:default", "allow-secret-set", "allow-secret-get", "allow-secret-delete", "allow-get-lyrics", "allow-set-lyric-offset", "allow-oauth-loopback-begin", "allow-oauth-loopback-wait"]
 }

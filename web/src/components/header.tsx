@@ -3,6 +3,12 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { Search, Settings, X } from "lucide-react";
 import { SettingsPanel } from "@/components/settings-panel";
+import {
+  SearchSuggestDropdown,
+  useAutocomplete,
+} from "@/components/search-suggest";
+import type { SearchHit } from "@/lib/api";
+import type { Page } from "@/components/sidebar";
 import { useArtworkColors } from "@/lib/artwork-colors";
 import { useCurrentTrack } from "@/player/store";
 
@@ -41,6 +47,7 @@ export function Header({
   onQueryChange,
   onSubmitSearch,
   onClearSearch,
+  onPickSuggest,
   onOpenDiagnostics,
   accountEmail,
   onOpenAccount,
@@ -54,12 +61,14 @@ export function Header({
   onQueryChange: (q: string) => void;
   onSubmitSearch: () => void;
   onClearSearch: () => void;
+  /** Typeahead pick: fills the query and runs the full search. */
+  onPickSuggest?: (hit: SearchHit) => void;
   onOpenDiagnostics: () => void;
   accountEmail: string | null;
   onOpenAccount: () => void;
   onOpenUpdates: () => void;
   className?: string;
-  page?: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update";
+  page?: Page;
 }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -78,6 +87,25 @@ export function Header({
     () => window.matchMedia("(max-width: 767px)").matches
   );
   const overlaid = focused && narrow;
+  // live typeahead under the pill (only while focused to avoid stray requests)
+  const { suggestions, loading, clear } = useAutocomplete(focused ? query : "");
+  const [highlight, setHighlight] = useState(-1);
+  const suggestOpen =
+    focused && (loading || suggestions.length > 0) && query.trim().length >= 2;
+  useEffect(() => {
+    setHighlight(-1);
+  }, [suggestions]);
+  function pickSuggest(hit: SearchHit) {
+    clear();
+    setHighlight(-1);
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    if (onPickSuggest !== undefined) {
+      onPickSuggest(hit);
+      return;
+    }
+    onQueryChange(`${hit.title} ${hit.artist}`);
+    onSubmitSearch();
+  }
 
   function measure(): { rest: number; expanded: number } {
     const slot = slotRef.current?.clientWidth ?? 0;
@@ -153,6 +181,12 @@ export function Header({
           // release focus so the wordmark returns (Enter-submit otherwise
           // keeps focus and the logo stays hidden behind the pill)
           (document.activeElement as HTMLElement | null)?.blur?.();
+          clear();
+          // keyboard-enter on a highlighted suggestion searches for it
+          if (highlight >= 0 && suggestions[highlight] !== undefined) {
+            pickSuggest(suggestions[highlight]);
+            return;
+          }
           onSubmitSearch();
         }}
       >
@@ -188,8 +222,41 @@ export function Header({
               onChange={(e) => onQueryChange(e.target.value)}
               onFocus={() => expand()}
               onBlur={() => setFocused(false)}
+              onKeyDown={(e) => {
+                if (!suggestOpen) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setHighlight((h) =>
+                    suggestions.length === 0
+                      ? -1
+                      : h >= suggestions.length - 1
+                        ? 0
+                        : h + 1
+                  );
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setHighlight((h) =>
+                    suggestions.length === 0
+                      ? -1
+                      : h <= 0
+                        ? suggestions.length - 1
+                        : h - 1
+                  );
+                } else if (e.key === "Escape") {
+                  clear();
+                  setHighlight(-1);
+                }
+              }}
               placeholder="Search artist or song"
               aria-label="Search artist or song"
+              role="combobox"
+              aria-expanded={suggestOpen}
+              aria-controls="songnest-search-suggest"
+              aria-activedescendant={
+                highlight >= 0 && suggestions[highlight] !== undefined
+                  ? `songnest-suggest-${suggestions[highlight].dz}`
+                  : undefined
+              }
               className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-sm text-foreground placeholder:text-muted-foreground focus:outline-none no-focus-ring"
             />
             {query !== "" && (
@@ -216,6 +283,16 @@ export function Header({
             </button>
           </motion.div>
         </div>
+        {suggestOpen && (
+          <SearchSuggestDropdown
+            listId="songnest-search-suggest"
+            suggestions={suggestions}
+            loading={loading}
+            highlight={highlight}
+            onHighlight={setHighlight}
+            onPick={pickSuggest}
+          />
+        )}
       </form>
       {page !== "search" && (
         <div ref={menuRef} className="relative ml-auto flex-shrink-0">

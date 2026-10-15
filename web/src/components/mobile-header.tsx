@@ -2,16 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { ChevronLeft, Search, Settings, X } from "lucide-react";
+import {
+  SearchSuggestDropdown,
+  useAutocomplete,
+} from "@/components/search-suggest";
+import type { SearchHit } from "@/lib/api";
+import type { Page } from "@/components/sidebar";
 
 interface Props {
-  page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update";
-  onNavigate: (page: "home" | "search" | "library" | "liked" | "diagnostics" | "profile" | "update") => void;
+  page: Page;
+  onNavigate: (page: Page) => void;
   query: string;
   onQueryChange: (q: string) => void;
   onSubmitSearch: () => void;
   onClearSearch: () => void;
   onOpenSettings: () => void;
   onOpenSearch: () => void;
+  /** Typeahead pick: fills the query and runs the full search. */
+  onPickSuggest?: (hit: SearchHit) => void;
   className?: string;
 }
 
@@ -24,13 +32,42 @@ export function MobileHeader({
   onClearSearch,
   onOpenSettings,
   onOpenSearch,
+  onPickSuggest,
   className,
 }: Props) {
   const [showBack, setShowBack] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  // live typeahead under the pill (only while focused to avoid stray requests)
+  const { suggestions, loading, clear } = useAutocomplete(focused ? query : "");
+  const suggestOpen =
+    focused && (loading || suggestions.length > 0) && query.trim().length >= 2;
 
   useEffect(() => {
     setShowBack(page !== "home" && page !== "search");
   }, [page]);
+  useEffect(() => {
+    setHighlight(-1);
+  }, [suggestions]);
+  // close typeahead when leaving the search page
+  useEffect(() => {
+    if (page !== "search") {
+      setFocused(false);
+      clear();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+  function pickSuggest(hit: SearchHit) {
+    clear();
+    setHighlight(-1);
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    if (onPickSuggest !== undefined) {
+      onPickSuggest(hit);
+      return;
+    }
+    onQueryChange(`${hit.title} ${hit.artist}`);
+    onSubmitSearch();
+  }
   const title =
     page === "library"
       ? "Your Library"
@@ -58,6 +95,12 @@ export function MobileHeader({
           onSubmit={(e) => {
             e.preventDefault();
             (document.activeElement as HTMLElement | null)?.blur?.();
+            clear();
+            // keyboard-enter on a highlighted suggestion searches for it
+            if (highlight >= 0 && suggestions[highlight] !== undefined) {
+              pickSuggest(suggestions[highlight]);
+              return;
+            }
             onSubmitSearch();
           }}
         >
@@ -70,8 +113,38 @@ export function MobileHeader({
               autoCorrect="off"
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onKeyDown={(e) => {
+                if (!suggestOpen) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setHighlight((h) =>
+                    suggestions.length === 0
+                      ? -1
+                      : h >= suggestions.length - 1
+                        ? 0
+                        : h + 1
+                  );
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setHighlight((h) =>
+                    suggestions.length === 0
+                      ? -1
+                      : h <= 0
+                        ? suggestions.length - 1
+                        : h - 1
+                  );
+                } else if (e.key === "Escape") {
+                  clear();
+                  setHighlight(-1);
+                }
+              }}
               placeholder="Search artist or song"
               aria-label="Search artist or song"
+              role="combobox"
+              aria-expanded={suggestOpen}
+              aria-controls="mobile-songnest-search-suggest"
               className="h-full min-w-0 flex-1 whitespace-nowrap bg-transparent text-left text-base text-foreground placeholder:text-muted-foreground focus:outline-none no-focus-ring"
             />
             {query !== "" && (
@@ -92,6 +165,16 @@ export function MobileHeader({
               <Search className="h-4 w-4" />
             </button>
           </div>
+          {suggestOpen && (
+            <SearchSuggestDropdown
+              listId="mobile-songnest-search-suggest"
+              suggestions={suggestions}
+              loading={loading}
+              highlight={highlight}
+              onHighlight={setHighlight}
+              onPick={pickSuggest}
+            />
+          )}
         </form>
       ) : showBack ? (
         <button

@@ -9,6 +9,7 @@ import { MiniPlayer } from "@/components/mini-player";
 import { MobileSeekBar } from "@/components/mobile-seek-bar";
 import { Diagnostics } from "@/components/diagnostics";
 import ProfilePage from "@/pages/profile";
+import LyricsPage from "@/pages/lyrics";
 import AuthPage from "@/pages/auth";
 import UpdatePage from "@/pages/update";
 import {
@@ -389,20 +390,33 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const runSearch = useCallback(async () => {
-    const q = query.trim();
-    if (!q) return;
-    setSearching(true);
-    try {
-      setHits(await searchSongs(q));
-      setSearchFailed(false);
-    } catch {
-      setHits([]);
-      setSearchFailed(true);
-    } finally {
-      setSearching(false);
-    }
-  }, [query]);
+  const runSearch = useCallback(
+    async (qOverride?: string) => {
+      // override: typeahead picks setQuery + search in one tap — state
+      // hasn't re-rendered yet, so search the passed text directly
+      const q = (qOverride ?? query).trim();
+      if (!q) return;
+      setSearching(true);
+      try {
+        setHits(await searchSongs(q));
+        setSearchFailed(false);
+      } catch {
+        setHits([]);
+        setSearchFailed(true);
+      } finally {
+        setSearching(false);
+      }
+    },
+    [query]
+  );
+
+  /** Typeahead pick: fill the bar and run the full search for it. */
+  function pickSuggest(hit: SearchHit) {
+    const label = `${hit.title} ${hit.artist}`;
+    setQuery(label);
+    go("search");
+    void runSearch(label);
+  }
 
   function playHit(hit: SearchHit) {
     // Optimistic: Now Playing updates on the tapped metadata instantly;
@@ -927,6 +941,7 @@ return (
           runSearch();
           go("search");
         }}
+        onPickSuggest={pickSuggest}
         onClearSearch={() => {
           setQuery("");
           setHits([]);
@@ -950,6 +965,7 @@ return (
           runSearch();
           go("search");
         }}
+        onPickSuggest={pickSuggest}
         onClearSearch={() => {
           setQuery("");
           setHits([]);
@@ -1240,6 +1256,12 @@ return (
             </section>
           )}
 
+          {page === "lyrics" && (
+            <div className="md:mx-4">
+              <LyricsPage />
+            </div>
+          )}
+
           {page === "profile" && (
             <ProfilePage
               account={account}
@@ -1315,7 +1337,11 @@ return (
       </div>
 
       {/* Desktop player bar */}
-      <PlayerBar className="hidden md:flex" />
+      <PlayerBar
+        className="hidden md:flex"
+        onOpenLyrics={() => go("lyrics")}
+        lyricsActive={page === "lyrics"}
+      />
 
       {/* Mobile bottom stack */}
       <div id="bottom-stack" className="fixed inset-x-0 bottom-0 z-40 md:hidden">
