@@ -67,6 +67,8 @@ struct DzTrack {
     contributors: Vec<DzContributor>,
     #[serde(default)]
     title_short: String,
+    #[serde(default)]
+    title_version: String,
 }
 #[derive(Deserialize)]
 struct DzArtist {
@@ -242,6 +244,18 @@ fn short_title(t: &DzTrack) -> &str {
     }
 }
 
+/// Deezer can keep the version suffix separate from both `title` and
+/// `title_short`; include it when searching YouTube.
+fn qualified_title(t: &DzTrack) -> String {
+    let title = t.title.trim();
+    let version = t.title_version.trim();
+    if version.is_empty() || title.to_lowercase().contains(&version.to_lowercase()) {
+        title.to_string()
+    } else {
+        format!("{title} {version}")
+    }
+}
+
 /// Queries tried in order until one scores a confident match.
 fn search_queries(t: &DzTrack) -> Vec<String> {
     let artists = artist_string(t);
@@ -250,7 +264,7 @@ fn search_queries(t: &DzTrack) -> Vec<String> {
     // Qualified first: when the full title names a version or a feature
     // the short title drops ("X (Remix)", "X (feat. B)"), searching only
     // the short form returns plain originals to choose from.
-    let full = t.title.trim();
+    let full = qualified_title(t);
     if !full.is_empty() && full != title {
         out.push(format!("{artists} - {full}"));
     }
@@ -394,7 +408,7 @@ fn deezer_versions(t: &DzTrack) -> Vec<&'static str> {
         "tiktok", "instrumental", "acapella", "nightcore",
     ];
     const PHRASE: &[&str] = &["sped up", "slow reverb", "a cappella"];
-    let full = format!("{} {}", t.title, t.title_short).to_lowercase();
+    let full = format!("{} {} {}", t.title, t.title_short, t.title_version).to_lowercase();
     let toks: std::collections::HashSet<&str> = full
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -1673,7 +1687,9 @@ async fn api_lyrics_offset(
 ///
 /// v2: version fidelity (remix/live/… must match) + featured-artist credit
 /// + full-title query for qualified tracks.
-const MATCH_ALGO: i64 = 2;
+/// v3: Android searches the same 10 candidates per query as desktop.
+/// v4: Deezer's separate title_version field participates in matching.
+const MATCH_ALGO: i64 = 4;
 
 /// Cached Deezer->YouTube match. `fresh=true` skips the cache, and rows
 /// stamped by an older algo are treated as a miss (re-searched below).
@@ -4382,6 +4398,7 @@ mod downloader_tests {
             preview: String::new(),
             contributors: vec![],
             title_short: String::new(),
+            title_version: String::new(),
         }
     }
 
@@ -4431,6 +4448,30 @@ mod downloader_tests {
             channel: Some("Ayo - Topic".to_string()),
         };
         assert!(score(&remix, &t) > score(&original, &t));
+        assert!(is_confident(&remix, &t, score(&remix, &t)));
+        assert!(!is_confident(&original, &t, score(&original, &t)));
+    }
+
+    #[test]
+    fn separate_deezer_title_version_requires_and_searches_for_remix() {
+        let mut t = dz_track("Ayo", "Something", 200);
+        t.title_short = "Something".to_string();
+        t.title_version = "(Remix)".to_string();
+        let remix = YtEntry {
+            id: "r".to_string(),
+            title: "Ayo - Something (Remix)".to_string(),
+            duration: Some(200.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+        let original = YtEntry {
+            id: "o".to_string(),
+            title: "Ayo - Something (Official Audio)".to_string(),
+            duration: Some(180.0),
+            channel: Some("Ayo - Topic".to_string()),
+        };
+
+        assert!(search_queries(&t)[0].contains("Something (Remix)"));
+        assert!(deezer_versions(&t).contains(&"remix"));
         assert!(is_confident(&remix, &t, score(&remix, &t)));
         assert!(!is_confident(&original, &t, score(&original, &t)));
     }
@@ -4566,7 +4607,16 @@ mod downloader_tests {
                 [],
             )
             .unwrap();
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO yt_match (deezer_id, video_id, score, matched_at, algo)
+                 VALUES (124, 'old-match', 60, strftime('%s','now'), 3)",
+                [],
+            )
+            .unwrap();
         assert!(get_match(&db, 123).is_none());
+        assert!(get_match(&db, 124).is_none());
         // fresh match with the current algo: hits
         put_match(&db, 123, "right-video", 80);
         assert_eq!(get_match(&db, 123), Some(("right-video".to_string(), 80)));

@@ -59,7 +59,7 @@ def _base_params():
     return params
 
 
-def search_json(query, limit=5):
+def search_json(query, limit=10):
     """ytsearchN for a query. Returns hits or {"error": ...}."""
     try:
         from yt_dlp import YoutubeDL

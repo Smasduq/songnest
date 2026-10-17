@@ -20,15 +20,27 @@ fn sidecar_path(app: &tauri::AppHandle) -> std::path::PathBuf {
         }
     }
     if let Ok(res) = app.path().resource_dir() {
-        for name in ["bin/songnest", "songnest", "bin/songnest-cli", "songnest-cli"] {
+        for name in [
+            "bin/songnest.exe",
+            "songnest.exe",
+            "bin/songnest",
+            "songnest",
+            "bin/songnest-cli.exe",
+            "songnest-cli.exe",
+            "bin/songnest-cli",
+            "songnest-cli",
+        ] {
             let p = res.join(name);
             if p.exists() {
                 return p;
             }
         }
     }
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/debug/songnest")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if cfg!(windows) {
+        "../../target/debug/songnest.exe"
+    } else {
+        "../../target/debug/songnest"
+    })
 }
 
 /// Spawn `songnest serve --data-dir <app-data>`; the UI talks to it on :8787.
@@ -53,10 +65,15 @@ fn spawn_backend(app: &tauri::AppHandle, slot: &ChildSlot) {
         bin.display(),
         data_dir.display()
     );
-    match std::process::Command::new(&bin)
-        .args(["serve", "--data-dir", &data_dir.to_string_lossy()])
-        .spawn()
+    let mut command = std::process::Command::new(&bin);
+    command.args(["serve", "--data-dir", &data_dir.to_string_lossy()]);
+    #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    match command.spawn() {
         Ok(child) => {
             *slot.lock().unwrap() = Some(child);
         }

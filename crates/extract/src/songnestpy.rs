@@ -267,7 +267,7 @@ impl Extractor for SongnestPyExtractor {
             .ok_or_else(|| anyhow::anyhow!("songnestpy search_json: no hits array"))?;
         Ok(hits
             .iter()
-            .take(5)
+            .take(10)
             .filter_map(|e| {
                 // id is load-bearing; everything else degrades gracefully
                 // (yt-dlp durations arrive as floats, and flat search rows
