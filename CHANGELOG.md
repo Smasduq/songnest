@@ -7,7 +7,8 @@ Releases are cut from tags like `v0.2.0`.
 
 - Fixed mobile YouTube matching for remixes: search now considers more
   candidates and reads Deezer's separate version field, rejecting the
-  plain original when Deezer identifies a remix.
+  plain original when Deezer identifies a remix. Existing cached matches
+  are invalidated and searched again.
 - Fixed Windows desktop startup by locating the bundled backend executable
   and launching it without opening a console window.
 
