@@ -1,18 +1,18 @@
 name: 'publish-alpha'
 
 # Release builds for Songnest.
-# Triggers on version tag push like `v0.3.0`, or manually via workflow_dispatch.
+# Triggers on version tag push like `v0.3.1`, or manually via workflow_dispatch.
 # All jobs upload to the SAME GitHub release (tauri-action finds it by tagName).
 on:
   push:
     tags:
-      - 'v0.3.0'
+      - 'v0.3.1'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish (e.g. v0.3.0)'
+        description: 'Release tag to publish (e.g. v0.3.1)'
         required: true
-        default: 'v0.3.0'
+        default: 'v0.3.1'
 
 jobs:
   publish-desktop:
@@ -81,8 +81,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: web
-          tagName: v0.3.0
-          releaseName: 'Songnest v0.3.0'
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'Songnest ${{ github.event.inputs.tag || github.ref_name }}'
           releaseBody: |
             Publishing — full notes are attached by the release-notes job from CHANGELOG.md.
             Desktop bundles for macOS (arm64 + x64), Linux, Windows.
@@ -157,8 +157,8 @@ jobs:
           SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
         with:
           projectPath: web
-          tagName: v0.3.0
-          releaseName: 'Songnest v0.3.0'
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'Songnest ${{ github.event.inputs.tag || github.ref_name }}'
           releaseBody: |
             Publishing — full notes are attached by the release-notes job from CHANGELOG.md.
           releaseDraft: false
@@ -301,4 +301,3 @@ jobs:
           EOF
           cat /tmp/notes.md
           gh release edit "$TAG" --repo "$REPO" --title "Songnest $TAG" --notes-file /tmp/notes.md
-

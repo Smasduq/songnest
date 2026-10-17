@@ -3,6 +3,14 @@
 Songnest is a cross-platform music library and player built in Rust.
 Releases are cut from tags like `v0.2.0`.
 
+## v0.3.1 — 2026-10-17
+
+- Fixed mobile YouTube matching for remixes: search now considers more
+  candidates and reads Deezer's separate version field, rejecting the
+  plain original when Deezer identifies a remix.
+- Fixed Windows desktop startup by locating the bundled backend executable
+  and launching it without opening a console window.
+
 ## v0.3.0 — 2026-10-15
 
 - Time-synced lyrics (LRCLIB, no key): synced lines with the active line
