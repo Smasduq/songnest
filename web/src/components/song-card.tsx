@@ -300,12 +300,12 @@ export function SongCard({
             : "bg-transparent hover:bg-foreground/[0.06]"
         }`}
       ><div
-      onClick={(e) => {
-        if (!tapGuard(e)) onPlay();
-      }}
       className="group/song-content flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
         <button
         type="button"
+        onClick={(e) => {
+          if (!tapGuard(e)) onPlay();
+        }}
         aria-label={`Play ${song.title}`}
         className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-xl border-0 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent sm:h-16 sm:w-16 sm:rounded-2xl transition-transform duration-150 group-has-[:active]/song-content:scale-[0.97]"
       >
@@ -338,6 +338,9 @@ export function SongCard({
       </button>
       <button
         type="button"
+        onClick={(e) => {
+          if (!tapGuard(e)) onPlay();
+        }}
         className="min-w-0 flex-1 text-left"
       >
         <p className="truncate text-sm font-semibold text-foreground">
