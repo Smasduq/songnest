@@ -331,6 +331,7 @@ function playCurrentElement() {
 }
 
 function loadAt(index: number, startAtSeconds = 0) {
+  const requestGeneration = ++generation;
   const { queue, library } = usePlayer.getState();
   const track = combined(queue, library)[index];
   if (track === undefined) {
@@ -344,10 +345,20 @@ function loadAt(index: number, startAtSeconds = 0) {
   }
   if (track.streamUrl === "") {
     const { resolving, resolvingDz } = usePlayer.getState();
+    if (preferNativeTransport()) void nativePause();
+    else audio.pause();
     if (resolving && track.id === `dz-${resolvingDz}`) {
-      usePlayer.setState({ error: "Finding the song… (resolving audio)" });
+      usePlayer.setState({
+        playing: false,
+        buffering: false,
+        error: "Finding the song… (resolving audio)",
+      });
     } else {
-      usePlayer.setState({ error: "That track has no playable audio." });
+      usePlayer.setState({
+        playing: false,
+        buffering: false,
+        error: "That track has no playable audio.",
+      });
     }
     return;
   }
@@ -358,7 +369,11 @@ function loadAt(index: number, startAtSeconds = 0) {
     // Native owns the element-free path: hand over URL + metadata, play.
     // Progress/ended/error come back through the native state listener.
     usePlayer.setState({ buffering: true });
-    void nativeLoad(track, startAtSeconds);
+    void nativeLoad(
+      track,
+      startAtSeconds,
+      () => generation === requestGeneration
+    );
     pruneTransient();
     return;
   }
@@ -577,7 +592,6 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   playTrack: (song) => {
-    generation++;
     const {
       queue,
       library,
@@ -626,11 +640,25 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
 
   playDz: async (dz, hint, fresh = false, startAtSeconds = 0) => {
     const g = ++generation;
+    const beforeResolve = get();
+    const previousTrack = combined(beforeResolve.queue, beforeResolve.library)[
+      beforeResolve.index
+    ];
+    const previousPosition = curPos();
+    const wasPlaying = preferNativeTransport()
+      ? isNativePlaying()
+      : !audio.paused;
+    const switchingTracks =
+      hint !== undefined && previousTrack?.id !== hint.id;
+    if (switchingTracks) {
+      if (preferNativeTransport()) void nativePause();
+      else audio.pause();
+      set({ playing: false, buffering: false });
+    }
     // Optimistic Now Playing: show the tapped song immediately (cover,
-    // title, artist) while yt-dlp resolves in the background. The previous
-    // audio keeps playing until the new stream is ready — no dead silence.
+    // title, artist) while yt-dlp resolves in the background.
     if (hint !== undefined) {
-      const st = get();
+      const st = beforeResolve;
       // Drop older unresolved placeholders so spam-taps can't stack them.
       const queue = st.queue.filter(
         (t) => t.streamUrl !== "" || !st.transientIds.includes(t.id)
@@ -698,11 +726,17 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       const nextQ = s.queue.filter(
         (t) => !(t.id === pid && s.transientIds.includes(t.id))
       );
-      let index = s.index;
-      if (cur !== undefined) {
+      const previousIndex =
+        switchingTracks && previousTrack !== undefined
+          ? combined(nextQ, s.library).findIndex(
+              (track) => track.id === previousTrack.id
+            )
+          : -1;
+      let index = previousIndex;
+      if (index < 0 && cur !== undefined) {
         const qi = nextQ.findIndex((t) => t.id === cur.id);
         index = qi >= 0 ? qi : nextQ.length + (s.index - s.queue.length);
-      } else {
+      } else if (index < 0) {
         index = 0;
       }
       const total = nextQ.length + s.library.length;
@@ -713,8 +747,15 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
         resolving: false,
         resolvingDz: null,
         buffering: false,
+        playing: false,
         error: e instanceof Error ? e.message : "Couldn't play that track.",
       });
+      if (switchingTracks && previousIndex >= 0 && wasPlaying) {
+        loadAt(previousIndex, previousPosition);
+        usePlayer.setState({
+          error: e instanceof Error ? e.message : "Couldn't play that track.",
+        });
+      }
       return;
     }
     if (g !== generation) return; // a newer request already won

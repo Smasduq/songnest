@@ -279,50 +279,82 @@ function androidQueue(song: Song): AndroidQueueTrack[] {
   return queue;
 }
 
-let queueSyncPromise: Promise<void> = Promise.resolve();
+let androidCommandQueue: Promise<void> = Promise.resolve();
+
+function enqueueAndroidCommand(operation: () => Promise<void>): Promise<void> {
+  const queued = androidCommandQueue.then(operation);
+  androidCommandQueue = queued.then(
+    () => undefined,
+    () => undefined
+  );
+  return queued;
+}
 
 /** Refresh the native timeline after the user edits the upcoming queue. */
 export function nativeQueueChanged(): void {
   if (!isAndroidApp() || !nativeActive) return;
-  queueSyncPromise = queueSyncPromise
-    .then(async () => {
-      const state = usePlayer.getState();
-      if (!state.playbackStarted) return;
-      const song = [...state.queue, ...state.library][state.index];
-      if (song === undefined) return;
-      await invoke("plugin:player|set_queue", {
-        tracks: androidQueue(song),
-        startIndex: 0,
-        preservePosition: true,
-      });
-    })
-    .catch((error: unknown) => {
-      console.error(error);
-      fail("Couldn't update playback queue.");
+  void enqueueAndroidCommand(async () => {
+    const state = usePlayer.getState();
+    if (!state.playbackStarted) return;
+    const song = [...state.queue, ...state.library][state.index];
+    if (song === undefined) return;
+    await invoke("plugin:player|set_queue", {
+      tracks: androidQueue(song),
+      startIndex: 0,
+      preservePosition: true,
     });
+  }).catch((error: unknown) => {
+    console.error(error);
+    fail("Couldn't update playback queue.");
+  });
 }
 
 /** Hand the current track to ExoPlayer/AVPlayer and start it. */
-export async function nativeLoad(song: Song, startAtSeconds = 0): Promise<void> {
+export async function nativeLoad(
+  song: Song,
+  startAtSeconds = 0,
+  isCurrent: () => boolean = () => true
+): Promise<void> {
+  if (isAndroidApp()) {
+    try {
+      await enqueueAndroidCommand(async () => {
+        if (!isCurrent()) return;
+        if (!(await ensureInit())) {
+          if (isCurrent()) fail("Playback failed.");
+          return;
+        }
+        if (!isCurrent()) return;
+        await invoke("plugin:player|set_queue", {
+          tracks: androidQueue(song),
+          startIndex: 0,
+        });
+        if (!isCurrent()) return;
+        if (startAtSeconds > 0) {
+          await invoke("plugin:player|seek_to", {
+            positionMs: Math.round(startAtSeconds * 1000),
+          });
+          if (!isCurrent()) return;
+        }
+        await invoke("plugin:player|play");
+        const state = await invoke<AndroidPlayerState>(
+          "plugin:player|get_state"
+        );
+        if (isCurrent()) applyAndroidState(state);
+      });
+    } catch (e: unknown) {
+      if (isCurrent()) {
+        console.error(e);
+        fail("Playback failed.");
+      }
+    }
+    return;
+  }
+
   if (!(await ensureInit())) {
-    fail("Playback failed.");
+    if (isCurrent()) fail("Playback failed.");
     return;
   }
   try {
-    if (isAndroidApp()) {
-      await invoke("plugin:player|set_queue", {
-        tracks: androidQueue(song),
-        startIndex: 0,
-      });
-      if (startAtSeconds > 0) {
-        await invoke("plugin:player|seek_to", {
-          positionMs: Math.round(startAtSeconds * 1000),
-        });
-      }
-      await invoke("plugin:player|play");
-      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
-      return;
-    }
     const na = await plugin();
     const dz = song.id.startsWith("dz-") ? Number(song.id.slice(3)) : NaN;
     await na.setSource({
@@ -333,24 +365,40 @@ export async function nativeLoad(song: Song, startAtSeconds = 0): Promise<void> 
       artworkUrl: song.coverUrl === "" ? undefined : song.coverUrl,
     });
     if (startAtSeconds > 0) await na.seekTo(startAtSeconds);
-    applyNativeState(await na.play());
+    const state = await na.play();
+    if (isCurrent()) applyNativeState(state);
   } catch (e: unknown) {
-    console.error(e);
-    fail("Playback failed.");
+    if (isCurrent()) {
+      console.error(e);
+      fail("Playback failed.");
+    }
   }
 }
 
 export async function nativePlay(): Promise<void> {
+  if (isAndroidApp()) {
+    try {
+      await enqueueAndroidCommand(async () => {
+        if (!(await ensureInit())) {
+          fail("Playback failed.");
+          return;
+        }
+        await invoke("plugin:player|play");
+        applyAndroidState(
+          await invoke<AndroidPlayerState>("plugin:player|get_state")
+        );
+      });
+    } catch (e: unknown) {
+      console.error(e);
+      fail("Playback failed.");
+    }
+    return;
+  }
   if (!(await ensureInit())) {
     fail("Playback failed.");
     return;
   }
   try {
-    if (isAndroidApp()) {
-      await invoke("plugin:player|play");
-      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
-      return;
-    }
     applyNativeState(await (await plugin()).play());
   } catch (e: unknown) {
     console.error(e);
@@ -359,13 +407,22 @@ export async function nativePlay(): Promise<void> {
 }
 
 export async function nativePause(): Promise<void> {
+  if (isAndroidApp()) {
+    try {
+      await enqueueAndroidCommand(async () => {
+        if (!(await ensureInit())) return;
+        await invoke("plugin:player|pause");
+        applyAndroidState(
+          await invoke<AndroidPlayerState>("plugin:player|get_state")
+        );
+      });
+    } catch (e: unknown) {
+      console.error(e);
+    }
+    return;
+  }
   if (!(await ensureInit())) return;
   try {
-    if (isAndroidApp()) {
-      await invoke("plugin:player|pause");
-      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
-      return;
-    }
     applyNativeState(await (await plugin()).pause());
   } catch (e: unknown) {
     console.error(e);
@@ -373,15 +430,24 @@ export async function nativePause(): Promise<void> {
 }
 
 export async function nativeSeek(secs: number): Promise<void> {
+  if (isAndroidApp()) {
+    try {
+      await enqueueAndroidCommand(async () => {
+        if (!(await ensureInit())) return;
+        await invoke("plugin:player|seek_to", {
+          positionMs: Math.round(Math.max(0, secs) * 1000),
+        });
+        applyAndroidState(
+          await invoke<AndroidPlayerState>("plugin:player|get_state")
+        );
+      });
+    } catch (e: unknown) {
+      console.error(e);
+    }
+    return;
+  }
   if (!(await ensureInit())) return;
   try {
-    if (isAndroidApp()) {
-      await invoke("plugin:player|seek_to", {
-        positionMs: Math.round(Math.max(0, secs) * 1000),
-      });
-      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
-      return;
-    }
     applyNativeState(await (await plugin()).seekTo(secs));
   } catch (e: unknown) {
     console.error(e);
@@ -392,9 +458,11 @@ export async function nativeSeek(secs: number): Promise<void> {
 export async function nativeStop(): Promise<void> {
   try {
     if (isAndroidApp()) {
-      await invoke("plugin:player|set_queue", { tracks: [], startIndex: 0 });
-      nativePlaying = false;
-      nativePos = 0;
+      await enqueueAndroidCommand(async () => {
+        await invoke("plugin:player|set_queue", { tracks: [], startIndex: 0 });
+        nativePlaying = false;
+        nativePos = 0;
+      });
       return;
     }
     const na = await plugin();
