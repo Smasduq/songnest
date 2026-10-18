@@ -1327,7 +1327,9 @@ return (
             }
             onRemoveFromQueue={(id) => store.getState().removeFromQueue(id)}
             onPlayQueued={(id) => {
-              const found = queue.find((t) => t.id === id);
+              const found =
+                queue.find((t) => t.id === id) ??
+                library.find((t) => t.id === id);
               if (found) store.getState().playTrack(found);
             }}
             onNext={() => store.getState().next(true)}

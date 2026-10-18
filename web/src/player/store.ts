@@ -58,6 +58,10 @@ interface PlayerState {
   library: Song[];
   /** position inside [...queue, ...library] */
   index: number;
+  /** Library track that follows any explicitly queued songs. */
+  upNextId: string | null;
+  /** Whether the current queue is interrupting playback from the library. */
+  libraryContinuation: boolean;
   repeat: RepeatMode;
   shuffle: boolean;
   playing: boolean;
@@ -118,6 +122,30 @@ let stallTimer: number | undefined;
 
 function combined(queue: Song[], library: Song[]): Song[] {
   return [...queue, ...library];
+}
+
+function nextLibraryTrack(
+  song: Song,
+  library: Song[],
+  shuffle: boolean,
+  repeat: RepeatMode,
+  queuedIds: string[] = []
+): Song | undefined {
+  const current = library.findIndex((track) => track.id === song.id);
+  if (current < 0 || repeat === "one" || library.length < 2) return undefined;
+  const queued = new Set(queuedIds);
+  if (shuffle) {
+    const candidates = library.filter(
+      (track) => track.id !== song.id && !queued.has(track.id)
+    );
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+  const lastOffset = repeat === "all" ? library.length - 1 : library.length - current - 1;
+  for (let offset = 1; offset <= lastOffset; offset++) {
+    const next = library[(current + offset) % library.length];
+    if (!queued.has(next.id)) return next;
+  }
+  return undefined;
 }
 
 /**
@@ -287,6 +315,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   queue: [],
   library: [],
   index: 0,
+  upNextId: null,
+  libraryContinuation: false,
   repeat: "off",
   shuffle: false,
   playing: false,
@@ -299,7 +329,16 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   transientIds: [],
 
   setLibrary: (tracks) => {
-    const { queue, library, index } = get();
+    const {
+      queue,
+      library,
+      index,
+      upNextId,
+      libraryContinuation,
+      transientIds,
+      shuffle,
+      repeat,
+    } = get();
     // pin Now Playing to its track: library refreshes (download finished,
     // track deleted) shift positions, so follow the id instead of the slot
     const cur = [...queue, ...library][index];
@@ -309,14 +348,57 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       const at = [...queue, ...tracks].findIndex((t) => t.id === cur.id);
       if (at >= 0) nextIndex = at;
     }
-    set({ library: tracks, index: nextIndex });
+    const currentIsInLibrary =
+      cur !== undefined &&
+      index >= queue.length &&
+      library.some((track) => track.id === cur.id);
+    const nextTrack =
+      libraryContinuation && currentIsInLibrary && cur !== undefined
+        ? nextLibraryTrack(
+            cur,
+            tracks,
+            shuffle,
+            repeat,
+            queue
+              .filter((track) => !transientIds.includes(track.id))
+              .map((track) => track.id)
+          )
+        : undefined;
+    set({
+      library: tracks,
+      index: nextIndex,
+      upNextId:
+        nextTrack?.id ??
+        (upNextId !== null && tracks.some((track) => track.id === upNextId)
+          ? upNextId
+          : null),
+    });
   },
 
   playTrack: (song) => {
     generation++;
-    const { queue, library, transientIds } = get();
+    const { queue, library, transientIds, shuffle, repeat } = get();
     const idx = combined(queue, library).findIndex((t) => t.id === song.id);
     if (idx >= 0) {
+      const libraryTrack =
+        idx >= queue.length
+          ? library.find((track) => track.id === song.id)
+          : undefined;
+      if (libraryTrack !== undefined) {
+        const nextTrack = nextLibraryTrack(
+          libraryTrack,
+          library,
+          shuffle,
+          repeat,
+          queue
+            .filter((track) => !transientIds.includes(track.id))
+            .map((track) => track.id)
+        );
+        set({
+          upNextId: nextTrack?.id ?? null,
+          libraryContinuation: true,
+        });
+      }
       loadAt(idx);
       return;
     }
@@ -324,6 +406,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     set({
       queue: [song, ...queue],
       transientIds: [...transientIds, song.id],
+      upNextId: null,
+      libraryContinuation: false,
     });
     loadAt(0);
   },
@@ -343,11 +427,30 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       const at = combined(queue, st.library).findIndex(
         (t) => t.id === hint.id
       );
+      const libraryTrack =
+        at >= queue.length
+          ? st.library.find((t) => t.id === hint.id)
+          : undefined;
+      const nextTrack =
+        libraryTrack === undefined
+          ? undefined
+          : nextLibraryTrack(
+              libraryTrack,
+              st.library,
+              st.shuffle,
+              st.repeat,
+              queue
+                .filter((track) => !st.transientIds.includes(track.id))
+                .map((track) => track.id)
+            );
       if (at >= 0) {
         set({
           queue,
           index: at,
           transientIds: st.transientIds.filter((id) => liveIds.has(id)),
+          ...(libraryTrack !== undefined
+            ? { upNextId: nextTrack?.id ?? null, libraryContinuation: true }
+            : {}),
         });
       } else {
         // play-now placeholder: transient head, hidden from Up next
@@ -358,6 +461,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
             ...st.transientIds.filter((id) => liveIds.has(id)),
             hint.id,
           ],
+          upNextId: null,
+          libraryContinuation: false,
         });
       }
       set({ resolving: true, resolvingDz: dz, error: null });
@@ -412,7 +517,15 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   enqueue: (song) => {
-    const { queue, library, index, transientIds } = get();
+    const {
+      queue,
+      library,
+      index,
+      transientIds,
+      upNextId,
+      shuffle,
+      repeat,
+    } = get();
     // explicit add: it belongs in Up next even if it was a placeholder
     if (queue.some((t) => t.id === song.id)) {
       if (transientIds.includes(song.id)) {
@@ -429,7 +542,23 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (cur !== undefined && index >= queue.length) {
       nextIndex = index + 1;
     }
-    set({ queue: nextQueue, index: nextIndex });
+    const nextTrack =
+      upNextId === song.id
+        ? nextLibraryTrack(
+            song,
+            library,
+            shuffle,
+            repeat,
+            nextQueue
+              .filter((track) => !transientIds.includes(track.id))
+              .map((track) => track.id)
+          )
+        : undefined;
+    set({
+      queue: nextQueue,
+      index: nextIndex,
+      ...(upNextId === song.id ? { upNextId: nextTrack?.id ?? null } : {}),
+    });
   },
 
   setQueueOrder: (next) => {
@@ -500,11 +629,46 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   next: (manual) => {
-    const { queue, library, index, repeat, shuffle, transientIds } = get();
+    const {
+      queue,
+      library,
+      index,
+      repeat,
+      shuffle,
+      transientIds,
+      upNextId,
+      libraryContinuation,
+    } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
     const cur = combined(queue, library)[index];
     const inQueue = index < queue.length;
+    function playUpNext(): boolean {
+      if (upNextId === null) return false;
+      const libraryIndex = library.findIndex((track) => track.id === upNextId);
+      if (libraryIndex < 0) {
+        usePlayer.setState({ upNextId: null });
+        return false;
+      }
+      const track = library[libraryIndex];
+      const following = nextLibraryTrack(
+        track,
+        library,
+        shuffle,
+        repeat,
+        queue
+          .filter(
+            (queued, i) => i > index && !transientIds.includes(queued.id)
+          )
+          .map((queued) => queued.id)
+      );
+      usePlayer.setState({
+        upNextId: following?.id ?? null,
+        libraryContinuation: true,
+      });
+      loadAt(queue.length + libraryIndex);
+      return true;
+    }
     // Queued songs come first: whenever the current song is out in the
     // library and Up next holds an explicitly added song, that song is
     // next — both for auto-advance (ended) and manual skip.
@@ -514,6 +678,22 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       );
       if (qi >= 0) {
         loadAt(qi);
+        return;
+      }
+      if (playUpNext()) return;
+    } else if (libraryContinuation) {
+      const ahead = queue.findIndex(
+        (t, i) =>
+          i > index && !transientIds.includes(t.id) && t.id !== cur?.id
+      );
+      if (ahead >= 0) {
+        loadAt(ahead);
+        return;
+      }
+      if (playUpNext()) return;
+      if (!manual && repeat === "off") {
+        if (preferNativeTransport()) void nativePause();
+        else audio.pause();
         return;
       }
     } else if (shuffle && total > 1) {
@@ -626,12 +806,54 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     set({ muted: next });
   },
 
-  cycleRepeat: () =>
-    set((s) => ({
-      repeat: s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off",
-    })),
+  cycleRepeat: () => {
+    const s = get();
+    const repeat =
+      s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off";
+    const current = combined(s.queue, s.library)[s.index];
+    const nextTrack =
+      current !== undefined && s.index >= s.queue.length
+        ? nextLibraryTrack(
+            current,
+            s.library,
+            s.shuffle,
+            repeat,
+            s.queue
+              .filter((track) => !s.transientIds.includes(track.id))
+              .map((track) => track.id)
+          )
+        : undefined;
+    set({
+      repeat,
+      ...(s.index >= s.queue.length
+        ? { upNextId: nextTrack?.id ?? null }
+        : {}),
+    });
+  },
 
-  toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
+  toggleShuffle: () => {
+    const s = get();
+    const shuffle = !s.shuffle;
+    const current = combined(s.queue, s.library)[s.index];
+    const nextTrack =
+      current !== undefined && s.index >= s.queue.length
+        ? nextLibraryTrack(
+            current,
+            s.library,
+            shuffle,
+            s.repeat,
+            s.queue
+              .filter((track) => !s.transientIds.includes(track.id))
+              .map((track) => track.id)
+          )
+        : undefined;
+    set({
+      shuffle,
+      ...(s.index >= s.queue.length
+        ? { upNextId: nextTrack?.id ?? null }
+        : {}),
+    });
+  },
 
   clearError: () => set({ error: null }),
 }));

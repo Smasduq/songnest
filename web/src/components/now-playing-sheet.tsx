@@ -51,8 +51,15 @@ export function NowPlayingSheet({
   const repeat = usePlayer((s) => s.repeat);
   const shuffle = usePlayer((s) => s.shuffle);
   const queue = usePlayer((s) => s.queue);
+  const library = usePlayer((s) => s.library);
   const transientIds = usePlayer((s) => s.transientIds);
-  const queuedCount = queue.filter((t) => !transientIds.includes(t.id)).length;
+  const upNextId = usePlayer((s) => s.upNextId);
+  const queuedCount =
+    queue.filter((t) => !transientIds.includes(t.id)).length +
+    (upNextId !== null &&
+    !queue.some((t) => t.id === upNextId && !transientIds.includes(t.id))
+      ? 1
+      : 0);
   const index = usePlayer((s) => s.index);
   const { currentTime, duration } = useTime();
   const [showQueue, setShowQueue] = useState(false);
@@ -416,7 +423,9 @@ export function NowPlayingSheet({
                   queue={queue}
                   activeId={index < queue.length ? queue[index].id : null}
                   onPlay={(id) => {
-                    const found = queue.find((t) => t.id === id);
+                    const found =
+                      queue.find((t) => t.id === id) ??
+                      library.find((t) => t.id === id);
                     if (found) st.playTrack(found);
                   }}
                   onRemove={(id) => st.removeFromQueue(id)}

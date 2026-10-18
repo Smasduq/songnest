@@ -23,10 +23,15 @@ export function QueueList({
 }) {
   const reorder = usePlayer((s) => s.setQueueOrder);
   const transientIds = usePlayer((s) => s.transientIds);
-  // play-now placeholders never appear: only explicitly added songs do
+  const library = usePlayer((s) => s.library);
+  const upNextId = usePlayer((s) => s.upNextId);
+  // play-now placeholders never appear
   const visible = queue.filter((t) => !transientIds.includes(t.id));
+  const upNext = library.find((track) => track.id === upNextId);
+  const showUpNext =
+    upNext !== undefined && !visible.some((track) => track.id === upNext.id);
 
-  if (visible.length === 0) {
+  if (visible.length === 0 && !showUpNext) {
     return (
       <EmptyState
         icon={ListMusic}
@@ -38,27 +43,75 @@ export function QueueList({
   }
 
   return (
-    <Reorder.Group
-      as="ul"
-      axis="y"
-      values={visible}
-      onReorder={(v) => {
-        // keep placeholders pinned at the head, reorder the rest
-        const pinned = queue.filter((t) => transientIds.includes(t.id));
-        reorder([...pinned, ...v]);
-      }}
-      className="space-y-1.5"
-    >
-      {visible.map((t) => (
-        <QueueRow
-          key={t.id}
-          song={t}
-          active={t.id === activeId}
-          onPlay={() => onPlay(t.id)}
-          onRemove={() => onRemove(t.id)}
-        />
-      ))}
-    </Reorder.Group>
+    <div className="space-y-1.5">
+      {visible.length > 0 && (
+        <Reorder.Group
+          as="ul"
+          axis="y"
+          values={visible}
+          onReorder={(v) => {
+            // keep placeholders pinned at the head, reorder the rest
+            const pinned = queue.filter((t) => transientIds.includes(t.id));
+            reorder([...pinned, ...v]);
+          }}
+          className="space-y-1.5"
+        >
+          {visible.map((t) => (
+            <QueueRow
+              key={t.id}
+              song={t}
+              active={t.id === activeId}
+              onPlay={() => onPlay(t.id)}
+              onRemove={() => onRemove(t.id)}
+            />
+          ))}
+        </Reorder.Group>
+      )}
+      {showUpNext && upNext !== undefined && (
+        <UpcomingLibraryRow song={upNext} onPlay={() => onPlay(upNext.id)} />
+      )}
+    </div>
+  );
+}
+
+function UpcomingLibraryRow({
+  song,
+  onPlay,
+}: {
+  song: Song;
+  onPlay: () => void;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onPlay}
+        aria-label={`Play ${song.title}`}
+        className="flex w-full items-center gap-2 rounded-2xl border border-border/30 bg-background/50 px-2 py-1.5 text-left"
+      >
+        <span className="h-8 w-6 flex-shrink-0" aria-hidden />
+        <span className="relative h-11 w-11 flex-shrink-0 overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-foreground/30 via-foreground/10 to-transparent">
+          {song.coverUrl !== "" && (
+            <img
+              src={song.coverUrl}
+              alt={`${song.album} cover`}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              draggable={false}
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-foreground">
+            {song.title}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            Next from library · {song.artist}
+          </span>
+        </span>
+        <Play className="mr-2 h-4 w-4 flex-shrink-0 fill-foreground text-foreground" aria-hidden />
+      </button>
+    </div>
   );
 }
 
