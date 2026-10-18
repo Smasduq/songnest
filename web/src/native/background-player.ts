@@ -18,7 +18,7 @@
  */
 
 import type { Song } from "@/lib/api";
-import { usePlayer, useTime } from "@/player/store";
+import { persistPlaybackPosition, usePlayer, useTime } from "@/player/store";
 import type { NativeAudioState } from "tauri-plugin-native-audio-api";
 
 /** Payloads the Rust tray sends on `player-control` (see player.rs). */
@@ -115,6 +115,7 @@ function applyNativeState(st: NativeAudioState): void {
   nativeDur = st.duration;
   lastNativeAt = performance.now();
   useTime.setState({ currentTime: nativePos, duration: nativeDur });
+  persistPlaybackPosition();
   if (st.status === "playing") {
     nativePlaying = true;
     usePlayer.setState({ playing: true, buffering: false });
@@ -162,6 +163,7 @@ function ensurePositionPoll(): void {
         nativeDur = st.duration;
         lastNativeAt = performance.now();
         useTime.setState({ currentTime: nativePos, duration: nativeDur });
+        persistPlaybackPosition();
       })
       .catch(() => {
         // transient JNI miss — next tick retries
@@ -186,7 +188,7 @@ async function doInit(): Promise<void> {
 }
 
 /** Hand the current track to ExoPlayer/AVPlayer and start it. */
-export async function nativeLoad(song: Song): Promise<void> {
+export async function nativeLoad(song: Song, startAtSeconds = 0): Promise<void> {
   if (!(await ensureInit())) {
     fail("Playback failed.");
     return;
@@ -201,6 +203,7 @@ export async function nativeLoad(song: Song): Promise<void> {
       artist: song.artist,
       artworkUrl: song.coverUrl === "" ? undefined : song.coverUrl,
     });
+    if (startAtSeconds > 0) await na.seekTo(startAtSeconds);
     applyNativeState(await na.play());
   } catch (e: unknown) {
     console.error(e);

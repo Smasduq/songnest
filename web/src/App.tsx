@@ -230,6 +230,7 @@ export default function App() {
     try {
       const library = await fetchLibrary();
       store.getState().setLibrary(library);
+      store.getState().restoreLastPlayback();
       // Seed the downloaded set from what's on disk (covers installs
       // from before this registry existed, and other devices' files
       // are naturally excluded — localStorage is per device).
@@ -453,7 +454,7 @@ export default function App() {
 
   function addToQueue(song: Song) {
     const st = store.getState();
-    const already = st.queue.some((t) => t.id === song.id);
+    const already = st.pendingQueueIds.includes(song.id);
     // optimistic: visible in Up next immediately, even from other pages
     // while something else plays; streams resolve in the background
     st.enqueue(song);
@@ -1327,9 +1328,13 @@ return (
             }
             onRemoveFromQueue={(id) => store.getState().removeFromQueue(id)}
             onPlayQueued={(id) => {
-              const found =
-                queue.find((t) => t.id === id) ??
-                library.find((t) => t.id === id);
+              const state = store.getState();
+              const found = state.pendingQueueIds.includes(id)
+                ? queue.find((t) => t.id === id)
+                : state.upNextIds.includes(id)
+                  ? library.find((t) => t.id === id)
+                  : queue.find((t) => t.id === id) ??
+                    library.find((t) => t.id === id);
               if (found) store.getState().playTrack(found);
             }}
             onNext={() => store.getState().next(true)}

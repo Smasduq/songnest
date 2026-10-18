@@ -23,20 +23,27 @@ export function QueueList({
 }) {
   const reorder = usePlayer((s) => s.setQueueOrder);
   const transientIds = usePlayer((s) => s.transientIds);
+  const pendingQueueIds = usePlayer((s) => s.pendingQueueIds);
   const library = usePlayer((s) => s.library);
-  const upNextId = usePlayer((s) => s.upNextId);
-  // play-now placeholders never appear
-  const visible = queue.filter((t) => !transientIds.includes(t.id));
-  const upNext = library.find((track) => track.id === upNextId);
-  const showUpNext =
-    upNext !== undefined && !visible.some((track) => track.id === upNext.id);
+  const upNextIds = usePlayer((s) => s.upNextIds);
+  const visible = pendingQueueIds
+    .map((id) => queue.find((track) => track.id === id))
+    .filter(
+      (track): track is Song =>
+        track !== undefined &&
+        track.id !== activeId &&
+        !transientIds.includes(track.id)
+    );
+  const upcomingLibrary = upNextIds
+    .map((id) => library.find((track) => track.id === id))
+    .filter((track): track is Song => track !== undefined && track.id !== activeId);
 
-  if (visible.length === 0 && !showUpNext) {
+  if (visible.length === 0 && upcomingLibrary.length === 0) {
     return (
       <EmptyState
         icon={ListMusic}
         variant="inline"
-        title="Queue is empty"
+        title="Nothing up next"
         body="Swipe a song right or use ⋯ → Add to queue."
       />
     );
@@ -50,9 +57,7 @@ export function QueueList({
           axis="y"
           values={visible}
           onReorder={(v) => {
-            // keep placeholders pinned at the head, reorder the rest
-            const pinned = queue.filter((t) => transientIds.includes(t.id));
-            reorder([...pinned, ...v]);
+            reorder(v);
           }}
           className="space-y-1.5"
         >
@@ -60,16 +65,19 @@ export function QueueList({
             <QueueRow
               key={t.id}
               song={t}
-              active={t.id === activeId}
               onPlay={() => onPlay(t.id)}
               onRemove={() => onRemove(t.id)}
             />
           ))}
         </Reorder.Group>
       )}
-      {showUpNext && upNext !== undefined && (
-        <UpcomingLibraryRow song={upNext} onPlay={() => onPlay(upNext.id)} />
-      )}
+      {upcomingLibrary.map((song) => (
+        <UpcomingLibraryRow
+          key={song.id}
+          song={song}
+          onPlay={() => onPlay(song.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -117,12 +125,10 @@ function UpcomingLibraryRow({
 
 function QueueRow({
   song,
-  active,
   onPlay,
   onRemove,
 }: {
   song: Song;
-  active: boolean;
   onPlay: () => void;
   onRemove: () => void;
 }) {
@@ -165,11 +171,7 @@ function QueueRow({
             onRemove();
           }
         }}
-        className={`relative flex touch-pan-y items-center gap-2 rounded-2xl border px-2 py-1.5 ${
-          active
-            ? "border-primary/40 bg-primary/10"
-            : "border-border/30 bg-background/50"
-        }`}
+        className="relative flex touch-pan-y items-center gap-2 rounded-2xl border border-border/30 bg-background/50 px-2 py-1.5"
       >
         {/* drag handle: vertical reorder only starts here */}
         <button
@@ -196,14 +198,6 @@ function QueueRow({
               draggable={false}
             />
           )}
-          {active && (
-            <span
-              aria-hidden
-              className="absolute inset-0 flex items-center justify-center bg-background/50"
-            >
-              <Play className="h-4 w-4 fill-foreground text-foreground" />
-            </span>
-          )}
         </button>
         <button
           type="button"
@@ -216,7 +210,7 @@ function QueueRow({
             {song.title}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            {song.artist}
+            Queued · {song.artist}
           </p>
         </button>
       </motion.div>

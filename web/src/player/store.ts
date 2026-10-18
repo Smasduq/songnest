@@ -30,6 +30,7 @@ const VOL_KEY = "songnest-volume";
 // volume-slider mis-tap — volume-to-0 used to set the mute flag, so every
 // song after that started silent ("auto muted"). Everyone starts clean.
 const MUTE_KEY = "songnest-muted-v2";
+const LAST_PLAYBACK_KEY = "songnest-last-playback";
 
 try {
   // Missing key (fresh install) must keep the element default of 1:
@@ -58,12 +59,13 @@ interface PlayerState {
   library: Song[];
   /** position inside [...queue, ...library] */
   index: number;
-  /** Library track that follows any explicitly queued songs. */
-  upNextId: string | null;
-  /** Whether the current queue is interrupting playback from the library. */
-  libraryContinuation: boolean;
+  /** Explicitly queued songs that have not started playing yet. */
+  pendingQueueIds: string[];
+  /** Planned library tracks that follow the explicit queue. */
+  upNextIds: string[];
   repeat: RepeatMode;
   shuffle: boolean;
+  playbackStarted: boolean;
   playing: boolean;
   volume: number;
   muted: boolean;
@@ -80,8 +82,14 @@ interface PlayerState {
    */
   transientIds: string[];
   setLibrary: (tracks: Song[]) => void;
+  restoreLastPlayback: () => void;
   playTrack: (song: Song) => void;
-  playDz: (dz: number, hint?: Song, fresh?: boolean) => Promise<void>;
+  playDz: (
+    dz: number,
+    hint?: Song,
+    fresh?: boolean,
+    startAtSeconds?: number
+  ) => Promise<void>;
   enqueue: (song: Song) => void;
   removeFromQueue: (id: string) => void;
   /** drag-reorder the queue; the playing index follows its track. */
@@ -119,33 +127,42 @@ let generation = 0;
 /** Error-recovery budget, reset on every fresh load. */
 let retriesLeft = 1;
 let stallTimer: number | undefined;
+let lastPlaybackPersistedAt = 0;
+let restoreAttempted = false;
 
 function combined(queue: Song[], library: Song[]): Song[] {
   return [...queue, ...library];
 }
 
-function nextLibraryTrack(
+function planLibraryTracks(
   song: Song,
   library: Song[],
   shuffle: boolean,
   repeat: RepeatMode,
   queuedIds: string[] = []
-): Song | undefined {
+): string[] {
   const current = library.findIndex((track) => track.id === song.id);
-  if (current < 0 || repeat === "one" || library.length < 2) return undefined;
+  if (current < 0 || repeat === "one" || library.length === 0) return [];
   const queued = new Set(queuedIds);
+  let future: Song[];
   if (shuffle) {
-    const candidates = library.filter(
+    future = library.filter(
       (track) => track.id !== song.id && !queued.has(track.id)
     );
-    return candidates[Math.floor(Math.random() * candidates.length)];
+    for (let i = future.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [future[i], future[j]] = [future[j], future[i]];
+    }
+  } else {
+    const length =
+      repeat === "all" ? library.length - 1 : library.length - current - 1;
+    future = Array.from(
+      { length },
+      (_, i) => library[(current + i + 1) % library.length]
+    );
   }
-  const lastOffset = repeat === "all" ? library.length - 1 : library.length - current - 1;
-  for (let offset = 1; offset <= lastOffset; offset++) {
-    const next = library[(current + offset) % library.length];
-    if (!queued.has(next.id)) return next;
-  }
-  return undefined;
+  if (repeat === "all" && !queued.has(song.id)) future.push(song);
+  return future.filter((track) => !queued.has(track.id)).map((track) => track.id);
 }
 
 /**
@@ -160,6 +177,115 @@ function curPos(): number {
 
 function curDur(): number {
   return preferNativeTransport() ? nativeDuration() : audio.duration || 0;
+}
+
+interface SavedPlayback {
+  trackId: string;
+  position: number;
+  song: Omit<Song, "streamUrl">;
+}
+
+function isSavedSong(value: unknown): value is SavedPlayback["song"] {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("id" in value) ||
+    typeof value.id !== "string" ||
+    !("title" in value) ||
+    typeof value.title !== "string" ||
+    !("artist" in value) ||
+    typeof value.artist !== "string" ||
+    !("album" in value) ||
+    typeof value.album !== "string" ||
+    !("duration" in value) ||
+    typeof value.duration !== "number" ||
+    !Number.isFinite(value.duration) ||
+    !("coverUrl" in value) ||
+    typeof value.coverUrl !== "string"
+  ) {
+    return false;
+  }
+  return (
+    !("deezerId" in value) ||
+    value.deezerId === null ||
+    (typeof value.deezerId === "number" && Number.isFinite(value.deezerId))
+  );
+}
+
+function readLastPlayback(): SavedPlayback | null {
+  try {
+    const raw = localStorage.getItem(LAST_PLAYBACK_KEY);
+    if (raw === null) return null;
+    const saved: unknown = JSON.parse(raw);
+    if (
+      typeof saved !== "object" ||
+      saved === null ||
+      !("trackId" in saved) ||
+      typeof saved.trackId !== "string" ||
+      !("position" in saved) ||
+      typeof saved.position !== "number" ||
+      !Number.isFinite(saved.position) ||
+      saved.position < 0 ||
+      !("song" in saved) ||
+      !isSavedSong(saved.song) ||
+      saved.song.id !== saved.trackId
+    ) {
+      return null;
+    }
+    return {
+      trackId: saved.trackId,
+      position: saved.position,
+      song: saved.song,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function persistPlaybackPosition(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastPlaybackPersistedAt < 3000) return;
+  const state = usePlayer.getState();
+  const track = combined(state.queue, state.library)[state.index];
+  if (track === undefined) return;
+  const position =
+    preferNativeTransport() || audio.getAttribute("src") === track.streamUrl
+      ? curPos()
+      : 0;
+  savePlayback(track, position);
+}
+
+function savePlayback(track: Song, position: number): void {
+  try {
+    localStorage.setItem(
+      LAST_PLAYBACK_KEY,
+      JSON.stringify({
+        trackId: track.id,
+        position: Math.max(0, position),
+        song: {
+          id: track.id,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          duration: track.duration,
+          coverUrl: track.coverUrl,
+          ...(track.deezerId !== undefined
+            ? { deezerId: track.deezerId }
+            : {}),
+        },
+      } satisfies SavedPlayback)
+    );
+    lastPlaybackPersistedAt = Date.now();
+  } catch {
+    // Storage full or blocked; playback remains available for this session.
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => persistPlaybackPosition(true));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") persistPlaybackPosition(true);
+  });
 }
 
 /** Drop play-now placeholders that are no longer current. The playing
@@ -201,11 +327,15 @@ function playCurrentElement() {
   });
 }
 
-function loadAt(index: number) {
+function loadAt(index: number, startAtSeconds = 0) {
   const { queue, library } = usePlayer.getState();
   const track = combined(queue, library)[index];
   if (track === undefined) {
-    usePlayer.setState({ playing: false, buffering: false });
+    usePlayer.setState({
+      playing: false,
+      buffering: false,
+      playbackStarted: false,
+    });
     pruneTransient();
     return;
   }
@@ -219,12 +349,13 @@ function loadAt(index: number) {
     return;
   }
   retriesLeft = 1;
-  usePlayer.setState({ index, error: null });
+  usePlayer.setState({ index, error: null, playbackStarted: true });
+  savePlayback(track, startAtSeconds);
   if (preferNativeTransport()) {
     // Native owns the element-free path: hand over URL + metadata, play.
     // Progress/ended/error come back through the native state listener.
     usePlayer.setState({ buffering: true });
-    void nativeLoad(track);
+    void nativeLoad(track, startAtSeconds);
     pruneTransient();
     return;
   }
@@ -233,6 +364,25 @@ function loadAt(index: number) {
     // streams buffer over the network; downloaded tracks play off disk,
     // so they never raise the "getting ready" state (a stale one clears)
     usePlayer.setState({ buffering: !track.id.startsWith("db-") });
+  }
+  if (startAtSeconds > 0) {
+    const seekAndPlay = () => {
+      audio.removeEventListener("loadedmetadata", seekAndPlay);
+      if (audio.getAttribute("src") !== track.streamUrl) return;
+      audio.currentTime = Math.max(
+        0,
+        Math.min(
+          startAtSeconds,
+          audio.duration > 0 ? audio.duration - 1 : startAtSeconds
+        )
+      );
+      useTime.setState({ currentTime: audio.currentTime });
+      playCurrentElement();
+    };
+    if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) seekAndPlay();
+    else audio.addEventListener("loadedmetadata", seekAndPlay);
+    pruneTransient();
+    return;
   }
   playCurrentElement();
   pruneTransient();
@@ -278,9 +428,10 @@ function recoverStream() {
 }
 
 audio.addEventListener("play", () => usePlayer.setState({ playing: true }));
-audio.addEventListener("pause", () =>
-  usePlayer.setState({ playing: false, buffering: false })
-);
+audio.addEventListener("pause", () => {
+  usePlayer.setState({ playing: false, buffering: false });
+  persistPlaybackPosition(true);
+});
 audio.addEventListener("waiting", () =>
   usePlayer.setState({ buffering: true })
 );
@@ -306,6 +457,7 @@ audio.addEventListener("playing", () => {
 audio.addEventListener("timeupdate", () => {
   window.clearTimeout(stallTimer);
   useTime.setState({ currentTime: audio.currentTime });
+  persistPlaybackPosition();
 });
 audio.addEventListener("loadedmetadata", () => {
   useTime.setState({ currentTime: 0, duration: audio.duration || 0 });
@@ -315,10 +467,11 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   queue: [],
   library: [],
   index: 0,
-  upNextId: null,
-  libraryContinuation: false,
+  pendingQueueIds: [],
+  upNextIds: [],
   repeat: "off",
   shuffle: false,
+  playbackStarted: false,
   playing: false,
   volume: audio.volume,
   muted: audio.muted,
@@ -333,8 +486,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       queue,
       library,
       index,
-      upNextId,
-      libraryContinuation,
+      pendingQueueIds,
+      upNextIds,
       transientIds,
       shuffle,
       repeat,
@@ -352,53 +505,109 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       cur !== undefined &&
       index >= queue.length &&
       library.some((track) => track.id === cur.id);
-    const nextTrack =
-      libraryContinuation && currentIsInLibrary && cur !== undefined
-        ? nextLibraryTrack(
+    const queuedIds = pendingQueueIds.filter(
+      (id) => !transientIds.includes(id)
+    );
+    const nextIds =
+      currentIsInLibrary && cur !== undefined
+        ? planLibraryTracks(
             cur,
             tracks,
             shuffle,
             repeat,
-            queue
-              .filter((track) => !transientIds.includes(track.id))
-              .map((track) => track.id)
+            queuedIds
           )
-        : undefined;
+        : upNextIds.filter(
+            (id) =>
+              tracks.some((track) => track.id === id) &&
+              !queuedIds.includes(id)
+          );
     set({
       library: tracks,
       index: nextIndex,
-      upNextId:
-        nextTrack?.id ??
-        (upNextId !== null && tracks.some((track) => track.id === upNextId)
-          ? upNextId
-          : null),
+      upNextIds: nextIds,
     });
+  },
+
+  restoreLastPlayback: () => {
+    const state = get();
+    if (state.playbackStarted || restoreAttempted) return;
+    const saved = readLastPlayback();
+    if (saved === null) return;
+    const index = state.library.findIndex(
+      (track) =>
+        track.id === saved.trackId ||
+        (saved.song.deezerId != null &&
+          track.deezerId === saved.song.deezerId)
+    );
+    if (index >= 0) {
+      const track = state.library[index];
+      if (track.streamUrl !== "") {
+        restoreAttempted = true;
+        set({
+          pendingQueueIds: [],
+          upNextIds: planLibraryTracks(
+            track,
+            state.library,
+            state.shuffle,
+            state.repeat
+          ),
+        });
+        loadAt(
+          state.queue.length + index,
+          Math.min(saved.position, Math.max(track.duration - 1, 0))
+        );
+        return;
+      }
+    }
+    const match = /^dz-(\d+)$/.exec(saved.song.id);
+    const deezerId = saved.song.deezerId ?? (match ? Number(match[1]) : null);
+    if (deezerId === null) return;
+    restoreAttempted = true;
+    void get().playDz(
+      deezerId,
+      { ...saved.song, deezerId, streamUrl: "" },
+      false,
+      saved.position
+    );
   },
 
   playTrack: (song) => {
     generation++;
-    const { queue, library, transientIds, shuffle, repeat } = get();
-    const idx = combined(queue, library).findIndex((t) => t.id === song.id);
+    const {
+      queue,
+      library,
+      transientIds,
+      pendingQueueIds,
+      shuffle,
+      repeat,
+    } = get();
+    const queueIndex = queue.findIndex((t) => t.id === song.id);
+    const libraryIndex = library.findIndex((t) => t.id === song.id);
+    const idx =
+      pendingQueueIds.includes(song.id) && queueIndex >= 0
+        ? queueIndex
+        : libraryIndex >= 0
+          ? queue.length + libraryIndex
+          : queueIndex;
     if (idx >= 0) {
+      const nextPending = pendingQueueIds.filter((id) => id !== song.id);
       const libraryTrack =
-        idx >= queue.length
-          ? library.find((track) => track.id === song.id)
-          : undefined;
-      if (libraryTrack !== undefined) {
-        const nextTrack = nextLibraryTrack(
-          libraryTrack,
-          library,
-          shuffle,
-          repeat,
-          queue
-            .filter((track) => !transientIds.includes(track.id))
-            .map((track) => track.id)
-        );
-        set({
-          upNextId: nextTrack?.id ?? null,
-          libraryContinuation: true,
-        });
-      }
+        idx >= queue.length ? library[idx - queue.length] : undefined;
+      set({
+        pendingQueueIds: nextPending,
+        ...(libraryTrack !== undefined
+          ? {
+              upNextIds: planLibraryTracks(
+                libraryTrack,
+                library,
+                shuffle,
+                repeat,
+                nextPending
+              ),
+            }
+          : {}),
+      });
       loadAt(idx);
       return;
     }
@@ -406,13 +615,12 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     set({
       queue: [song, ...queue],
       transientIds: [...transientIds, song.id],
-      upNextId: null,
-      libraryContinuation: false,
+      upNextIds: [],
     });
     loadAt(0);
   },
 
-  playDz: async (dz, hint, fresh = false) => {
+  playDz: async (dz, hint, fresh = false, startAtSeconds = 0) => {
     const g = ++generation;
     // Optimistic Now Playing: show the tapped song immediately (cover,
     // title, artist) while yt-dlp resolves in the background. The previous
@@ -424,32 +632,37 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
         (t) => t.streamUrl !== "" || !st.transientIds.includes(t.id)
       );
       const liveIds = new Set(queue.map((t) => t.id));
-      const at = combined(queue, st.library).findIndex(
-        (t) => t.id === hint.id
-      );
+      const queueIndex = queue.findIndex((t) => t.id === hint.id);
+      const libraryIndex = st.library.findIndex((t) => t.id === hint.id);
+      const targetIndex =
+        st.pendingQueueIds.includes(hint.id) && queueIndex >= 0
+          ? queueIndex
+          : libraryIndex >= 0
+            ? queue.length + libraryIndex
+            : queueIndex >= 0
+              ? queueIndex
+              : -1;
       const libraryTrack =
-        at >= queue.length
-          ? st.library.find((t) => t.id === hint.id)
+        targetIndex >= queue.length && libraryIndex >= 0
+          ? st.library[libraryIndex]
           : undefined;
-      const nextTrack =
-        libraryTrack === undefined
-          ? undefined
-          : nextLibraryTrack(
-              libraryTrack,
-              st.library,
-              st.shuffle,
-              st.repeat,
-              queue
-                .filter((track) => !st.transientIds.includes(track.id))
-                .map((track) => track.id)
-            );
-      if (at >= 0) {
+      const nextPending = st.pendingQueueIds.filter((id) => id !== hint.id);
+      if (targetIndex >= 0) {
         set({
           queue,
-          index: at,
+          index: targetIndex,
           transientIds: st.transientIds.filter((id) => liveIds.has(id)),
+          pendingQueueIds: nextPending,
           ...(libraryTrack !== undefined
-            ? { upNextId: nextTrack?.id ?? null, libraryContinuation: true }
+            ? {
+                upNextIds: planLibraryTracks(
+                  libraryTrack,
+                  st.library,
+                  st.shuffle,
+                  st.repeat,
+                  nextPending
+                ),
+              }
             : {}),
         });
       } else {
@@ -461,8 +674,8 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
             ...st.transientIds.filter((id) => liveIds.has(id)),
             hint.id,
           ],
-          upNextId: null,
-          libraryContinuation: false,
+          pendingQueueIds: nextPending,
+          upNextIds: [],
         });
       }
       set({ resolving: true, resolvingDz: dz, error: null });
@@ -503,13 +716,22 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (g !== generation) return; // a newer request already won
     // Swap the placeholder for the resolved stream in place, then play it.
     const { queue, library } = get();
-    const at = combined(queue, library).findIndex((t) => t.id === song.id);
+    const resolvedQueueIndex = queue.findIndex((t) => t.id === song.id);
+    const resolvedLibraryIndex = library.findIndex((t) => t.id === song.id);
+    const resolvedState = get();
+    const at =
+      resolvedState.pendingQueueIds.includes(song.id) &&
+      resolvedQueueIndex >= 0
+        ? resolvedQueueIndex
+        : resolvedLibraryIndex >= 0
+          ? queue.length + resolvedLibraryIndex
+          : resolvedQueueIndex;
     if (at >= 0) {
       const next = [...queue];
       const qi = queue.findIndex((t) => t.id === song.id);
       if (qi >= 0) next[qi] = song;
       set({ queue: next, resolving: false, resolvingDz: null });
-      loadAt(at);
+      loadAt(at, startAtSeconds);
     } else {
       set({ resolving: false, resolvingDz: null });
       get().playTrack(song);
@@ -522,14 +744,21 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       library,
       index,
       transientIds,
-      upNextId,
-      shuffle,
-      repeat,
+      pendingQueueIds,
     } = get();
     // explicit add: it belongs in Up next even if it was a placeholder
     if (queue.some((t) => t.id === song.id)) {
       if (transientIds.includes(song.id)) {
-        set({ transientIds: transientIds.filter((id) => id !== song.id) });
+        set({
+          transientIds: transientIds.filter((id) => id !== song.id),
+          pendingQueueIds: [...pendingQueueIds, song.id],
+          upNextIds: get().upNextIds.filter((id) => id !== song.id),
+        });
+      } else if (!pendingQueueIds.includes(song.id)) {
+        set({
+          pendingQueueIds: [...pendingQueueIds, song.id],
+          upNextIds: get().upNextIds.filter((id) => id !== song.id),
+        });
       }
       return;
     }
@@ -542,35 +771,38 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     if (cur !== undefined && index >= queue.length) {
       nextIndex = index + 1;
     }
-    const nextTrack =
-      upNextId === song.id
-        ? nextLibraryTrack(
-            song,
-            library,
-            shuffle,
-            repeat,
-            nextQueue
-              .filter((track) => !transientIds.includes(track.id))
-              .map((track) => track.id)
-          )
-        : undefined;
     set({
       queue: nextQueue,
       index: nextIndex,
-      ...(upNextId === song.id ? { upNextId: nextTrack?.id ?? null } : {}),
+      pendingQueueIds: [...pendingQueueIds, song.id],
+      upNextIds: get().upNextIds.filter((id) => id !== song.id),
     });
   },
 
   setQueueOrder: (next) => {
-    const { queue, library, index } = get();
+    const { queue, library, index, pendingQueueIds } = get();
     const cur = combined(queue, library)[index];
-    set({ queue: next });
-    // same length: library positions are unaffected; only follow the
-    // track when the now-playing one lives inside the queue
-    if (cur !== undefined) {
-      const at = next.findIndex((t) => t.id === cur.id);
-      if (at >= 0) set({ index: at });
-    }
+    const pending = new Set(pendingQueueIds);
+    const historical = queue.filter((track) => !pending.has(track.id));
+    const orderedPending = next.filter((track) => pending.has(track.id));
+    const nextQueue = [...historical, ...orderedPending];
+    const currentIndex =
+      cur === undefined
+        ? -1
+        : nextQueue.findIndex((track) => track.id === cur.id);
+    const libraryIndex =
+      cur === undefined
+        ? -1
+        : library.findIndex((track) => track.id === cur.id);
+    set({
+      queue: nextQueue,
+      pendingQueueIds: orderedPending.map((track) => track.id),
+      ...(currentIndex >= 0
+        ? { index: currentIndex }
+        : libraryIndex >= 0
+          ? { index: nextQueue.length + libraryIndex }
+          : {}),
+    });
   },
 
   swapQueued: (id, song) => {
@@ -583,7 +815,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   removeFromQueue: (id) => {
-    const { queue, library, index, transientIds } = get();
+    const { queue, library, index, transientIds, pendingQueueIds } = get();
     const qi = queue.findIndex((t) => t.id === id);
     if (qi < 0) return;
     const next = queue.filter((t) => t.id !== id);
@@ -592,6 +824,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       set({
         queue: next,
         transientIds: live,
+        pendingQueueIds: pendingQueueIds.filter((t) => t !== id),
         index: qi < index ? Math.max(0, index - 1) : index,
       });
       return;
@@ -606,10 +839,22 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
         audio.removeAttribute("src");
         audio.load();
       }
-      set({ queue: next, transientIds: live, index: 0, playing: false, buffering: false });
+      set({
+        queue: next,
+        transientIds: live,
+        pendingQueueIds: pendingQueueIds.filter((t) => t !== id),
+        index: 0,
+        playing: false,
+        buffering: false,
+        playbackStarted: false,
+      });
       return;
     }
-    set({ queue: next, transientIds: live });
+    set({
+      queue: next,
+      transientIds: live,
+      pendingQueueIds: pendingQueueIds.filter((t) => t !== id),
+    });
     loadAt(index);
   },
 
@@ -635,81 +880,48 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       index,
       repeat,
       shuffle,
-      transientIds,
-      upNextId,
-      libraryContinuation,
+      pendingQueueIds,
+      upNextIds,
     } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
     const cur = combined(queue, library)[index];
-    const inQueue = index < queue.length;
-    function playUpNext(): boolean {
-      if (upNextId === null) return false;
-      const libraryIndex = library.findIndex((track) => track.id === upNextId);
-      if (libraryIndex < 0) {
-        usePlayer.setState({ upNextId: null });
-        return false;
+    const pendingId = pendingQueueIds[0];
+    if (pendingId !== undefined) {
+      const queueIndex = queue.findIndex((track) => track.id === pendingId);
+      if (queueIndex >= 0) {
+        usePlayer.setState({ pendingQueueIds: pendingQueueIds.slice(1) });
+        loadAt(queueIndex);
+        return;
       }
-      const track = library[libraryIndex];
-      const following = nextLibraryTrack(
-        track,
-        library,
-        shuffle,
-        repeat,
-        queue
-          .filter(
-            (queued, i) => i > index && !transientIds.includes(queued.id)
-          )
-          .map((queued) => queued.id)
-      );
-      usePlayer.setState({
-        upNextId: following?.id ?? null,
-        libraryContinuation: true,
-      });
-      loadAt(queue.length + libraryIndex);
-      return true;
+      usePlayer.setState({ pendingQueueIds: pendingQueueIds.slice(1) });
     }
-    // Queued songs come first: whenever the current song is out in the
-    // library and Up next holds an explicitly added song, that song is
-    // next — both for auto-advance (ended) and manual skip.
-    if (!inQueue) {
-      const qi = queue.findIndex(
-        (t) => !transientIds.includes(t.id) && t.id !== cur?.id
-      );
-      if (qi >= 0) {
-        loadAt(qi);
-        return;
-      }
-      if (playUpNext()) return;
-    } else if (libraryContinuation) {
-      const ahead = queue.findIndex(
-        (t, i) =>
-          i > index && !transientIds.includes(t.id) && t.id !== cur?.id
-      );
-      if (ahead >= 0) {
-        loadAt(ahead);
-        return;
-      }
-      if (playUpNext()) return;
-      if (!manual && repeat === "off") {
-        if (preferNativeTransport()) void nativePause();
-        else audio.pause();
-        return;
-      }
-    } else if (shuffle && total > 1) {
-      // Shuffled but still draining Up next in order: a random jump must
-      // not skip over explicitly queued songs sitting ahead.
-      const ahead = queue.findIndex(
-        (t, i) =>
-          i > index && !transientIds.includes(t.id) && t.id !== cur?.id
-      );
-      if (ahead >= 0) {
-        loadAt(ahead);
+    const libraryNextIds =
+      upNextIds.length === 0 && manual && repeat === "one" && cur !== undefined
+        ? planLibraryTracks(cur, library, shuffle, "off")
+        : upNextIds;
+    const nextId = libraryNextIds[0];
+    if (nextId !== undefined) {
+      const libraryIndex = library.findIndex((track) => track.id === nextId);
+      if (libraryIndex >= 0) {
+        let following = libraryNextIds.slice(1);
+        if (following.length === 0 && repeat === "all") {
+          following = planLibraryTracks(
+            library[libraryIndex],
+            library,
+            shuffle,
+            repeat,
+            pendingQueueIds.slice(1)
+          );
+        }
+        usePlayer.setState({ upNextIds: following });
+        loadAt(queue.length + libraryIndex);
         return;
       }
     }
-    if (!manual && repeat === "off" && index >= total - 1) {
-      audio.pause(); // stop at the end instead of wrapping
+    if (!manual && repeat === "off") {
+      if (preferNativeTransport()) void nativePause();
+      else audio.pause();
       return;
     }
     if (shuffle && total > 1) {
@@ -726,7 +938,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
   },
 
   prev: () => {
-    const { queue, library, index } = get();
+    const { queue, library, index, pendingQueueIds, shuffle, repeat } = get();
     const total = queue.length + library.length;
     if (total === 0) return;
     if (curPos() > 3) {
@@ -735,7 +947,20 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       else audio.currentTime = 0;
       return;
     }
-    loadAt((index - 1 + total) % total);
+    const previousIndex = (index - 1 + total) % total;
+    const previous = combined(queue, library)[previousIndex];
+    if (previous !== undefined && previousIndex >= queue.length) {
+      usePlayer.setState({
+        upNextIds: planLibraryTracks(
+          previous,
+          library,
+          shuffle,
+          repeat,
+          pendingQueueIds
+        ),
+      });
+    }
+    loadAt(previousIndex);
   },
 
   seekTo: (ratio) => {
@@ -811,23 +1036,19 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const repeat =
       s.repeat === "off" ? "all" : s.repeat === "all" ? "one" : "off";
     const current = combined(s.queue, s.library)[s.index];
-    const nextTrack =
+    const upNextIds =
       current !== undefined && s.index >= s.queue.length
-        ? nextLibraryTrack(
+        ? planLibraryTracks(
             current,
             s.library,
             s.shuffle,
             repeat,
-            s.queue
-              .filter((track) => !s.transientIds.includes(track.id))
-              .map((track) => track.id)
+            s.pendingQueueIds
           )
-        : undefined;
+        : s.upNextIds;
     set({
       repeat,
-      ...(s.index >= s.queue.length
-        ? { upNextId: nextTrack?.id ?? null }
-        : {}),
+      upNextIds,
     });
   },
 
@@ -835,24 +1056,17 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
     const s = get();
     const shuffle = !s.shuffle;
     const current = combined(s.queue, s.library)[s.index];
-    const nextTrack =
+    const upNextIds =
       current !== undefined && s.index >= s.queue.length
-        ? nextLibraryTrack(
+        ? planLibraryTracks(
             current,
             s.library,
             shuffle,
             s.repeat,
-            s.queue
-              .filter((track) => !s.transientIds.includes(track.id))
-              .map((track) => track.id)
+            s.pendingQueueIds
           )
-        : undefined;
-    set({
-      shuffle,
-      ...(s.index >= s.queue.length
-        ? { upNextId: nextTrack?.id ?? null }
-        : {}),
-    });
+        : s.upNextIds;
+    set({ shuffle, upNextIds });
   },
 
   clearError: () => set({ error: null }),

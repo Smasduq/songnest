@@ -37,9 +37,6 @@ cd web && npm run lint    # oxlint
 - Keep PRs small and focused; one concern per PR.
 - PRs must not add features whose purpose is to circumvent DRM,
   paywalls, or access controls.
-- PRs must not add branding of third parties (names, logos, or
-  look-alike theme names) to the UI, assets, or docs. Descriptive
-  technical mentions (e.g. the name of an optional external tool) are fine.
 - Do not commit binaries, databases, media files, cookies, tokens, or
   personal data. Check `git status` before pushing.
 - A maintainer will run the checks above; make sure they pass first.
