@@ -155,6 +155,7 @@ export function pickAssetForPlatform(assets: ReleaseAsset[], platform: OsKey | n
 }
 
 export function detectPlatform(): OsKey | null {
+  if (typeof navigator === 'undefined') return null // prerendered HTML has no navigator
   const ua = navigator.userAgent.toLowerCase()
   const plat = (navigator as Navigator & { userAgentData?: { platform: string } }).userAgentData?.platform.toLowerCase() ?? ''
   const combined = `${ua} ${plat}`

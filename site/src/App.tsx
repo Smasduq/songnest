@@ -16,6 +16,7 @@ const ReleaseList = lazy(() => import('./components/ReleaseList.tsx'))
 type SitePage = 'home' | 'privacy' | 'terms'
 
 function pageFromHash(): SitePage {
+  if (typeof window === 'undefined') return 'home' // prerendered HTML has no location
   const hash = window.location.hash.replace(/^#/, '').split('?')[0]
   if (hash === 'privacy') return 'privacy'
   if (hash === 'terms') return 'terms'
