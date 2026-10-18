@@ -7,6 +7,7 @@ import {
   nativeLoad,
   nativePause,
   nativePlay,
+  nativeQueueChanged,
   nativePosition,
   nativeSeek,
   nativeStop,
@@ -106,6 +107,8 @@ interface PlayerState {
   cycleRepeat: () => void;
   toggleShuffle: () => void;
   clearError: () => void;
+  /** Mirror a track transition initiated by Android's MediaSession controls. */
+  nativeTrackChanged: (id: string) => void;
 }
 
 /**
@@ -527,6 +530,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       index: nextIndex,
       upNextIds: nextIds,
     });
+    nativeQueueChanged();
   },
 
   restoreLastPlayback: () => {
@@ -754,11 +758,13 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
           pendingQueueIds: [...pendingQueueIds, song.id],
           upNextIds: get().upNextIds.filter((id) => id !== song.id),
         });
+        nativeQueueChanged();
       } else if (!pendingQueueIds.includes(song.id)) {
         set({
           pendingQueueIds: [...pendingQueueIds, song.id],
           upNextIds: get().upNextIds.filter((id) => id !== song.id),
         });
+        nativeQueueChanged();
       }
       return;
     }
@@ -777,6 +783,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       pendingQueueIds: [...pendingQueueIds, song.id],
       upNextIds: get().upNextIds.filter((id) => id !== song.id),
     });
+    nativeQueueChanged();
   },
 
   setQueueOrder: (next) => {
@@ -803,6 +810,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
           ? { index: nextQueue.length + libraryIndex }
           : {}),
     });
+    nativeQueueChanged();
   },
 
   swapQueued: (id, song) => {
@@ -827,6 +835,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
         pendingQueueIds: pendingQueueIds.filter((t) => t !== id),
         index: qi < index ? Math.max(0, index - 1) : index,
       });
+      nativeQueueChanged();
       return;
     }
     // removing what's playing: continue with whatever is now there
@@ -1050,6 +1059,7 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
       repeat,
       upNextIds,
     });
+    nativeQueueChanged();
   },
 
   toggleShuffle: () => {
@@ -1067,9 +1077,28 @@ export const usePlayer = create<PlayerState>()((set, get) => ({
           )
         : s.upNextIds;
     set({ shuffle, upNextIds });
+    nativeQueueChanged();
   },
 
   clearError: () => set({ error: null }),
+
+  nativeTrackChanged: (id) => {
+    const { queue, library, index, pendingQueueIds, upNextIds } = get();
+    const tracks = combined(queue, library);
+    const nextIndex = tracks.findIndex((track) => track.id === id);
+    if (nextIndex < 0 || nextIndex === index) return;
+    const track = tracks[nextIndex];
+    set({
+      index: nextIndex,
+      pendingQueueIds: pendingQueueIds.filter((trackId) => trackId !== id),
+      upNextIds: upNextIds.filter((trackId) => trackId !== id),
+      playbackStarted: true,
+      error: null,
+      buffering: false,
+    });
+    useTime.setState({ currentTime: 0, duration: 0 });
+    savePlayback(track, 0);
+  },
 }));
 
 /** Current track; safe to call in any component (stable subscriptions). */

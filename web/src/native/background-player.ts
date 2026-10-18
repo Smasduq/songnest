@@ -3,12 +3,9 @@
  *
  * Two engines, one store API (`src/player/store.ts` keeps owning the queue):
  *
- * - **Phones (Tauri + Android/iOS):** the native player from
- *   `tauri-plugin-native-audio` — Media3 ExoPlayer + MediaSessionService on
- *   Android, so audio survives backgrounding with a notification, lockscreen
- *   controls, and audio-focus handling. The store drives it through
- *   `nativeLoad/nativePlay/nativePause/nativeSeek`; native state events flow
- *   back into the zustand stores below.
+ * - **Android:** the `player` plugin owns ExoPlayer and its MediaSession; the
+ *   store sends commands and mirrors native state events.
+ * - **iOS:** `tauri-plugin-native-audio` owns AVPlayer.
  * - **Everywhere else (desktop Tauri, browser dev):** the WebView `<audio>`
  *   element, untouched. Desktop backgrounding comes from the Rust tray +
  *   hide-to-close (`src-tauri/src/player.rs`); OS transport metadata comes
@@ -17,25 +14,33 @@
  * `initBackgroundPlayer()` is idempotent — call it once from `App`.
  */
 
-import type { Song } from "@/lib/api";
-import { persistPlaybackPosition, usePlayer, useTime } from "@/player/store";
+import { getServerUrl, type Song } from "@/lib/api";
+import {
+  persistPlaybackPosition,
+  usePlayer,
+  useTime,
+} from "@/player/store";
 import type { NativeAudioState } from "tauri-plugin-native-audio-api";
+import { addPluginListener, invoke } from "@tauri-apps/api/core";
+
+interface AndroidPlayerState {
+  position: number;
+  duration: number;
+  playing: boolean;
+  currentIndex: number;
+  currentId: string;
+}
+
+interface AndroidQueueTrack {
+  id: string;
+  url: string;
+  title: string;
+  artist: string;
+  artwork: string | null;
+}
 
 /** Payloads the Rust tray sends on `player-control` (see player.rs). */
 type TrayAction = "toggle" | "prev" | "next";
-
-/** JS entry the Android notification relay calls (see MainActivity). */
-export interface SongnestTransport {
-  next: () => void;
-  prev: () => void;
-  toggle: () => void;
-}
-
-declare global {
-  interface Window {
-    __songnestTransport?: SongnestTransport;
-  }
-}
 
 let nativeActive = false;
 let nativePlaying = false;
@@ -55,13 +60,12 @@ let initPromise: Promise<void> | null = null;
 let booted = false;
 
 /**
- * Synchronous transport routing for the store. True inside the phone app
- * unless native init already failed — including while init is still in
- * flight, so early taps can't start the `<audio>` element and double-play
- * once the native engine comes up. Transports `await ensureInit()` first.
+ * Android always stays on the native route, including after initialization
+ * errors, so the WebView audio element can never start a second player.
+ * iOS falls back to WebView audio only if its native player failed.
  */
 export function preferNativeTransport(): boolean {
-  return isPhoneApp() && !nativeFailed;
+  return isPhoneApp() && (isAndroidApp() || !nativeFailed);
 }
 
 /** True once the native mobile engine owns transport. */
@@ -100,6 +104,10 @@ function isPhoneApp(): boolean {
   if (typeof window === "undefined") return false;
   if (!("__TAURI__" in window)) return false;
   return /android|iphone|ipad/i.test(navigator.userAgent);
+}
+
+function isAndroidApp(): boolean {
+  return isPhoneApp() && /android/i.test(navigator.userAgent);
 }
 
 async function plugin() {
@@ -141,7 +149,7 @@ function applyNativeState(st: NativeAudioState): void {
   publishMediaSession();
 }
 
-/** Resolve once the native engine is up (phone only). False = use `<audio>`. */
+/** Resolve once the platform's native engine is up. */
 async function ensureInit(): Promise<boolean> {
   if (!isPhoneApp() || nativeFailed) return false;
   if (nativeActive) return true;
@@ -156,23 +164,61 @@ function ensurePositionPoll(): void {
   if (pollTimer !== undefined) return;
   pollTimer = window.setInterval(() => {
     if (!nativePlaying || !nativeActive) return;
-    plugin()
-      .then((na) => na.getState())
+    if (isAndroidApp() && document.visibilityState !== "visible") return;
+    (isAndroidApp()
+      ? invoke<AndroidPlayerState>("plugin:player|get_state")
+      : plugin().then((na) => na.getState()))
       .then((st) => {
-        nativePos = st.currentTime;
-        nativeDur = st.duration;
-        lastNativeAt = performance.now();
-        useTime.setState({ currentTime: nativePos, duration: nativeDur });
-        persistPlaybackPosition();
+        if (isAndroidApp()) {
+          applyAndroidState(st as AndroidPlayerState);
+        } else {
+          const nativeState = st as NativeAudioState;
+          nativePos = nativeState.currentTime;
+          nativeDur = nativeState.duration;
+          lastNativeAt = performance.now();
+          useTime.setState({ currentTime: nativePos, duration: nativeDur });
+          persistPlaybackPosition();
+        }
       })
       .catch(() => {
         // transient JNI miss — next tick retries
       });
-  }, 150);
+  }, isAndroidApp() ? 1000 : 150);
 }
 
 async function doInit(): Promise<void> {
   try {
+    if (isAndroidApp()) {
+      await addPluginListener<{ id: string }>("player", "track-changed", (event) => {
+        usePlayer.getState().nativeTrackChanged(event.id);
+      });
+      await addPluginListener<{ playing: boolean }>(
+        "player",
+        "playing-changed",
+        (event) => {
+          nativePlaying = event.playing;
+          usePlayer.setState({ playing: event.playing, buffering: false });
+          if (!event.playing) {
+            void invoke<AndroidPlayerState>("plugin:player|get_state")
+              .then(applyAndroidState)
+              .catch((error: unknown) => console.error(error));
+          }
+        }
+      );
+      await addPluginListener<{ message: string }>(
+        "player",
+        "playback-error",
+        (event) => {
+          nativePlaying = false;
+          fail(event.message);
+        }
+      );
+      nativeActive = true;
+      nativeReady = true;
+      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
+      ensurePositionPoll();
+      return;
+    }
     const na = await plugin();
     await na.addStateListener(applyNativeState);
     applyNativeState(await na.initialize());
@@ -187,6 +233,75 @@ async function doInit(): Promise<void> {
   }
 }
 
+function applyAndroidState(state: AndroidPlayerState): void {
+  nativePos = Math.max(0, state.position / 1000);
+  nativeDur = Math.max(0, state.duration / 1000);
+  nativePlaying = state.playing;
+  lastNativeAt = performance.now();
+  useTime.setState({ currentTime: nativePos, duration: nativeDur });
+  usePlayer.setState({
+    playing: state.playing,
+    buffering: false,
+  });
+  persistPlaybackPosition();
+}
+
+function androidQueue(song: Song): AndroidQueueTrack[] {
+  const state = usePlayer.getState();
+  const tracks = [...state.queue, ...state.library];
+  const byId = new Map(tracks.map((track) => [track.id, track]));
+  const ids = [song.id, ...state.pendingQueueIds, ...state.upNextIds];
+  const seen = new Set<string>();
+  const queue: AndroidQueueTrack[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const track = id === song.id ? song : byId.get(id);
+    if (track === undefined) continue;
+    const match = /^dz-(\d+)$/.exec(track.id);
+    const deezerId = track.deezerId ?? (match ? Number(match[1]) : null);
+    const url =
+      track.streamUrl ||
+      (deezerId !== null
+        ? `songnest://resolve/${deezerId}?server=${encodeURIComponent(getServerUrl())}`
+        : "");
+    if (url === "") {
+      throw new Error(`Track ${track.id} has no stream URL or Deezer ID`);
+    }
+    queue.push({
+      id: track.id,
+      url,
+      title: track.title,
+      artist: track.artist,
+      artwork: track.coverUrl || null,
+    });
+  }
+  return queue;
+}
+
+let queueSyncPromise: Promise<void> = Promise.resolve();
+
+/** Refresh the native timeline after the user edits the upcoming queue. */
+export function nativeQueueChanged(): void {
+  if (!isAndroidApp() || !nativeActive) return;
+  queueSyncPromise = queueSyncPromise
+    .then(async () => {
+      const state = usePlayer.getState();
+      if (!state.playbackStarted) return;
+      const song = [...state.queue, ...state.library][state.index];
+      if (song === undefined) return;
+      await invoke("plugin:player|set_queue", {
+        tracks: androidQueue(song),
+        startIndex: 0,
+        preservePosition: true,
+      });
+    })
+    .catch((error: unknown) => {
+      console.error(error);
+      fail("Couldn't update playback queue.");
+    });
+}
+
 /** Hand the current track to ExoPlayer/AVPlayer and start it. */
 export async function nativeLoad(song: Song, startAtSeconds = 0): Promise<void> {
   if (!(await ensureInit())) {
@@ -194,6 +309,20 @@ export async function nativeLoad(song: Song, startAtSeconds = 0): Promise<void> 
     return;
   }
   try {
+    if (isAndroidApp()) {
+      await invoke("plugin:player|set_queue", {
+        tracks: androidQueue(song),
+        startIndex: 0,
+      });
+      if (startAtSeconds > 0) {
+        await invoke("plugin:player|seek_to", {
+          positionMs: Math.round(startAtSeconds * 1000),
+        });
+      }
+      await invoke("plugin:player|play");
+      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
+      return;
+    }
     const na = await plugin();
     const dz = song.id.startsWith("dz-") ? Number(song.id.slice(3)) : NaN;
     await na.setSource({
@@ -217,6 +346,11 @@ export async function nativePlay(): Promise<void> {
     return;
   }
   try {
+    if (isAndroidApp()) {
+      await invoke("plugin:player|play");
+      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
+      return;
+    }
     applyNativeState(await (await plugin()).play());
   } catch (e: unknown) {
     console.error(e);
@@ -227,6 +361,11 @@ export async function nativePlay(): Promise<void> {
 export async function nativePause(): Promise<void> {
   if (!(await ensureInit())) return;
   try {
+    if (isAndroidApp()) {
+      await invoke("plugin:player|pause");
+      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
+      return;
+    }
     applyNativeState(await (await plugin()).pause());
   } catch (e: unknown) {
     console.error(e);
@@ -236,6 +375,13 @@ export async function nativePause(): Promise<void> {
 export async function nativeSeek(secs: number): Promise<void> {
   if (!(await ensureInit())) return;
   try {
+    if (isAndroidApp()) {
+      await invoke("plugin:player|seek_to", {
+        positionMs: Math.round(Math.max(0, secs) * 1000),
+      });
+      applyAndroidState(await invoke<AndroidPlayerState>("plugin:player|get_state"));
+      return;
+    }
     applyNativeState(await (await plugin()).seekTo(secs));
   } catch (e: unknown) {
     console.error(e);
@@ -245,6 +391,12 @@ export async function nativeSeek(secs: number): Promise<void> {
 /** Full teardown for "queue emptied while playing". */
 export async function nativeStop(): Promise<void> {
   try {
+    if (isAndroidApp()) {
+      await invoke("plugin:player|set_queue", { tracks: [], startIndex: 0 });
+      nativePlaying = false;
+      nativePos = 0;
+      return;
+    }
     const na = await plugin();
     await na.pause();
     await na.dispose();
@@ -316,18 +468,6 @@ async function listenTrayControls(): Promise<void> {
 export async function initBackgroundPlayer(): Promise<void> {
   if (booted) return;
   booted = true;
-  // Notification-relay entry (Android): MainActivity evaluates
-  // window.__songnestTransport.next()/prev() for the native card buttons.
-  // Set synchronously at boot so it exists before any playback.
-  try {
-    window.__songnestTransport = {
-      next: () => usePlayer.getState().next(true),
-      prev: () => usePlayer.getState().prev(),
-      toggle: () => usePlayer.getState().toggle(),
-    };
-  } catch {
-    // non-DOM harness — native relay just stays unavailable
-  }
   initMediaSessionActions();
   // Republish whenever the track or transport flips (usePlayer never ticks
   // with playback position — that lives in useTime — so this stays cheap).
