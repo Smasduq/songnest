@@ -1,0 +1,11 @@
+[default]
+description = "Default permissions for the native player"
+permissions = [
+  "allow-set-queue",
+  "allow-play",
+  "allow-pause",
+  "allow-next",
+  "allow-prev",
+  "allow-seek-to",
+  "allow-get-state",
+]

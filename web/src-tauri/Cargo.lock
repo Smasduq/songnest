@@ -4099,6 +4099,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-native-audio",
  "tauri-plugin-opener",
+ "tauri-plugin-player",
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tokio",
@@ -4539,6 +4540,16 @@ dependencies = [
  "url",
  "windows",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-player"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
