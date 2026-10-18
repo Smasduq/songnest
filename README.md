@@ -73,12 +73,21 @@ npm run desktop:sidecar
 npm run desktop:build
 ```
 
-Android (experimental thin client; needs the Android SDK):
+Android (experimental thin client; needs Java 17, the Android SDK/NDK, and
+Python 3.11 for Chaquopy):
 
 ```sh
 cd web
-npx tauri android build --apk
+# If Chaquopy cannot find the host Python 3.11 automatically:
+export SONGNEST_BUILD_PYTHON=/absolute/path/to/python3.11
+npm run android:build
 ```
+
+This builds a release APK and requires the Android release keystore. Configure
+`web/src-tauri/gen/android/keystore.properties` locally (it is gitignored), or
+set `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_KEYSTORE_PATH`.
+The release build stops with an error if signing credentials or the keystore
+are missing, rather than producing an APK that cannot update the installed app.
 
 Tests and checks:
 

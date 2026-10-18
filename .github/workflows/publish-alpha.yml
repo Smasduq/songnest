@@ -140,21 +140,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Release signing: keystore.properties is gitignored and written here
-      # from secrets (Tauri docs "Android Code Signing"). Local builds
-      # without it stay unsigned, as before.
+      # Decode the signing key to a runner-local file; passwords are passed
+      # to Gradle through the step environment rather than shell interpolation.
       - name: setup Android signing
         working-directory: web/src-tauri/gen/android
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
         run: |
-          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" > keystore.properties
-          echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
-          base64 -d <<< "${{ secrets.ANDROID_KEY_BASE64 }}" > "$RUNNER_TEMP/release.keystore"
-          echo "storeFile=$RUNNER_TEMP/release.keystore" >> keystore.properties
+          printf '%s' "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         with:
           projectPath: web
           tagName: ${{ github.event.inputs.tag || github.ref_name }}

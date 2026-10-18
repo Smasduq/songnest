@@ -1,4 +1,3 @@
-import java.io.FileInputStream
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -36,19 +35,56 @@ android {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
     }
-    // Release signing from CI secrets (gen/android/keystore.properties,
-    // gitignored, written by the workflow). Absent locally => unsigned
-    // release build, same as before.
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val keystoreProperties = Properties().apply {
+        if (keystorePropertiesFile.exists()) {
+            keystorePropertiesFile.inputStream().use { load(it) }
+        }
+    }
+    val releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+        ?: keystoreProperties.getProperty("keyAlias")
+    val releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+        ?: keystoreProperties.getProperty("keyPassword")
+        ?: keystoreProperties.getProperty("password")
+    val releaseStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        ?: keystoreProperties.getProperty("storePassword")
+        ?: releaseKeyPassword
+    val releaseStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
+        ?: keystoreProperties.getProperty("storeFile")
+    val releaseBuildRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+
+    if (releaseBuildRequested) {
+        val missingSigningValues = buildList {
+            if (releaseKeyAlias.isNullOrBlank()) add("ANDROID_KEY_ALIAS")
+            if (releaseKeyPassword.isNullOrBlank()) add("ANDROID_KEY_PASSWORD")
+            if (releaseStorePassword.isNullOrBlank()) add("ANDROID_KEYSTORE_PASSWORD")
+            if (releaseStoreFile.isNullOrBlank()) add("ANDROID_KEYSTORE_PATH")
+        }
+        if (missingSigningValues.isNotEmpty()) {
+            throw GradleException(
+                "Android release builds must be signed. Set ${missingSigningValues.joinToString()} " +
+                    "or configure gen/android/keystore.properties."
+            )
+        }
+        if (!file(releaseStoreFile!!).isFile) {
+            throw GradleException("Android signing keystore does not exist: $releaseStoreFile")
+        }
+    }
+
     signingConfigs {
         create("release") {
-            val keystorePropertiesFile = rootProject.file("keystore.properties")
-            if (keystorePropertiesFile.exists()) {
-                val keystoreProperties = Properties()
-                keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["password"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["password"] as String
+            if (
+                !releaseKeyAlias.isNullOrBlank() &&
+                !releaseKeyPassword.isNullOrBlank() &&
+                !releaseStorePassword.isNullOrBlank() &&
+                !releaseStoreFile.isNullOrBlank()
+            ) {
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
             }
         }
     }
@@ -66,7 +102,7 @@ android {
             }
         }
         getByName("release") {
-            if (rootProject.file("keystore.properties").exists()) {
+            if (!releaseKeyAlias.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }
             optimization {
