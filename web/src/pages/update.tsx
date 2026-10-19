@@ -50,6 +50,10 @@ export default function UpdatePage() {
   const [working, setWorking] = useState(false);
   // Download-flow state (mobile / browser).
   const [latest, setLatest] = useState<AppRelease | null>(null);
+  // Set after a mobile/browser download is handed to the OS. Without this the
+  // button looked dead: on Android openUrl() silently sends the APK to the
+  // system browser's Downloads folder, with no in-app progress or result.
+  const [downloadedName, setDownloadedName] = useState<string | null>(null);
 
   const check = useCallback(async () => {
     setStatus({ kind: "checking" });
@@ -57,6 +61,7 @@ export default function UpdatePage() {
     setProgress(null);
     setInstalled(false);
     setLatest(null);
+    setDownloadedName(null);
     try {
       const platform = await detectOs();
       setOs(platform);
@@ -134,8 +139,14 @@ export default function UpdatePage() {
       return;
     }
     setWorking(true);
+    setDownloadedName(null);
     try {
       await openDownload(asset.browser_download_url);
+      // On Android the browser takes over; confirm here so the button does not
+      // look like it did nothing.
+      setDownloadedName(asset.name);
+    } catch {
+      setStatus({ kind: "failed", message: "Couldn't start the download — try again." });
     } finally {
       setWorking(false);
     }
@@ -283,16 +294,26 @@ export default function UpdatePage() {
             >
               {working ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : downloadedName !== null ? (
+                <Check className="h-4 w-4" aria-hidden />
               ) : (
                 <ArrowDownToLine className="h-4 w-4" aria-hidden />
               )}
-              Update
+              {working ? "Starting download…" : downloadedName !== null ? "Download started" : "Update"}
             </button>
-            <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
-              {os === "android"
-                ? "Downloads the new APK — open it to install."
-                : "Downloads the new version — open the file to install."}
-            </p>
+            {downloadedName !== null ? (
+              <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground" aria-live="polite">
+                {os === "android"
+                  ? "Saved to your Downloads. Open it from your notifications or the Files app to install — Android will ask you to allow installing from this source."
+                  : "Saved to your Downloads. Open the file to install."}
+              </p>
+            ) : (
+              <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+                {os === "android"
+                  ? "Downloads the new APK — then open it to install."
+                  : "Downloads the new version — then open the file to install."}
+              </p>
+            )}
           </div>
         )}
 
