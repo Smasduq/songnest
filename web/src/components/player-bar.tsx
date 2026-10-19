@@ -37,11 +37,20 @@ export function PlayerBar({
   const volume = usePlayer((s) => s.volume);
   const muted = usePlayer((s) => s.muted);
   const repeat = usePlayer((s) => s.repeat);
+  const shuffle = usePlayer((s) => s.shuffle);
   const error = usePlayer((s) => s.error);
   const { currentTime, duration } = useTime();
 
-  const { toggle, next, prev, seekTo, setVolume, toggleMute, cycleRepeat } =
-    usePlayer.getState();
+  const {
+    toggle,
+    next,
+    prev,
+    seekTo,
+    setVolume,
+    toggleMute,
+    cycleRepeat,
+    toggleShuffle,
+  } = usePlayer.getState();
 
   // PC shortcuts (ignored while typing): Space play/pause, ←/→ seek 5s,
   // N/P next/previous, M mute. "/" focuses search (handled in App).
@@ -162,7 +171,13 @@ export function PlayerBar({
           <Button
             variant="ghost"
             size="icon"
-            className="hidden h-8 w-8 rounded-full text-muted-foreground hover:text-foreground sm:inline-flex"
+            onClick={() => toggleShuffle()}
+            title={shuffle ? "Shuffle on" : "Shuffle off"}
+            aria-label={shuffle ? "Shuffle on" : "Shuffle off"}
+            aria-pressed={shuffle}
+            className={`hidden h-8 w-8 rounded-full sm:inline-flex ${
+              shuffle ? "text-foreground" : "text-muted-foreground"
+            } hover:text-foreground`}
           >
             <Shuffle className="h-4 w-4" />
           </Button>
