@@ -323,6 +323,20 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     {
         s += 20;
     }
+    // The canonical audio upload: title is exactly the song ("STAY") or
+    // "Artist - Title", with no "(Official Video)"-style qualifier, and it
+    // sits on the artist's own channel. This is the strongest single signal
+    // we have — it is the release itself, not a user upload of it — so it
+    // is computed once here and used both to skip the collab-feature
+    // penalty (topic masters name only the primary artist) and to score
+    // the bonus below.
+    let artist_trim = t.artist.name.trim().to_lowercase();
+    let on_artist_channel = !artist_trim.is_empty()
+        && e.channel
+            .as_deref()
+            .map(|c| c.to_lowercase().starts_with(&artist_trim))
+            .unwrap_or(false);
+    let bare_master = on_artist_channel && is_bare_title_upload(&e.title, t);
     // same-name guard: the artist must actually match, not just the title
     let artist = t.artist.name.to_lowercase();
     if !artist.is_empty() {
@@ -350,12 +364,17 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         }
         // Collab fidelity: every credited artist should be named somewhere.
         // A video naming only the main artist is usually the solo/original
-        // cut, not the collaboration picked on Deezer.
-        for feat in featured_names(t) {
-            if yt.contains(&feat) || chan.contains(&feat) {
-                s += 12;
-            } else {
-                s -= 12;
+        // cut, not the collaboration picked on Deezer. The canonical master
+        // is exempt: a topic/YouTube-Music upload of a collab is titled
+        // with the primary artist alone, so penalising it for "missing"
+        // features would disqualify the very recording we want.
+        if !bare_master {
+            for feat in featured_names(t) {
+                if yt.contains(&feat) || chan.contains(&feat) {
+                    s += 12;
+                } else {
+                    s -= 12;
+                }
             }
         }
     }
@@ -371,10 +390,31 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
             s -= 20;
         }
     }
-    if yt.contains("official audio") || yt.contains("official music video") {
+    // Audio vs video. Deezer tracks are audio, so an "Official Audio"
+    // upload is exactly what we want. A music/official *video* is a
+    // different edit (longer, video-only sections) — the classic "this
+    // isn't the audio" complaint — so it is demoted, not vetoed: it still
+    // wins when it is the only upload of the song, but any real audio
+    // upload outranks it.
+    if yt.contains("official audio") {
         s += 10;
-    } else if yt.contains("official video") {
-        s += 8;
+    }
+    if [
+        "official video",
+        "official music video",
+        "music video",
+        "video letra",
+    ]
+    .iter()
+    .any(|v| yt.contains(v))
+    {
+        s -= 25;
+    }
+    // Reward the canonical master decisively: on the artist's channel with
+    // a bare title it is the studio recording, and must outrank a verbose
+    // "(Official Video)" whose title happens to name every collaborator.
+    if bare_master {
+        s += 25;
     }
     // Version fidelity: a Deezer remix/live/acoustic is a different
     // recording from the plain original — the video must say so too.
@@ -397,6 +437,61 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
         }
     }
     s
+}
+
+/// True when a candidate is the canonical audio upload of exactly this
+/// track: its title is the song title alone ("STAY"), or "Artist - Title"
+/// with the artist and title exact on both sides, and carries no trailing
+/// "(…)"/"[…]" qualifier. Streams on auto-generated music channels are
+/// titled like this because they *are* the release, not a user upload *of*
+/// it — the "STAY" master that the fuller-titled "Official Lyric Video"
+/// otherwise outranks.
+///
+/// Deliberately strict: any parenthesised suffix ("Official Video",
+/// "Lyric Video", "Live", "Remix") makes it a qualified upload, which the
+/// rest of the scorer already knows how to weigh. Whether it is really the
+/// artist's own upload is left to the caller's channel bonus, not decided
+/// here.
+fn is_bare_title_upload(yt_title: &str, t: &DzTrack) -> bool {
+    let title = short_title(t).trim().to_lowercase();
+    if title.is_empty() {
+        return false;
+    }
+    let yt = yt_title.trim().to_lowercase();
+    // Any "(…)" / "[…]" qualifier is a version tag; those are weighed
+    // elsewhere, never treated as the bare release.
+    if yt.contains('(') || yt.contains('[') {
+        return false;
+    }
+    if yt == title {
+        return true;
+    }
+    let artist = t.artist.name.trim().to_lowercase();
+    if artist.is_empty() {
+        return false;
+    }
+    // Only "artist - title" / "title - artist" count, with both halves
+    // exact. A bare title carrying any other dash-separated suffix
+    // ("STAY - Remastered") is not the plain release.
+    match split_on_dash(&yt) {
+        Some((left, right)) => {
+            (left == artist && right == title) || (left == title && right == artist)
+        }
+        None => false,
+    }
+}
+
+/// Split `s` on the first "-", "–", "—", ":" or "|", trimming both halves
+/// and honouring multi-byte separators.
+fn split_on_dash(s: &str) -> Option<(&str, &str)> {
+    for (i, c) in s.char_indices() {
+        if matches!(c, '-' | '–' | '—' | ':' | '|') {
+            let left = s[..i].trim();
+            let right = s[i + c.len_utf8()..].trim();
+            return Some((left, right));
+        }
+    }
+    None
 }
 
 /// Version tags in the Deezer title that denote a *different recording*.
@@ -529,7 +624,20 @@ fn variant_suspect(yt_title: &str, t: &DzTrack) -> bool {
         "performance",
         "performing",
     ];
-    const PHRASES: &[&str] = &["1 hour", "one hour", "sped up", "slow reverb", "a cappella"];
+    const PHRASES: &[&str] = &[
+        "1 hour",
+        "one hour",
+        "sped up",
+        "slow reverb",
+        "a cappella",
+        // A "lyric video" / "video letra" is a produced *video* release,
+        // not the audio master: it often ships a different mix and its
+        // on-screen lyrics drift. Deezer's plain track means the studio
+        // audio, so these lose to a genuine audio upload.
+        "lyric video",
+        "lyrics video",
+        "video letra",
+    ];
     const UPLOADS: &[&str] = &[
         "traducc",
         "español",
@@ -1760,7 +1868,7 @@ async fn api_lyrics_offset(
 ///
 /// v5: every candidate is inspected (not just each query's top hit) and
 /// undemanded re-recording tags (live/acoustic/karaoke/…) are vetoed.
-const MATCH_ALGO: i64 = 5;
+const MATCH_ALGO: i64 = 6;
 
 /// Cached Deezer->YouTube match. `fresh=true` skips the cache, and rows
 /// stamped by an older algo are treated as a miss (re-searched below).
@@ -1786,6 +1894,42 @@ fn put_match(db: &Db, deezer_id: u64, video_id: &str, score: i32) {
     );
 }
 
+/// Best acceptable candidate from one query's results: the highest-scoring
+/// entry that is both confident and not a [`variant_suspect`] re-recording.
+///
+/// Critically, the *vetoed* entries never occupy the "best" slot. Tracking
+/// the raw score maximum instead let a vetoed top hit — a lyric video, a
+/// live cut — shadow a perfectly good lower-scoring studio upload, so the
+/// caller saw a top entry that failed the veto and returned a false 404
+/// even though the same result list contained the right recording.
+fn best_acceptable(mut entries: Vec<YtEntry>, t: &DzTrack) -> Option<(YtEntry, i32)> {
+    entries.sort_by_key(|e| -score(e, t));
+    entries.into_iter().find_map(|e| {
+        let sc = score(&e, t);
+        (is_confident(&e, t, sc) && !variant_suspect(&e.title, t)).then_some((e, sc))
+    })
+}
+
+/// The upload we actually want: the studio audio on the artist's own
+/// channel — the bare-titled master, or an explicit "Official Audio".
+///
+/// Used to decide whether to stop searching. A music video or a
+/// third-party re-upload scoring confidently is *not* a reason to stop:
+/// those frequently outrank the real master on title text alone, while the
+/// master only turns up under a later query ("STAY" surfaced solely for
+/// "The Kid LAROI STAY", not for the collab query that returns the video).
+fn is_canonical_audio(e: &YtEntry, t: &DzTrack) -> bool {
+    let artist = t.artist.name.trim().to_lowercase();
+    let on_artist = !artist.is_empty()
+        && e.channel
+            .as_deref()
+            .map(|c| c.to_lowercase().starts_with(&artist))
+            .unwrap_or(false);
+    on_artist
+        && (is_bare_title_upload(&e.title, t)
+            || e.title.to_lowercase().contains("official audio"))
+}
+
 /// Match a Deezer track to a YouTube video id (cached). yt-dlp runs
 /// `ytsearch10` over artist-aware queries — all credited artists plus the
 /// song title — trying each query until one scores a confident match;
@@ -1808,10 +1952,13 @@ async fn youtube_match(
     #[cfg(feature = "songnestpy")]
     if let Backend::SongnestPy(ex) = backend {
         // on-device search fans out over the same queries as desktop
-        let mut best: Option<(YtEntry, i32)> = None;
+        let mut best: Option<(String, i32)> = None;
         for q in search_queries(t) {
-            let hits = ex.search_music(&q).await.ok()?;
-            let mut entries: Vec<YtEntry> = hits
+            // A failed/timed-out query is not fatal: try the next one.
+            let Ok(hits) = ex.search_music(&q).await else {
+                continue;
+            };
+            let entries: Vec<YtEntry> = hits
                 .iter()
                 .map(|c| YtEntry {
                     id: c.id.clone(),
@@ -1820,38 +1967,31 @@ async fn youtube_match(
                     channel: c.channel.clone(),
                 })
                 .collect();
-            // best first, so a rejected variant falls through to the next
-            entries.sort_by_key(|e| -score(e, t));
-            for e in entries {
-                let sc = score(&e, t);
-                let confident = is_confident(&e, t, sc) && !variant_suspect(&e.title, t);
+            if let Some((e, sc)) = best_acceptable(entries, t) {
+                let canonical = is_canonical_audio(&e, t);
                 if best.as_ref().map_or(true, |(_, b)| sc > *b) {
-                    best = Some((e, sc));
+                    best = Some((e.id, sc));
                 }
-                if confident {
+                // Only the artist's own audio ends the search; a video or
+                // third-party hit leaves room for a better later query.
+                if canonical {
                     break;
                 }
             }
-            if best
-                .as_ref()
-                .is_some_and(|(be, bs)| is_confident(be, t, *bs) && !variant_suspect(&be.title, t))
-            {
-                break;
-            }
         }
-        let (entry, sc) = best?;
-        if !is_confident(&entry, t, sc) || variant_suspect(&entry.title, t) {
-            return None;
-        }
-        put_match(db, t.id, &entry.id, sc);
-        return Some((entry.id, sc));
+        let (id, sc) = best?;
+        put_match(db, t.id, &id, sc);
+        return Some((id, sc));
     }
     // desktop: up to 3 queries, 10 candidates each, 25s per search
-    let mut best: Option<(YtEntry, i32)> = None;
+    let mut best: Option<(String, i32)> = None;
     for q in search_queries(t) {
         trace("match", format!("dz={} ytsearch start", t.id));
         let YtDlpCall { mut cmd, _guard } = ytdlp_command(dl).ok()?;
-        let out = tokio::time::timeout(
+        // A search that times out, fails to spawn, or returns non-JSON is a
+        // transient YouTube hiccup — move on to the next query rather than
+        // aborting the whole match (which would surface as a false 404).
+        let Ok(Ok(out)) = tokio::time::timeout(
             Duration::from_secs(25),
             cmd.args(cookie_args())
                 .args([
@@ -1863,46 +2003,32 @@ async fn youtube_match(
                 .output(),
         )
         .await
-        .ok()?
-        .ok()?;
+        else {
+            continue;
+        };
         if !out.status.success() {
             continue;
         }
-        let list: YtList = serde_json::from_slice(&out.stdout).ok()?;
-        // Inspect every candidate best-first: when the query's top hit is
-        // a live/acoustic/re-upload cut the numbers cannot tell us, the
-        // veto rejects it and the next candidate down is the real studio
-        // recording. Scoring only the top hit is what served covers.
-        let mut entries = list.entries;
-        entries.sort_by_key(|e| -score(e, t));
-        for e in entries {
-            let sc = score(&e, t);
-            let confident = is_confident(&e, t, sc) && !variant_suspect(&e.title, t);
+        let Ok(list): Result<YtList, _> = serde_json::from_slice(&out.stdout) else {
+            continue;
+        };
+        if let Some((e, sc)) = best_acceptable(list.entries, t) {
+            let canonical = is_canonical_audio(&e, t);
             if best.as_ref().map_or(true, |(_, b)| sc > *b) {
-                best = Some((e, sc));
+                best = Some((e.id, sc));
             }
-            if confident {
+            if canonical {
                 break;
             }
         }
-        if best
-            .as_ref()
-            .is_some_and(|(be, bs)| is_confident(be, t, *bs) && !variant_suspect(&be.title, t))
-        {
-            break;
-        }
     }
-    let (entry, sc) = best?;
-    if !is_confident(&entry, t, sc) || variant_suspect(&entry.title, t) {
+    let Some((id, sc)) = best else {
         trace("match", format!("dz={} no confident match", t.id));
         return None;
-    }
-    trace(
-        "match",
-        format!("dz={} matched {} (score {sc})", t.id, entry.id),
-    );
-    put_match(db, t.id, &entry.id, sc);
-    Some((entry.id.clone(), sc))
+    };
+    trace("match", format!("dz={} matched {id} (score {sc})", t.id));
+    put_match(db, t.id, &id, sc);
+    Some((id, sc))
 }
 
 async fn track(
@@ -4692,6 +4818,151 @@ mod downloader_tests {
         ] {
             assert!(!variant_suspect(ok, &t));
         }
+    }
+
+    #[test]
+    fn lyric_videos_are_not_the_studio_audio() {
+        // Regression: "STAY" played the "Official Lyric Video", which is a
+        // produced video release (different mix, drifting on-screen lyrics),
+        // not the studio master. A lyric/video-letra upload must be vetoed
+        // just like a live or cover cut.
+        let t = dz_track("The Kid LAROI", "STAY", 140);
+        assert!(variant_suspect(
+            "The Kid LAROI, Justin Bieber - Stay (Official Lyric Video)",
+            &t
+        ));
+        assert!(variant_suspect(
+            "The Kid LAROI, Justin Bieber - Stay (Lyrics Video)",
+            &t
+        ));
+        // genuine audio uploads stay
+        assert!(!variant_suspect(
+            "The Kid LAROI, Justin Bieber - Stay (Official Audio)",
+            &t
+        ));
+        assert!(!variant_suspect("STAY", &t));
+    }
+
+    #[test]
+    fn bare_title_upload_is_the_canonical_audio() {
+        // Streams on an artist's own channel are titled "Artist - Title" or
+        // just "Title" because they *are* the release; a qualified
+        // "(Official Video)"-style upload is a user-facing video of it.
+        let t = dz_track("The Kid LAROI", "STAY", 140);
+        assert!(is_bare_title_upload("STAY", &t));
+        assert!(is_bare_title_upload("The Kid LAROI - STAY", &t));
+        assert!(is_bare_title_upload("STAY - The Kid LAROI", &t));
+        for qualified in [
+            "The Kid LAROI, Justin Bieber - Stay (Official Lyric Video)",
+            "The Kid LAROI, Justin Bieber - Stay (Official Video)",
+            "The Kid LAROI - STAY (Live)",
+        ] {
+            assert!(
+                !is_bare_title_upload(qualified, &t),
+                "not bare: {qualified}"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_audio_is_the_artist_channel_audio_only() {
+        let mut t = dz_track("The Kid LAROI", "STAY", 140);
+        t.contributors = vec![DzContributor {
+            name: "Justin Bieber".to_string(),
+        }];
+        let bare = YtEntry {
+            id: "bare".to_string(),
+            title: "STAY".to_string(),
+            duration: Some(142.0),
+            channel: Some("The Kid LAROI.".to_string()),
+        };
+        let official_video = YtEntry {
+            id: "ov".to_string(),
+            title: "The Kid LAROI, Justin Bieber - STAY (Official Video)".to_string(),
+            duration: Some(158.0),
+            channel: Some("The Kid LAROI.".to_string()),
+        };
+        let third_party_audio = YtEntry {
+            id: "tp".to_string(),
+            title: "The Kid LAROI, Justin Bieber - Stay (Official Audio)".to_string(),
+            duration: Some(142.0),
+            channel: Some("Ace Khalifa Music".to_string()),
+        };
+        assert!(is_canonical_audio(&bare, &t));
+        // a music video is not a reason to stop searching
+        assert!(!is_canonical_audio(&official_video, &t));
+        // nor is a stranger's "Official Audio" re-upload
+        assert!(!is_canonical_audio(&third_party_audio, &t));
+    }
+
+    #[test]
+    fn bare_title_beats_qualified_video_on_artist_channel() {
+        // The exact STAY regression: the artist's own "Official Lyric
+        // Video" outranked the plain master "STAY" on title text alone.
+        let mut t = dz_track("The Kid LAROI", "STAY", 140);
+        t.contributors = vec![DzContributor {
+            name: "Justin Bieber".to_string(),
+        }];
+        let bare = YtEntry {
+            id: "bare".to_string(),
+            title: "STAY".to_string(),
+            duration: Some(142.0),
+            channel: Some("The Kid LAROI.".to_string()),
+        };
+        let lyric_video = YtEntry {
+            id: "lv".to_string(),
+            title: "The Kid LAROI, Justin Bieber - Stay (Official Lyric Video)".to_string(),
+            duration: Some(142.0),
+            channel: Some("The Kid LAROI.".to_string()),
+        };
+        let official_video = YtEntry {
+            id: "ov".to_string(),
+            title: "The Kid LAROI, Justin Bieber - STAY (Official Video)".to_string(),
+            duration: Some(158.0),
+            channel: Some("The Kid LAROI.".to_string()),
+        };
+        // the lyric video is vetoed outright...
+        assert!(variant_suspect(&lyric_video.title, &t));
+        // ...and the surviving master is a confident match
+        assert!(!variant_suspect(&bare.title, &t));
+        assert!(is_confident(&bare, &t, score(&bare, &t)));
+        // The music video is a different edit, not the audio: the master
+        // must outrank it so the app downloads the studio recording.
+        assert!(score(&bare, &t) > score(&official_video, &t));
+    }
+
+    #[test]
+    fn best_acceptable_skips_a_higher_scoring_vetoed_top_hit() {
+        // Regression: a vetoed top hit (the "Official Lyric Video") used to
+        // occupy the best slot, so selection returned None and the track
+        // 404'd even though a perfectly good studio upload sat right below
+        // it in the same result list.
+        let mut t = dz_track("The Kid LAROI", "STAY", 140);
+        t.contributors = vec![DzContributor {
+            name: "Justin Bieber".to_string(),
+        }];
+        let entries = vec![
+            YtEntry {
+                id: "lyric-video".to_string(),
+                title: "The Kid LAROI, Justin Bieber - Stay (Official Lyric Video)".to_string(),
+                duration: Some(142.0),
+                channel: Some("The Kid LAROI.".to_string()),
+            },
+            YtEntry {
+                id: "master".to_string(),
+                title: "STAY".to_string(),
+                duration: Some(142.0),
+                channel: Some("The Kid LAROI.".to_string()),
+            },
+        ];
+        // the lyric video really does outscore the bare master...
+        let lv = &entries[0];
+        let bare = &entries[1];
+        assert!(score(lv, &t) > score(bare, &t));
+        assert!(variant_suspect(&lv.title, &t));
+        // ...yet selection must fall through to the master, not give up.
+        let picked = best_acceptable(entries, &t);
+        assert_eq!(picked.map(|(e, _)| e.id).as_deref(), Some("master"));
     }
 
     #[test]

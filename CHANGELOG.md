@@ -7,12 +7,17 @@ Releases are cut from tags like `v0.2.0`.
 
 - Fixed YouTube matching serving the wrong recording. Search now inspects
   every candidate instead of only each query's top hit and rejects live,
-  acoustic, karaoke, remix, slowed, "1 hour loop" and foreign-language
-  re-uploads that Deezer did not ask for — so "One Dance" no longer
-  resolves to the SNL performance, "Love To Lose" to the acoustic cut, or
-  "Beauty And A Beat" to a Spanish re-upload. When only such a cut exists
-  the track now honestly 404s instead of playing something wrong. Cached
-  matches from the old scorer are re-searched once.
+  acoustic, karaoke, remix, slowed, "1 hour loop", lyric-video and
+  foreign-language re-uploads that Deezer did not ask for — so "One Dance"
+  no longer resolves to the SNL performance, "Love To Lose" to the
+  acoustic cut, "Beauty And A Beat" to a Spanish re-upload, or "STAY" to
+  its lyric video. Deezer tracks are audio, so an "Official Audio" upload
+  now outranks an "Official Video"/music video, and the artist's own
+  plain-titled master is preferred over a verbosely-titled video that
+  merely names every collaborator. When only a wrong cut exists the track
+  now honestly 404s instead of playing something wrong, and a query that
+  times out no longer aborts the whole search. Cached matches from the old
+  scorer are re-searched once.
 - Deleting a song now clears its cached Deezer→YouTube match, download
   history and in-memory stream URL, so re-downloading it genuinely
   re-searches YouTube instead of replaying the exact recording you
