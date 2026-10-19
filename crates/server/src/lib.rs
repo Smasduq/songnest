@@ -2685,18 +2685,35 @@ async fn api_unlike(
 }
 
 /// DELETE /api/track/:id — delete a downloaded track: audio file, library
-/// row, and its `db:<id>` like (the song is gone, so the like goes too).
-/// Queue/match history is left alone (re-download reuses the match).
+/// row, its `db:<id>` like, the cached Deezer->YouTube match and the
+/// download job history.
+///
+/// The match and history must go too, not just the row: a re-download would
+/// otherwise reuse the cached `yt_match` video id (the very recording the
+/// user deleted) and skip searching. Dropping both is what makes "delete
+/// then download again" produce a genuinely fresh, re-searched download.
 async fn api_delete_track(State(s): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
-    let path: Option<String> =
-        s.db.lock()
-            .unwrap()
-            .query_row("SELECT path FROM tracks WHERE id = ?1", [id], |r| r.get(0))
-            .ok();
-    let Some(path) = path else {
+    let row: Option<(String, Option<i64>)> = s
+        .db
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT path, deezer_id FROM tracks WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((path, deezer_id)) = row else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let _ = std::fs::remove_file(&path);
+    // A re-download reuses `music/<video_id>.<ext>` as its final path; clear
+    // the match first so the video id (and therefore the file name) is not
+    // silently reused. Also drop the cached stream URL so playback cannot
+    // serve the deleted video from memory.
+    if let Some(dz) = deezer_id {
+        purge_track_caches(&s, dz);
+    }
     {
         let db = s.db.lock().unwrap();
         db.execute("DELETE FROM tracks WHERE id = ?1", [id]).ok();
@@ -2704,6 +2721,37 @@ async fn api_delete_track(State(s): State<AppState>, Path(id): Path<i64>) -> imp
             .ok();
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Drop the caches that would otherwise make a deleted song come back as the
+/// same download: the cached match, its download jobs, and the in-memory
+/// stream URL for that video. Deliberately does NOT touch lyrics (tied to
+/// the recording, not the match) or the audio file (already removed).
+fn purge_track_caches(s: &AppState, deezer_id: i64) {
+    let video_ids: Vec<String> = {
+        let db = s.db.lock().unwrap();
+        let mut st = match db.prepare(
+            "SELECT video_id FROM yt_match WHERE deezer_id = ?1
+             UNION SELECT video_id FROM downloads WHERE deezer_id = ?1",
+        ) {
+            Ok(st) => st,
+            Err(_) => return,
+        };
+        st.query_map([deezer_id], |r| r.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    };
+    {
+        let db = s.db.lock().unwrap();
+        db.execute("DELETE FROM yt_match WHERE deezer_id = ?1", [deezer_id])
+            .ok();
+        db.execute("DELETE FROM downloads WHERE deezer_id = ?1", [deezer_id])
+            .ok();
+    }
+    let mut urls = s.urls.lock().unwrap();
+    for id in video_ids {
+        urls.remove(&id);
+    }
 }
 
 /// POST /api/auth/device — retired (its OAuth device flow is gone; auth is
@@ -4644,6 +4692,72 @@ mod downloader_tests {
         ] {
             assert!(!variant_suspect(ok, &t));
         }
+    }
+
+    #[test]
+    fn delete_purges_match_and_history_but_not_lyrics() {
+        // Deleting a song must clear the cached match + download history so
+        // the next download re-searches YouTube, and drop the in-memory
+        // stream URL for that video. Lyrics are keyed to the recording and
+        // must survive (they are not wrong, just the file was removed).
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        let db: Db = Arc::new(Mutex::new(conn));
+        let s = AppState {
+            db: db.clone(),
+            http: reqwest::Client::new(),
+            backend: Backend::YtDlp,
+            urls: Arc::new(Mutex::new(HashMap::new())),
+            resolve_lock: Arc::new(tokio::sync::Mutex::new(())),
+            dl_sem: Arc::new(tokio::sync::Semaphore::new(2)),
+            yt_cooldown_until: Arc::new(Mutex::new(None)),
+            last_media: Arc::new(tokio::sync::Mutex::new(None)),
+            downloader: DownloaderState::default(),
+        };
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO yt_match (deezer_id, video_id, score, matched_at, algo)
+                 VALUES (900, 'wrong-vid', 60, strftime('%s','now'), 5)",
+                [],
+            )
+            .unwrap();
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO downloads (deezer_id, video_id, status, progress, queued_at, updated_at)
+                 VALUES (900, 'wrong-vid', 'done', 100, 0, 0)",
+                [],
+            )
+            .unwrap();
+        db.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO lyrics (key, plain, fetched_at) VALUES ('dz:900', 'la la', 0)",
+                [],
+            )
+            .unwrap();
+        s.urls
+            .lock()
+            .unwrap()
+            .insert("wrong-vid".to_string(), ("http://x".into(), "audio/mp4".into(), Instant::now()));
+
+        purge_track_caches(&s, 900);
+
+        assert!(get_match(&db, 900).is_none(), "match must be purged");
+        let jobs: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM downloads WHERE deezer_id = 900", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(jobs, 0, "download history must be purged");
+        assert!(s.urls.lock().unwrap().get("wrong-vid").is_none(), "stream URL must be dropped");
+        let lyrics: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM lyrics WHERE key = 'dz:900'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(lyrics, 1, "lyrics must survive a delete");
     }
 
     #[test]

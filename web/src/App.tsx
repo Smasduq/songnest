@@ -99,6 +99,11 @@ function Anim({ id, children }: { id: string; children: ReactNode }) {
   );
 }
 
+/** How long a deleted song stays recoverable before the real removal runs.
+ *  Long enough to notice and tap Undo, short enough that it never feels
+ *  like the delete "didn't work". */
+const DELETE_UNDO_MS = 6000;
+
 export default function App() {
   const [history, setHistory] = useState<Page[]>(["home"]);
   const page = history[history.length - 1];
@@ -118,18 +123,33 @@ export default function App() {
   const [likes, setLikes] = useState<Set<string>>(new Set());
   const [likedRows, setLikedRows] = useState<LikedRow[]>([]);
   const [dl, setDl] = useState<Record<string, { state: DlState; progress: number }>>({});
-  const [toast, setToast] = useState<{ id: number; msg: string } | null>(null);
+  const [pending, setPending] = useState<Set<string>>(() => new Set());
+  const [toast, setToast] = useState<{
+    id: number;
+    msg: string;
+    undo?: () => void;
+    timeoutMs?: number;
+  } | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
+  /** Deferred real-deletes, keyed by song id, so Undo can cancel one that is
+   *  still counting down. */
+  const deleteTimers = useRef<Map<string, number>>(new Map());
   // frontend download gate: max 2 at once, ~2s between starts,
   // 5-minute pause after a rate-limit style failure
   const dlActive = useRef(0);
   const dlLastStart = useRef(0);
   const dlCooldownUntil = useRef(0);
 
-  function showToast(msg: string) {
+  function showToast(
+    msg: string,
+    opts?: { undo?: () => void; timeoutMs?: number }
+  ) {
     window.clearTimeout(toastTimer.current);
-    setToast({ id: Date.now(), msg });
-    toastTimer.current = window.setTimeout(() => setToast(null), 2500);
+    setToast({ id: Date.now(), msg, ...opts });
+    toastTimer.current = window.setTimeout(
+      () => setToast(null),
+      opts?.timeoutMs ?? 2500
+    );
   }
   const [sheetOpen, setSheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -788,6 +808,14 @@ export default function App() {
     [library]
   );
 
+  /** Library rows to render: `pending` rows are inside their undo window —
+   *  still on disk and in the DB, just hidden so the delete feels instant.
+   *  Undo drops them from `pending` and they reappear untouched. */
+  const visibleLibrary = useMemo(
+    () => library.filter((t) => !pending.has(t.id)),
+    [library, pending]
+  );
+
   /** True when the song exists as a file: library row, finished queue job,
    *  a Deezer id already in the library, or the persistent download
    *  registry (marks survive list re-renders and restarts). */
@@ -799,35 +827,103 @@ export default function App() {
     return libraryDz.has(dz) || downloadedDz.has(dz);
   }
 
-  async function deleteSong(song: Song) {
+  /** Cancel a song's pending real-delete, if any (Undo, or a re-delete). */
+  function cancelDelete(id: string): void {
+    const t = deleteTimers.current.get(id);
+    if (t !== undefined) {
+      window.clearTimeout(t);
+      deleteTimers.current.delete(id);
+    }
+  }
+
+  /** Delete a downloaded song, but only for real once the undo window
+   *  closes. Until then the row is merely hidden (`pending`) and un-queued,
+   *  so the file, DB row and caches are all still intact and Undo is a pure
+   *  state rollback with nothing to re-download. */
+  function deleteSong(song: Song) {
     const m = /^db-(\d+)$/.exec(song.id);
     if (m === null) return;
-    try {
-      await deleteTrack(Number(m[1]));
-    } catch {
-      showToast("Delete failed");
-      return;
-    }
+    const dbId = Number(m[1]);
     const dz = dzOf(song);
-    if (dz !== null) unmarkDownloaded(dz);
-    store.getState().removeFromQueue(song.id);
-    await refreshLibrary();
-    await refreshLikes();
-    // deleted while playing: move on (or pause when nothing is left)
+
+    // Re-deleting the same song: drop any earlier countdown first.
+    cancelDelete(song.id);
+    window.clearTimeout(toastTimer.current);
+    setPending((p) => new Set(p).add(song.id));
+    const st = store.getState();
+    st.removeFromQueue(song.id);
+    // deleted while playing: move on (or pause when nothing is left).
+    // Re-read state after the removal — the snapshot above is pre-removal.
     if (activeTrack?.id === song.id) {
-      const st = store.getState();
+      const now = store.getState();
       const stillThere =
-        st.queue.some((t) => t.id === song.id) ||
-        st.library.some((t) => t.id === song.id);
+        now.queue.some((t) => t.id === song.id) ||
+        now.library.some((t) => t.id === song.id);
       if (!stillThere) {
-        if (st.queue.length + st.library.length === 0) {
-          if (st.playing) st.toggle();
+        if (now.queue.length + now.library.length === 0) {
+          if (now.playing) now.toggle();
         } else {
-          st.next(true);
+          now.next(true);
         }
       }
     }
-    showToast("Deleted");
+
+    showToast(`Deleted ${song.title}`, {
+      timeoutMs: DELETE_UNDO_MS,
+      undo: () => {
+        cancelDelete(song.id);
+        window.clearTimeout(toastTimer.current);
+        setToast(null);
+        setPending((p) => {
+          const n = new Set(p);
+          n.delete(song.id);
+          return n;
+        });
+        if (dz !== null) markDownloaded(dz);
+        // The server was never told about the delete, so the row is still
+        // there — this refresh only heals any concurrent list change.
+        void refreshLibrary();
+        void refreshLikes();
+      },
+    });
+
+    // The real removal is deferred until the undo window lapses. If the app
+    // closes first the row simply stays — never a half-delete, never a file
+    // removed while an Undo is still on screen.
+    deleteTimers.current.set(
+      song.id,
+      window.setTimeout(() => {
+        deleteTimers.current.delete(song.id);
+        void hardDelete();
+      }, DELETE_UNDO_MS)
+    );
+
+    async function hardDelete() {
+      try {
+        await deleteTrack(dbId);
+      } catch (e) {
+        // "already gone" is success (double delete). Any other failure means
+        // the row survived, so restore it instead of showing a phantom
+        // deleted song.
+        if (!(e instanceof Error && e.message === "already gone")) {
+          setPending((p) => {
+            const n = new Set(p);
+            n.delete(song.id);
+            return n;
+          });
+          showToast("Delete failed");
+          return;
+        }
+      }
+      if (dz !== null) unmarkDownloaded(dz);
+      await refreshLibrary();
+      await refreshLikes();
+      setPending((p) => {
+        const n = new Set(p);
+        n.delete(song.id);
+        return n;
+      });
+    }
   }
 
   function cardFor(
@@ -1196,7 +1292,7 @@ return (
                       .catch(() => setHealth(null));
                   }}
                 />
-              ) : library.length === 0 ? (
+              ) : visibleLibrary.length === 0 ? (
                 <EmptyState
                   icon={Library}
                   variant="inline"
@@ -1206,7 +1302,7 @@ return (
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-3 2xl:grid-cols-[repeat(2,minmax(0,1fr))]">
                   <AnimatePresence initial={false}>
-                    {library.map((t) => (
+                    {visibleLibrary.map((t) => (
                       <Anim key={`lib-${t.id}`} id={`lib-${t.id}`}>
                         {cardFor(
                           t,
@@ -1426,9 +1522,18 @@ return (
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, x: "-50%" }}
             transition={{ type: "spring", stiffness: 400, damping: 35 }}
-            className="pointer-events-none fixed bottom-36 left-1/2 z-[110] rounded-full border border-border/50 bg-background/95 px-5 py-2.5 text-sm text-foreground shadow-lg backdrop-blur-2xl md:bottom-28"
+            className="pointer-events-auto fixed bottom-36 left-1/2 z-[110] flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-full border border-border/50 bg-background/95 py-2 pl-5 pr-2 text-sm text-foreground shadow-lg backdrop-blur-2xl md:bottom-28"
           >
-            {toast.msg}
+            <span className="truncate">{toast.msg}</span>
+            {toast.undo !== undefined && (
+              <button
+                type="button"
+                onClick={() => toast.undo?.()}
+                className="shrink-0 rounded-full bg-foreground px-3 py-1 text-xs font-semibold text-background transition-transform active:scale-95"
+              >
+                Undo
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

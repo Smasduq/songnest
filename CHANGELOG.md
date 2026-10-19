@@ -13,6 +13,11 @@ Releases are cut from tags like `v0.2.0`.
   "Beauty And A Beat" to a Spanish re-upload. When only such a cut exists
   the track now honestly 404s instead of playing something wrong. Cached
   matches from the old scorer are re-searched once.
+- Deleting a song now clears its cached Deezer→YouTube match, download
+  history and in-memory stream URL, so re-downloading it genuinely
+  re-searches YouTube instead of replaying the exact recording you
+  deleted. Deletion is deferred ~6s and the bottom toast gains an Undo
+  button, so an accidental delete is a tap away from being cancelled.
 
 ## v0.3.1 — 2026-10-17
 
