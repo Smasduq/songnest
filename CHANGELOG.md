@@ -38,6 +38,10 @@ Releases are cut from tags like `v0.2.0`.
 - The in-app updater now picks the APK matching the phone's CPU family
   instead of whichever `.apk` sorted first, which handed Android users the
   156 MB universal build.
+- Pressing Update on Android no longer looks like it did nothing. The APK
+  is handed to the system browser, which downloads silently; the button
+  now confirms the download started and points at the Downloads folder,
+  and a failure to start it is reported instead of swallowed.
 
 ## v0.3.1 — 2026-10-17
 
