@@ -23,11 +23,12 @@ export default function Terms() {
         you agree to them.
       </p>
 
-      <Section title="Early alpha, as-is">
+      <Section title="As-is">
         <p>
-          Songnest is early alpha software: expect rough edges and breaking
-          changes. It is provided as-is, without warranties of any kind. The
-          app itself is open source under MIT / Apache-2.0.
+          Songnest is under active development, so expect occasional rough
+          edges and changes between versions. It is provided as-is, without
+          warranties of any kind. The app itself is open source under
+          MIT / Apache-2.0.
         </p>
       </Section>
 
@@ -63,7 +64,7 @@ export default function Terms() {
       <Section title="Changes and termination">
         <p>
           Features (including sync and social login) may change or be withdrawn
-          as the alpha evolves. We may suspend accounts that breach these terms.
+          as Songnest evolves. We may suspend accounts that breach these terms.
           You can stop using the service at any time by signing out; account
           deletion is handled as described in the Privacy Policy.
         </p>

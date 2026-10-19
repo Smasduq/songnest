@@ -24,8 +24,8 @@ const FEATURES = [
   },
   {
     icon: MonitorSmartphone,
-    title: 'Desktop app, mobile experimental',
-    body: 'Tauri desktop spawns and manages the backend. Android is a thin client over LAN.',
+    title: 'Desktop and Android',
+    body: 'Tauri desktop spawns and manages the backend. Android is a thin client over LAN with native playback.',
   },
   {
     icon: ShieldCheck,
@@ -41,7 +41,7 @@ function Features() {
         What Songnest does
       </h2>
       <p className="mt-2 max-w-2xl text-[15px] text-[#aeaeae]">
-        What works today in alpha. Local-file import and loudness normalization are planned.
+        What works today. Local-file import and loudness normalization are planned.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {FEATURES.map((f) => (

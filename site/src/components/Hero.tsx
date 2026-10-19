@@ -28,7 +28,7 @@ function Hero({ latest, loading }: Props) {
       />
       <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#3a3a3a] bg-[#232323] px-3 py-1 text-[13px] text-[#aeaeae]">
         <TriangleAlert className="size-4" aria-hidden="true" />
-        Early alpha — expect breaking changes
+        Released — desktop and Android
       </p>
       <h1
         id="hero-heading"

@@ -7,7 +7,7 @@ const FAQ = [
   },
   {
     q: 'Which download do I need?',
-    a: 'macOS Apple Silicon (arm64) for M1+, macOS Intel (x64) for older Macs, Windows .msi/.exe, Linux .AppImage/.deb, Android .apk (experimental thin client over your local network).',
+    a: 'macOS Apple Silicon (arm64) for M1+, macOS Intel (x64) for older Macs, Windows .msi/.exe, Linux .AppImage/.deb, Android .apk (thin client over your local network).',
   },
   {
     q: 'Is there an iOS build?',

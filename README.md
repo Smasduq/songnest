@@ -3,10 +3,12 @@
 Songnest is a music library and player with a pluggable source system,
 desktop-first, built with Tauri, Rust and React.
 
-> **Status: early alpha. Expect breaking changes.**
+> **Status: released.** Desktop builds (macOS, Windows, Linux) and Android
+> are ready to use. Android is the newest platform, so expect the odd rough
+> edge there; report anything you hit in the community.
 
 Join the [Songnest WhatsApp community](https://chat.whatsapp.com/COutxvPnS4J3W5vyDSeWxv)
-for release announcements, early builds, and to report problems.
+for release announcements, new builds, and to report problems.
 
 What works today:
 
@@ -19,15 +21,14 @@ What works today:
 - Desktop app (Tauri) that spawns and manages the backend automatically.
 - Background playback: native notification + lockscreen controls on
   Android (Media3), tray + close-to-tray with OS media keys on desktop.
-- Android builds are **experimental** (on-device server + native player).
+- In-place Android updates through Android's own installer.
+- Android builds ship as single-ABI APKs so they install on more devices.
 
-Planned or experimental:
+Planned:
 
-- Legal-source support — planned.
-- Source health checks and updates — available.
-- Mobile builds — experimental.
 - Local-file import — planned.
 - Loudness normalization — planned.
+- Legal-source support — planned.
 
 ## Screenshots
 
@@ -67,7 +68,7 @@ npm run desktop:sidecar
 npm run desktop:build
 ```
 
-Android (experimental thin client; needs Java 17, the Android SDK/NDK, and
+Android (thin client; needs Java 17, the Android SDK/NDK, and
 Python 3.11 for Chaquopy):
 
 ```sh

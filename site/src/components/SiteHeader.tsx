@@ -14,7 +14,7 @@ export default function SiteHeader() {
           />
           <span className="text-[17px] font-semibold tracking-tight">Songnest</span>
           <span className="rounded-full border border-[#3a3a3a] px-2 py-0.5 text-[11px] text-[#aeaeae]">
-            alpha
+            release
           </span>
         </a>
         <nav className="hidden items-center gap-5 text-[13px] text-[#aeaeae] md:flex" aria-label="Primary">

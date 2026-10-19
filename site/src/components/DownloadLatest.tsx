@@ -23,7 +23,7 @@ const GROUP_META: Record<string, { icon: typeof Monitor; title: string; hint: st
   macos: { icon: Apple, title: 'macOS', hint: '.dmg' },
   windows: { icon: Monitor, title: 'Windows', hint: '.msi / .exe' },
   linux: { icon: Monitor, title: 'Linux', hint: '.AppImage / .deb' },
-  android: { icon: Smartphone, title: 'Android (experimental)', hint: '.apk thin client' },
+  android: { icon: Smartphone, title: 'Android', hint: '.apk thin client' },
   ios: { icon: Smartphone, title: 'iOS (unsigned, best-effort)', hint: '.ipa sideload only' },
 }
 
