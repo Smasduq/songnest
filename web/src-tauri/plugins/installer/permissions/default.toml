@@ -1,0 +1,7 @@
+[default]
+description = "Default permissions for the Android session installer"
+permissions = [
+  "allow-can-install",
+  "allow-open-install-settings",
+  "allow-install",
+]

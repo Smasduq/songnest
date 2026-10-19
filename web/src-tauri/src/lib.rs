@@ -177,6 +177,7 @@ fn builder() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_native_audio::init())
         .plugin(tauri_plugin_player::init())
+        .plugin(tauri_plugin_installer::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(oauth::OAuthSlot::default())

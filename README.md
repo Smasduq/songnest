@@ -97,6 +97,14 @@ gitignored), or set `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and
 credentials or the keystore are missing, rather than producing an APK that
 cannot update the installed app.
 
+Updates on Android use `PackageInstaller.Session`, which requires the
+`REQUEST_INSTALL_PACKAGES` permission. Android still shows its own confirm
+dialog — no app can install silently outside Google Play — but the download
+and staging happen inside Songnest, so the user taps Install once instead of
+hunting for the file in Downloads. The native side lives in
+`web/src-tauri/plugins/installer` (Rust command + Kotlin plugin), mirroring
+`plugins/player`.
+
 Tests and checks:
 
 ```sh

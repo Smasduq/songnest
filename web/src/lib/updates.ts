@@ -297,6 +297,60 @@ export async function openDownload(url: string): Promise<void> {
   }
 }
 
+/** Running inside the Android Tauri app (not desktop, not the browser)? */
+export function isAndroidApp(): boolean {
+  if (typeof window === "undefined" || !("__TAURI__" in window)) return false;
+  return /android/i.test(navigator.userAgent);
+}
+
+export interface InstallCapability {
+  available: boolean;
+  needsPermission: boolean;
+}
+
+/**
+ * Android in-place updater (session-based).
+ *
+ * Android always shows its own confirmation dialog before installing; this
+ * gets the user to that dialog in one tap instead of dropping the APK in the
+ * browser's Downloads folder. `install` resolves once the dialog is up — the
+ * outcome arrives via the `install-finished` event, because the user can take
+ * as long as they like on the dialog.
+ */
+export const androidInstaller = {
+  /** Is the session installer usable, and has the user allowed installs from
+   *  this app yet? */
+  async canInstall(): Promise<InstallCapability> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<InstallCapability>("plugin:installer|can_install");
+  },
+
+  /** Open the system "Install unknown apps" screen for this app. */
+  async openInstallSettings(): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("plugin:installer|open_install_settings");
+  },
+
+  /** Download the APK, stage it and show the confirm dialog. */
+  async install(url: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("plugin:installer|install", { url });
+  },
+
+  /** Listen for the final result ("installed" | "cancelled" | "failed"). */
+  async onFinished(handler: (result: InstallResult) => void): Promise<() => void> {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<InstallResult>("plugin:installer|install-finished", (event) =>
+      handler(event.payload),
+    );
+  },
+};
+
+export interface InstallResult {
+  status: "installed" | "cancelled" | "failed";
+  message?: string;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
   const units = ["B", "KB", "MB", "GB"];

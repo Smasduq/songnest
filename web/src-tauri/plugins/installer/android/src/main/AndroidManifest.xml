@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Session-based install. Android still shows its own confirm dialog;
+         this permission is what makes the dialog possible at all. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <!-- Receives the final PackageInstaller session status (installed /
+             cancelled / failed) and forwards it to the web layer. The install
+             dialog can outlive the plugin instance, so the result cannot be
+             delivered by the pending `install` call. -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.songnest.installer.SESSION_RESULT" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import {
+  androidInstaller,
   checkTauriUpdate,
   compareTags,
   detectOs,
@@ -16,6 +17,7 @@ import {
   formatBytes,
   formatDate,
   getCurrentVersion,
+  isAndroidApp,
   isDesktopTauri,
   openDownload,
   pickAsset,
@@ -30,6 +32,95 @@ type Status =
   | { kind: "available" }
   | { kind: "failed"; message: string }
   | { kind: "none" };
+
+/** Label for the mobile/browser Update button. The Android in-place flow has
+ *  more states than the plain download one, and "Update" alone would hide the
+ *  step the user is on. */
+function buttonLabel({
+  working,
+  awaitingConfirm,
+  downloadedName,
+  installed,
+  canInstallInPlace,
+  hasPermission,
+}: {
+  working: boolean;
+  awaitingConfirm: boolean;
+  downloadedName: string | null;
+  installed: boolean;
+  canInstallInPlace: boolean;
+  hasPermission: boolean;
+}): string {
+  if (working) return "Preparing update…";
+  if (awaitingConfirm) return "Waiting for confirmation";
+  if (installed) return "Update installed";
+  if (downloadedName !== null) return "Download started";
+  if (canInstallInPlace && !hasPermission) return "Allow installs";
+  return "Update";
+}
+
+/** Shown under the mobile/browser Update button, explaining what just
+ *  happened or what happens next. */
+function mobileHint({
+  canInstallInPlace,
+  awaitingConfirm,
+  needsInstallPermission,
+  downloadedName,
+  installed,
+  os,
+}: {
+  canInstallInPlace: boolean;
+  awaitingConfirm: boolean;
+  needsInstallPermission: boolean;
+  downloadedName: string | null;
+  installed: boolean;
+  os: OsKey;
+}) {
+  if (installed) {
+    return (
+      <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground" aria-live="polite">
+        Update installed. Reopen Songnest to run the new version.
+      </p>
+    );
+  }
+  if (awaitingConfirm) {
+    return (
+      <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground" aria-live="polite">
+        Android will ask you to confirm the install — tap Install to finish.
+      </p>
+    );
+  }
+  if (canInstallInPlace && needsInstallPermission) {
+    return (
+      <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+        Tap to allow Songnest to install updates, then come back and tap Update.
+      </p>
+    );
+  }
+  if (canInstallInPlace) {
+    return (
+      <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+        Updates in place — Android asks you to confirm, and your library and likes stay put.
+      </p>
+    );
+  }
+  if (downloadedName !== null) {
+    return (
+      <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground" aria-live="polite">
+        {os === "android"
+          ? "Saved to your Downloads. Open it from your notifications or the Files app to install — Android will ask you to allow installing from this source."
+          : "Saved to your Downloads. Open the file to install."}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+      {os === "android"
+        ? "Downloads the new APK — then open it to install."
+        : "Downloads the new version — then open the file to install."}
+    </p>
+  );
+}
 
 /**
  * App update page (desktop + mobile). One Update button — the app picks
@@ -54,6 +145,12 @@ export default function UpdatePage() {
   // button looked dead: on Android openUrl() silently sends the APK to the
   // system browser's Downloads folder, with no in-app progress or result.
   const [downloadedName, setDownloadedName] = useState<string | null>(null);
+  // Android session installer (in-place update). Null until the capability
+  // check resolves; false means fall back to the plain download flow.
+  const [canInstallInPlace, setCanInstallInPlace] = useState(false);
+  const [needsInstallPermission, setNeedsInstallPermission] = useState(false);
+  // Set once the APK is staged and the system confirm dialog is up.
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   const check = useCallback(async () => {
     setStatus({ kind: "checking" });
@@ -62,6 +159,8 @@ export default function UpdatePage() {
     setInstalled(false);
     setLatest(null);
     setDownloadedName(null);
+    setAwaitingConfirm(false);
+    setWorking(false);
     try {
       const platform = await detectOs();
       setOs(platform);
@@ -103,6 +202,69 @@ export default function UpdatePage() {
     void check();
   }, [check]);
 
+  // Probe the Android session installer once. Inside the Android app the
+  // system updater is the right path; in a browser or on desktop it does not
+  // exist and we keep the plain download flow.
+  useEffect(() => {
+    if (!isAndroidApp()) return;
+    let cancelled = false;
+    const refresh = () => {
+      androidInstaller
+        .canInstall()
+        .then((cap) => {
+          if (cancelled) return;
+          setCanInstallInPlace(cap.available);
+          setNeedsInstallPermission(cap.needsPermission);
+        })
+        .catch(() => {
+          // Plugin missing (older build): the download flow still works.
+          if (!cancelled) setCanInstallInPlace(false);
+        });
+    };
+    refresh();
+    // Re-check when the user comes back from the "install unknown apps"
+    // settings screen, so the button updates without a manual refresh.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  // The install result arrives as an event: the system dialog can outlive the
+  // call that opened it, so `install` cannot return the outcome itself.
+  useEffect(() => {
+    if (!canInstallInPlace) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void androidInstaller
+      .onFinished((result) => {
+        setAwaitingConfirm(false);
+        setWorking(false);
+        if (result.status === "installed") {
+          setInstalled(true);
+        } else if (result.status === "cancelled") {
+          setStatus({ kind: "available" });
+        } else {
+          setStatus({ kind: "failed", message: result.message ?? "The update could not be installed." });
+        }
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // No listener: the flow falls back to the download path below.
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [canInstallInPlace]);
+
   async function install(): Promise<void> {
     if (pending === null || working) return;
     setWorking(true);
@@ -138,6 +300,48 @@ export default function UpdatePage() {
       setStatus({ kind: "failed", message: "No installer for this device in the latest release." });
       return;
     }
+
+    // Android app: hand the APK to the system installer in place. Android
+    // still shows its own confirm dialog, but the user never has to find the
+    // file. Everything after the commit is reported by the install-finished
+    // event, so this only needs to start the flow.
+    if (canInstallInPlace) {
+      if (needsInstallPermission) {
+        try {
+          await androidInstaller.openInstallSettings();
+        } catch {
+          setStatus({
+            kind: "failed",
+            message: "Allow installing from Songnest in Settings to continue.",
+          });
+        }
+        return;
+      }
+      setWorking(true);
+      setDownloadedName(null);
+      setAwaitingConfirm(false);
+      try {
+        await androidInstaller.install(asset.browser_download_url);
+        // Resolves once the APK is staged and the confirm dialog is up.
+        setAwaitingConfirm(true);
+      } catch (e) {
+        setWorking(false);
+        const message = e instanceof Error ? e.message : String(e);
+        // The plugin rejects with this when the permission is still missing
+        // (e.g. the user backed out of Settings).
+        if (message.includes("NEEDS_PERMISSION")) {
+          setNeedsInstallPermission(true);
+          setStatus({
+            kind: "failed",
+            message: "Allow installing from Songnest in Settings to continue.",
+          });
+        } else {
+          setStatus({ kind: "failed", message: "Couldn't start the update — try again." });
+        }
+      }
+      return;
+    }
+
     setWorking(true);
     setDownloadedName(null);
     try {
@@ -288,32 +492,27 @@ export default function UpdatePage() {
           <div className="mt-4">
             <button
               type="button"
-              disabled={working}
+              disabled={working && !awaitingConfirm}
               onClick={() => void downloadBest()}
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.99] disabled:opacity-60"
             >
               {working ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : downloadedName !== null ? (
+              ) : downloadedName !== null || installed ? (
                 <Check className="h-4 w-4" aria-hidden />
               ) : (
                 <ArrowDownToLine className="h-4 w-4" aria-hidden />
               )}
-              {working ? "Starting download…" : downloadedName !== null ? "Download started" : "Update"}
+              {buttonLabel({ working, awaitingConfirm, downloadedName, installed, canInstallInPlace, hasPermission: !needsInstallPermission })}
             </button>
-            {downloadedName !== null ? (
-              <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground" aria-live="polite">
-                {os === "android"
-                  ? "Saved to your Downloads. Open it from your notifications or the Files app to install — Android will ask you to allow installing from this source."
-                  : "Saved to your Downloads. Open the file to install."}
-              </p>
-            ) : (
-              <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
-                {os === "android"
-                  ? "Downloads the new APK — then open it to install."
-                  : "Downloads the new version — then open the file to install."}
-              </p>
-            )}
+            {mobileHint({
+              canInstallInPlace,
+              awaitingConfirm,
+              needsInstallPermission,
+              downloadedName,
+              installed,
+              os,
+            })}
           </div>
         )}
 

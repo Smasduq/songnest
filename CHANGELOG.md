@@ -38,10 +38,17 @@ Releases are cut from tags like `v0.2.0`.
 - The in-app updater now picks the APK matching the phone's CPU family
   instead of whichever `.apk` sorted first, which handed Android users the
   156 MB universal build.
-- Pressing Update on Android no longer looks like it did nothing. The APK
-  is handed to the system browser, which downloads silently; the button
-  now confirms the download started and points at the Downloads folder,
-  and a failure to start it is reported instead of swallowed.
+- Pressing Update on Android no longer looks like it did nothing, and no
+  longer sends you into the browser. Inside the app the update is now
+  installed in place through Android's session installer: the APK is
+  downloaded, handed to the system, and Android asks you to confirm with one
+  tap — your library and likes stay put. Outside the app (browser) the APK
+  is still downloaded, and the button confirms that it started rather than
+  going quiet.
+- Android builds now ask for `REQUEST_INSTALL_PACKAGES`. Android always
+  shows its own confirmation before installing, so this is the closest thing
+  to a one-tap update that the platform allows for an app that is not on
+  Google Play.
 
 ## v0.3.1 — 2026-10-17
 
