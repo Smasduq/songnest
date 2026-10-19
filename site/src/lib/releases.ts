@@ -20,6 +20,13 @@ export interface Release {
 
 export type OsKey = 'macos-arm64' | 'macos-x64' | 'macos' | 'windows' | 'linux' | 'android' | 'ios' | 'other'
 
+/**
+ * Android CPU family, best-effort from the browser. Browsers do not expose the
+ * device ABI, so arm64 (almost every phone made since ~2017) is the default and
+ * armeabi-v7a is only assumed for the 32-bit signals we can actually see.
+ */
+export type AndroidAbi = 'arm64' | 'armv7' | 'universal'
+
 const REPO = 'Smasduq/songnest'
 const API_URL = `https://api.github.com/repos/${REPO}/releases?per_page=100`
 const CACHE_KEY = 'songnest-releases-v1'
@@ -145,6 +152,9 @@ export function sortAssets(assets: ReleaseAsset[]): ReleaseAsset[] {
 /** Best single asset for the visitor's OS, or null. */
 export function pickAssetForPlatform(assets: ReleaseAsset[], platform: OsKey | null): ReleaseAsset | null {
   if (assets.length === 0 || !platform) return null
+  // Android gets the ABI-aware picker: never hand a phone the 156 MB universal
+  // APK if a single-ABI build exists, since some installers reject it.
+  if (platform === 'android') return pickAndroidAsset(assets, detectAndroidAbi())
   const sorted = sortAssets(assets)
   const exact = sorted.find((a) => classifyAsset(a.name).os === platform)
   if (exact) return exact
@@ -165,6 +175,45 @@ export function detectPlatform(): OsKey | null {
   if (combined.includes('win')) return 'windows'
   if (combined.includes('linux')) return 'linux'
   return null
+}
+
+/**
+ * Best Android APK for a phone, preferring a single-ABI build over the
+ * universal one. The universal APK packs all four ABIs (~156 MB) and some
+ * installers — Transsion/HiOS on Android 15 — reject it as an invalid package,
+ * so a matching per-ABI APK is the safer default.
+ */
+export function pickAndroidAsset(assets: ReleaseAsset[], abi: AndroidAbi): ReleaseAsset | null {
+  const apks = assets.filter((a) => a.name.toLowerCase().endsWith('.apk'))
+  if (apks.length === 0) return null
+
+  const byAbi = (needle: string) => apks.find((a) => a.name.toLowerCase().includes(needle))
+  const universal = apks.find((a) => a.name.toLowerCase().includes('universal'))
+
+  if (abi === 'armv7') return byAbi('armv7') ?? universal ?? apks[0] ?? null
+  if (abi === 'arm64') return byAbi('arm64') ?? byAbi('aarch64') ?? universal ?? apks[0] ?? null
+  return universal ?? apks[0] ?? null
+}
+
+/**
+ * Guess the phone's CPU family. Chromium exposes a bitness hint via
+ * `userAgentData` on some builds; everything else falls back to arm64, which
+ * is right for the overwhelming majority of Android devices.
+ */
+export function detectAndroidAbi(): AndroidAbi {
+  if (typeof navigator === 'undefined') return 'universal'
+  const nav = navigator as Navigator & {
+    userAgentData?: { bitness?: string; architecture?: string }
+  }
+  const bitness = nav.userAgentData?.bitness
+  if (bitness === '32') return 'armv7'
+  if (bitness === '64') return 'arm64'
+  const arch = nav.userAgentData?.architecture?.toLowerCase()
+  if (arch === 'arm') return 'armv7'
+  const ua = navigator.userAgent.toLowerCase()
+  // x86 phones exist but are vanishingly rare; treat unknown Android as arm64.
+  if (ua.includes('android')) return 'arm64'
+  return 'universal'
 }
 
 export function formatBytes(bytes: number): string {

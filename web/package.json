@@ -19,7 +19,9 @@
     "desktop:sidecar": "cargo build --release -p songnest && mkdir -p src-tauri/bin && cp ../target/release/songnest src-tauri/bin/songnest",
     "desktop:build": "npm run desktop:sidecar && tauri build",
     "android:dev": "tauri android dev -f android-backend",
-    "android:build": "tauri android build --apk -f android-backend"
+    "android:build": "tauri android build --apk -f android-backend",
+    "android:build:arm": "tauri android build --apk -t armv7 -f android-backend",
+    "android:build:arm64": "tauri android build --apk -t aarch64 -f android-backend"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",

@@ -29,11 +29,12 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
-        ndk {
-            // Chaquopy needs explicit ABIs; match Tauri's four Rust targets.
-            // armeabi-v7a (this phone) only goes up to Python 3.11.
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-        }
+        // No abiFilters here on purpose. The Tauri CLI injects an "abi" flavor
+        // dimension with universal/arm/arm64/x86/x86_64 flavors, each setting
+        // its own abiFilters. A blanket defaultConfig filter layered all four
+        // ABIs into every variant, defeating per-ABI builds: a `-t armv7`
+        // build still packed arm64/x86/x86_64 too (~156 MB). Chaquopy needs
+        // the per-flavor filters the CLI generates, so leave this alone.
     }
     val keystorePropertiesFile = rootProject.file("keystore.properties")
     val keystoreProperties = Properties().apply {

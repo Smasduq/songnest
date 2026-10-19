@@ -1,18 +1,18 @@
 name: 'publish-alpha'
 
 # Release builds for Songnest.
-# Triggers on version tag push like `v0.3.1`, or manually via workflow_dispatch.
-# All jobs upload to the SAME GitHub release (tauri-action finds it by tagName).
+# Triggers on any version tag push like `v0.3.1`, or manually via
+# workflow_dispatch (pass the exact tag, e.g. `v0.3.2`). All jobs upload to the
+# SAME GitHub release (tauri-action finds it by tagName).
 on:
   push:
     tags:
-      - 'v0.3.1'
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish (e.g. v0.3.1)'
+        description: 'Release tag to publish (e.g. v0.3.2)'
         required: true
-        default: 'v0.3.1'
 
 jobs:
   publish-desktop:
@@ -150,6 +150,9 @@ jobs:
           printf '%s' "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
 
+      # Default: the universal APK (all four ABIs, ~156 MB). Installs on most
+      # devices and is the artefact most users want. Phones whose installer
+      # rejects it use the single-ABI APKs from the matrix job below.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -167,6 +170,91 @@ jobs:
           retryAttempts: 2
           mobile: 'android'
           args: '--apk -f android-backend'
+
+  # Single-ABI APKs. Chaquopy ignores APK splits, so the ABI is chosen with
+  # Tauri's -t flag. Each build writes the SAME output path, so this runs as a
+  # matrix (one runner per ABI) and renames before uploading — otherwise the
+  # jobs would clobber each other's asset. These are the fallback for
+  # installers that reject the universal APK (Transsion/HiOS, Android 15 Go).
+  publish-android-abi:
+    needs: [publish-android]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: armv7
+            abi: armv7
+          - target: aarch64
+            abi: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: setup Android SDK
+        run: |
+          TOOLS="$(ls -d /usr/local/lib/android/sdk/cmdline-tools/*/ | sort -V | tail -1)bin/sdkmanager"
+          yes | "$TOOLS" --licenses > /dev/null
+          "$TOOLS" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: install Rust stable + Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: setup Python 3.11 (Chaquopy host)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: setup Android signing
+        working-directory: web/src-tauri/gen/android
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+        run: |
+          printf '%s' "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: build single-ABI APK
+        working-directory: web
+        env:
+          SONGNEST_BUILD_PYTHON: ${{ env.pythonLocation }}/bin/python
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: npx tauri android build --apk -t ${{ matrix.target }} -f android-backend
+
+      - name: upload APK to release
+        working-directory: web
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          src="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk"
+          dest="Songnest-${TAG#v}-${{ matrix.abi }}.apk"
+          cp "$src" "$dest"
+          gh release upload "$TAG" "$dest" --clobber
 
   # In-place desktop updates: build latest.json from the signed updater
   # bundles (*.sig siblings) that tauri-action uploaded, and attach it to
@@ -261,7 +349,7 @@ jobs:
   # the bottom under "Late changes"). Re-running the workflow refreshes
   # the notes, so late fixes are never lost from the release page.
   publish-release-notes:
-    needs: [publish-desktop, publish-android, publish-updater-json]
+    needs: [publish-desktop, publish-android, publish-android-abi, publish-updater-json]
     permissions:
       contents: write
     runs-on: ubuntu-latest

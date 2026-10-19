@@ -78,16 +78,24 @@ Python 3.11 for Chaquopy):
 
 ```sh
 cd web
-# If Chaquopy cannot find the host Python 3.11 automatically:
+# If Chaquopy cannot find the host Python 3.11 automatically, point it at a
+# real interpreter. A mise shim alone is not enough: mise must have a version
+# selected, otherwise Chaquopy errors with "No version is set for shim".
 export SONGNEST_BUILD_PYTHON=/absolute/path/to/python3.11
-npm run android:build
+# A plain build makes a ~156 MB universal APK (all four ABIs). Some device
+# installers (Transsion/HiOS on Android 15 Go) reject that as an invalid
+# package; build a single-ABI APK instead — see the npm scripts below.
+npm run android:build          # universal: armeabi-v7a + arm64-v8a + x86 + x86_64
+npm run android:build:arm      # armeabi-v7a only (~69 MB, 32-bit phones)
+npm run android:build:arm64    # arm64-v8a only (current 64-bit phones)
 ```
 
-This builds a release APK and requires the Android release keystore. Configure
-`web/src-tauri/gen/android/keystore.properties` locally (it is gitignored), or
-set `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and `ANDROID_KEYSTORE_PATH`.
-The release build stops with an error if signing credentials or the keystore
-are missing, rather than producing an APK that cannot update the installed app.
+This builds signed release APKs and requires the Android release keystore.
+Configure `web/src-tauri/gen/android/keystore.properties` locally (it is
+gitignored), or set `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, and
+`ANDROID_KEYSTORE_PATH`. The release build stops with an error if signing
+credentials or the keystore are missing, rather than producing an APK that
+cannot update the installed app.
 
 Tests and checks:
 

@@ -23,6 +23,12 @@ Releases are cut from tags like `v0.2.0`.
   re-searches YouTube instead of replaying the exact recording you
   deleted. Deletion is deferred ~6s and the bottom toast gains an Undo
   button, so an accidental delete is a tap away from being cancelled.
+- Android releases now ship single-ABI APKs alongside the universal one.
+  The ~156 MB universal APK (all four ABIs) is rejected as an invalid
+  package by some installers, including Transsion/HiOS on Android 15 Go;
+  the armeabi-v7a build is ~69 MB and installs cleanly. The blanket
+  `abiFilters` in `defaultConfig` was also removed — it forced every ABI
+  into every variant, so `-t armv7` still produced a 156 MB file.
 
 ## v0.3.1 — 2026-10-17
 
