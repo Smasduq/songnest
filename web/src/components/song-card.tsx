@@ -110,12 +110,16 @@ export function SongCard({
     return false;
   }
   // swipe distances drive the action reveals; both sides mirror each other
-  // (same 90px commit, same spring back) so left feels like swipe-to-queue
+  // (same 90px commit, same spring back) so left feels like swipe-to-queue.
+  // The reveal ramps in over the first ~20px (not the full 90px commit) so
+  // the icon is already legible on a short drag — waiting for the commit
+  // distance left the action invisible until the swipe was nearly done.
   const x = useMotionValue(0);
-  const actionOpacity = useTransform(x, [0, 90], [0, 1]);
-  const actionScale = useTransform(x, [0, 90], [0.6, 1]);
-  const stripOpacity = useTransform(x, [-90, 0], [1, 0]);
-  const stripScale = useTransform(x, [-90, 0], [1, 0.6]);
+  const REVEAL_PX = 20;
+  const actionOpacity = useTransform(x, [0, REVEAL_PX], [0, 1]);
+  const actionScale = useTransform(x, [0, REVEAL_PX], [0.7, 1]);
+  const stripOpacity = useTransform(x, [-REVEAL_PX, 0], [1, 0]);
+  const stripScale = useTransform(x, [-REVEAL_PX, 0], [1, 0.7]);
 
   // haptic tick the moment either threshold is crossed
   useMotionValueEvent(x, "change", (v) => {
@@ -134,9 +138,6 @@ export function SongCard({
       crossedRef.current = null;
     }
   });
-
-  const leftLabel =
-    swipeLeft === "delete" ? "Delete" : swipeLeft === "like" ? (liked ? "Unlike" : "Like") : "Download";
 
   // portal menu: escapes the scroll container so cards below can't cover it
   useEffect(() => {
@@ -232,31 +233,29 @@ export function SongCard({
         openAt(e.clientX, e.clientY);
       }}
     >
-      {/* revealed while swiping right — add-to-queue action */}
+      {/* revealed while swiping right — add-to-queue action. Icon-only so it
+          reads at a glance; anchored to the exposed edge so a short swipe is
+          enough to bring it into view. */}
       <motion.div
-        style={{ opacity: actionOpacity, scale: actionScale }}
-        className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-center gap-1.5 rounded-2xl bg-primary text-primary-foreground sm:rounded-3xl"
+        style={{ opacity: actionOpacity, scale: actionScale, transformOrigin: "left center" }}
+        className="pointer-events-none absolute inset-y-0 left-0 flex w-24 items-center justify-start rounded-2xl bg-primary pl-4 text-primary-foreground sm:rounded-3xl sm:pl-5"
       >
         <ListPlus className="h-5 w-5" />
-        <span className="text-xs font-semibold">Queue</span>
       </motion.div>
-      {/* revealed while swiping left — action depends on context.
-          Scale sits on the pill itself (like the queue pill) so the whole
-          button grows under the finger, not just its content. */}
+      {/* revealed while swiping left — action depends on context. Icon-only,
+          anchored to the exposed right edge so it shows on a short drag;
+          scale sits on the pill so the whole button grows under the finger. */}
       <motion.div
-        style={{ opacity: stripOpacity, scale: stripScale }}
-        className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-center gap-1.5 rounded-2xl bg-primary text-primary-foreground sm:rounded-3xl"
+        style={{ opacity: stripOpacity, scale: stripScale, transformOrigin: "right center" }}
+        className="pointer-events-none absolute inset-y-0 right-0 flex w-28 items-center justify-end rounded-2xl bg-primary pr-4 text-primary-foreground sm:rounded-3xl sm:pr-5"
       >
-        <span className="flex items-center gap-1.5">
-          {swipeLeft === "delete" ? (
-            <Trash2 className="h-5 w-5" />
-          ) : swipeLeft === "like" ? (
-            <Heart className={`h-5 w-5 ${liked ? "fill-background" : ""}`} />
-          ) : (
-            <Download className="h-5 w-5" />
-          )}
-          <span className="text-xs font-semibold">{leftLabel}</span>
-        </span>
+        {swipeLeft === "delete" ? (
+          <Trash2 className="h-5 w-5" />
+        ) : swipeLeft === "like" ? (
+          <Heart className={`h-5 w-5 ${liked ? "fill-background" : ""}`} />
+        ) : (
+          <Download className="h-5 w-5" />
+        )}
       </motion.div>
       <motion.div
         ref={rowRef}
