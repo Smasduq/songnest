@@ -387,10 +387,10 @@ fn score(e: &YtEntry, t: &DzTrack) -> i32 {
     }
     // Version-looking words are only suspicious when Deezer does NOT name
     // them: a "remix" tag on a remix track is the correct answer, not a
-    // bootleg signal.
+    // bootleg signal. These only cost points; [`variant_suspect`] is the
+    // hard gate that actually rejects the recording.
     for bad in [
-        "live", "cover", "remix", "lyrics", "karaoke", "slowed", "sped up", "tiktok", "reverb",
-        "8d",
+        "lyrics", "cover", "karaoke", "slowed", "sped up", "tiktok", "reverb", "8d",
     ] {
         if yt.contains(bad) && !versions.iter().any(|v| *v == bad) {
             s -= 20;
@@ -493,6 +493,72 @@ fn is_confident(e: &YtEntry, t: &DzTrack, s: i32) -> bool {
 fn versioned_title(yt_title: &str, t: &DzTrack) -> bool {
     let yt = yt_title.to_lowercase();
     deezer_versions(t).iter().all(|v| yt.contains(v))
+}
+
+/// Uploads of a *different recording* wearing the same name. YouTube is
+/// full of them — "(Live On SNL)", "(Acoustic)", "(Karaoke Version)",
+/// "(Traducción al Español)", "1 hour loop" — and they score high enough to
+/// win: the artist channel starts with the artist, the duration is close,
+/// and every title word is present. Deezer's plain track means the studio
+/// recording, so any re-recording tag it did not ask for disqualifies the
+/// candidate outright ([`is_confident`] can't catch this because coverage
+/// and duration are perfect).
+///
+/// Tags the Deezer title *does* name are what we are looking for, never a
+/// disqualifier; "remaster" is deliberately absent ("same recording,
+/// untagged on YouTube"), and `live` matches whole words so "Alive" is safe.
+/// `session`/`performance` catch the "(Live at …)" cuts whose own title
+/// omits the word "live" (e.g. "The Circle° Sessions", award-show uploads).
+fn variant_suspect(yt_title: &str, t: &DzTrack) -> bool {
+    const TAGS: &[&str] = &[
+        "live",
+        "cover",
+        "acoustic",
+        "unplugged",
+        "karaoke",
+        "remix",
+        "slowed",
+        "reverb",
+        "8d",
+        "nightcore",
+        "instrumental",
+        "acapella",
+        "loop",
+        "session",
+        "sessions",
+        "performance",
+        "performing",
+    ];
+    const PHRASES: &[&str] = &["1 hour", "one hour", "sped up", "slow reverb", "a cappella"];
+    const UPLOADS: &[&str] = &[
+        "traducc",
+        "español",
+        "espanol",
+        "subtitul",
+        "letra",
+        "翻訳",
+        "和訳",
+        "歌詞",
+    ];
+    let versions = deezer_versions(t);
+    let yt = yt_title.to_lowercase();
+    let toks: std::collections::HashSet<&str> = yt
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if TAGS
+        .iter()
+        .any(|tag| toks.contains(tag) && !versions.contains(tag))
+    {
+        return true;
+    }
+    if PHRASES
+        .iter()
+        .any(|p| yt.contains(p) && !versions.contains(p))
+    {
+        return true;
+    }
+    UPLOADS.iter().any(|u| yt.contains(u))
 }
 
 // ---- downloader: yt-dlp binary, JS runtimes, health, updates ----
@@ -1687,9 +1753,14 @@ async fn api_lyrics_offset(
 ///
 /// v2: version fidelity (remix/live/… must match) + featured-artist credit
 /// + full-title query for qualified tracks.
+///
 /// v3: Android searches the same 10 candidates per query as desktop.
+///
 /// v4: Deezer's separate title_version field participates in matching.
-const MATCH_ALGO: i64 = 4;
+///
+/// v5: every candidate is inspected (not just each query's top hit) and
+/// undemanded re-recording tags (live/acoustic/karaoke/…) are vetoed.
+const MATCH_ALGO: i64 = 5;
 
 /// Cached Deezer->YouTube match. `fresh=true` skips the cache, and rows
 /// stamped by an older algo are treated as a miss (re-searched below).
@@ -1737,10 +1808,10 @@ async fn youtube_match(
     #[cfg(feature = "songnestpy")]
     if let Backend::SongnestPy(ex) = backend {
         // on-device search fans out over the same queries as desktop
-        let mut best: Option<(String, String, i32)> = None;
+        let mut best: Option<(YtEntry, i32)> = None;
         for q in search_queries(t) {
             let hits = ex.search_music(&q).await.ok()?;
-            let top = hits
+            let mut entries: Vec<YtEntry> = hits
                 .iter()
                 .map(|c| YtEntry {
                     id: c.id.clone(),
@@ -1748,24 +1819,32 @@ async fn youtube_match(
                     duration: c.duration_secs.map(|d| d as f64),
                     channel: c.channel.clone(),
                 })
-                .max_by_key(|e| score(e, t));
-            if let Some(e) = top {
+                .collect();
+            // best first, so a rejected variant falls through to the next
+            entries.sort_by_key(|e| -score(e, t));
+            for e in entries {
                 let sc = score(&e, t);
-                let confident = is_confident(&e, t, sc);
-                if best.as_ref().map_or(true, |(_, _, b)| sc > *b) {
-                    best = Some((e.id.clone(), e.title.clone(), sc));
+                let confident = is_confident(&e, t, sc) && !variant_suspect(&e.title, t);
+                if best.as_ref().map_or(true, |(_, b)| sc > *b) {
+                    best = Some((e, sc));
                 }
                 if confident {
                     break;
                 }
             }
+            if best
+                .as_ref()
+                .is_some_and(|(be, bs)| is_confident(be, t, *bs) && !variant_suspect(&be.title, t))
+            {
+                break;
+            }
         }
-        let (id, title, sc) = best?;
-        if title_coverage(&title, t) < 0.5 || sc < 25 || !versioned_title(&title, t) {
+        let (entry, sc) = best?;
+        if !is_confident(&entry, t, sc) || variant_suspect(&entry.title, t) {
             return None;
         }
-        put_match(db, t.id, &id, sc);
-        return Some((id, sc));
+        put_match(db, t.id, &entry.id, sc);
+        return Some((entry.id, sc));
     }
     // desktop: up to 3 queries, 10 candidates each, 25s per search
     let mut best: Option<(YtEntry, i32)> = None;
@@ -1790,22 +1869,31 @@ async fn youtube_match(
             continue;
         }
         let list: YtList = serde_json::from_slice(&out.stdout).ok()?;
-        let top = list.entries.into_iter().max_by_key(|e| score(e, t));
-        if let Some(e) = top {
+        // Inspect every candidate best-first: when the query's top hit is
+        // a live/acoustic/re-upload cut the numbers cannot tell us, the
+        // veto rejects it and the next candidate down is the real studio
+        // recording. Scoring only the top hit is what served covers.
+        let mut entries = list.entries;
+        entries.sort_by_key(|e| -score(e, t));
+        for e in entries {
             let sc = score(&e, t);
+            let confident = is_confident(&e, t, sc) && !variant_suspect(&e.title, t);
             if best.as_ref().map_or(true, |(_, b)| sc > *b) {
                 best = Some((e, sc));
             }
-            if best
-                .as_ref()
-                .is_some_and(|(be, bs)| is_confident(be, t, *bs))
-            {
+            if confident {
                 break;
             }
         }
+        if best
+            .as_ref()
+            .is_some_and(|(be, bs)| is_confident(be, t, *bs) && !variant_suspect(&be.title, t))
+        {
+            break;
+        }
     }
     let (entry, sc) = best?;
-    if !is_confident(&entry, t, sc) {
+    if !is_confident(&entry, t, sc) || variant_suspect(&entry.title, t) {
         trace("match", format!("dz={} no confident match", t.id));
         return None;
     }
@@ -4495,6 +4583,67 @@ mod downloader_tests {
         };
         assert!(score(&studio, &t) > score(&live, &t));
         assert!(is_confident(&studio, &t, score(&studio, &t)));
+        // ...and now the veto makes the certainty explicit: the live cut
+        // is never the plain studio recording, however well it scores.
+        assert!(variant_suspect(&live.title, &t));
+        assert!(is_confident(&live, &t, score(&live, &t)));
+    }
+
+    #[test]
+    fn undemanded_rerecordings_are_vetoed() {
+        // Regression: "One Dance" resolved to the SNL performance, "Love To
+        // Lose" to the acoustic cut, "Beauty And A Beat" to a Spanish
+        // re-upload. All of them pass coverage/duration/artist checks and
+        // used to win on score alone.
+        let one_dance = dz_track("Drake", "One Dance", 174);
+        for bad in [
+            "Drake - One Dance (Live On SNL) ft. Wizkid, Kyla",
+            "Sandro Cavazza, Georgia Ku - Love To Lose (Acoustic)",
+            "Sing King - Beauty And A Beat (Karaoke Version)",
+            "Ayo - Something (Cover)",
+            "Ayo - Something (Nightcore)",
+            "Ayo - Something (Traducción al Español)",
+            "Ayo - Something (1 hour loop)",
+            "Ayo - Something (The Circle° Sessions)",
+        ] {
+            assert!(variant_suspect(bad, &one_dance), "should veto: {bad}");
+        }
+        for good in [
+            "Drake - One Dance (Official Audio)",
+            "Drake - One Dance ft. Wizkid & Kyla",
+            // "Alive" is not a live recording
+            "Ayo - Alive (Official Audio)",
+            // remastered is the same recording, just retagged
+            "Ayo - Something - Remastered",
+        ] {
+            assert!(!variant_suspect(good, &one_dance), "must keep: {good}");
+        }
+    }
+
+    #[test]
+    fn demanded_version_still_wins_over_the_veto() {
+        // A Deezer remix/live track wants exactly the tag that disqualifies
+        // a studio track — the veto follows Deezer, it does not blanket-ban.
+        let t = dz_track("Ayo", "Something (Remix)", 200);
+        assert!(!variant_suspect("Ayo - Something (Remix)", &t));
+        let live = dz_track("Ayo", "Something (Live)", 200);
+        assert!(!variant_suspect("Ayo - Something (Live at Coachella)", &live));
+        // ...but a remix upload can't pass off as the plain original
+        assert!(variant_suspect("Ayo - Something (Remix)", &live));
+    }
+
+    #[test]
+    fn album_single_versions_match_everything_else() {
+        // "One Dance" exists as both an album and a single master; the
+        // richer candidate must not be vetoed for naming the release.
+        let t = dz_track("Drake", "One Dance", 174);
+        for ok in [
+            "Drake - One Dance (Official Audio)",
+            "Drake - One Dance ft. Wizkid & Kyla",
+            "One Dance (feat. WizKid & Kyla) - Drake (Official Audio)",
+        ] {
+            assert!(!variant_suspect(ok, &t));
+        }
     }
 
     #[test]

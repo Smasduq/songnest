@@ -3,6 +3,17 @@
 Songnest is a cross-platform music library and player built in Rust.
 Releases are cut from tags like `v0.2.0`.
 
+## Unreleased
+
+- Fixed YouTube matching serving the wrong recording. Search now inspects
+  every candidate instead of only each query's top hit and rejects live,
+  acoustic, karaoke, remix, slowed, "1 hour loop" and foreign-language
+  re-uploads that Deezer did not ask for — so "One Dance" no longer
+  resolves to the SNL performance, "Love To Lose" to the acoustic cut, or
+  "Beauty And A Beat" to a Spanish re-upload. When only such a cut exists
+  the track now honestly 404s instead of playing something wrong. Cached
+  matches from the old scorer are re-searched once.
+
 ## v0.3.1 — 2026-10-17
 
 - Fixed mobile YouTube matching for remixes: search now considers more
