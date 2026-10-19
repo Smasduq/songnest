@@ -1,5 +1,9 @@
-import { ArrowDownToLine, Check, Monitor, Moon, Sun, Wrench, CircleUserRound, Palette } from "lucide-react";
+import { ArrowDownToLine, Check, Monitor, Moon, Sun, Wrench, CircleUserRound, MessagesSquare, Palette } from "lucide-react";
 import type { Theme } from "@/components/header";
+import { openDownload } from "@/lib/updates";
+
+/** Songnest community invite — release news, early builds, and support. */
+export const WHATSAPP_COMMUNITY_URL = "https://chat.whatsapp.com/COutxvPnS4J3W5vyDSeWxv";
 
 const THEMES: { id: Theme; label: string; icon: typeof Sun }[] = [
   { id: "light", label: "Light", icon: Sun },
@@ -95,6 +99,15 @@ export function SettingsPanel({
       >
         <ArrowDownToLine className="h-4 w-4" aria-hidden />
         App updates
+      </button>
+
+      <button
+        type="button"
+        onClick={() => void openDownload(WHATSAPP_COMMUNITY_URL)}
+        className="flex w-full items-center gap-2.5 rounded-2xl bg-foreground/5 px-4 py-3 text-left text-sm text-muted-foreground hover:text-foreground"
+      >
+        <MessagesSquare className="h-4 w-4" aria-hidden />
+        Join our WhatsApp community
       </button>
     </div>
   );

@@ -1,9 +1,10 @@
 import { memo } from 'react'
-import { ArrowDownToLine, MonitorDown, TriangleAlert } from 'lucide-react'
+import { ArrowDownToLine, MessagesSquare, MonitorDown, TriangleAlert } from 'lucide-react'
 import {
   detectPlatform,
   formatBytes,
   pickAssetForPlatform,
+  WHATSAPP_URL,
   type Release,
 } from '../lib/releases.ts'
 
@@ -66,6 +67,15 @@ function Hero({ latest, loading }: Props) {
           className="rounded-full border border-[#3a3a3a] px-5 py-2.5 text-[15px] text-[#dcdcdc] transition-opacity hover:opacity-80"
         >
           Browse all versions
+        </a>
+        <a
+          href={WHATSAPP_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 rounded-full border border-[#3a3a3a] px-5 py-2.5 text-[15px] text-[#dcdcdc] transition-opacity hover:opacity-80"
+        >
+          <MessagesSquare className="size-4" aria-hidden="true" />
+          Join our WhatsApp community
         </a>
       </div>
       <p className="mt-3 text-[13px] text-[#6a6a6a]">

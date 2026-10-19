@@ -5,6 +5,50 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+## v0.4.0 — 2026-10-19
+
+Updates now install in place on Android, and the phone build is much
+lighter. The player was reworked on Android (Media3) and the queue now
+survives a restart.
+
+### Features
+
+- Android updates are installed in place through Android's session
+  installer. Pressing Update downloads the APK, hands it to the system,
+  and Android asks you to confirm with one tap; your library and likes are
+  kept. Android always shows its own confirmation for an app that is not
+  on Google Play.
+- Android background playback now runs on Media3, with a command queue so
+  play, pause, next, previous, and seek stay in order, plus lockscreen and
+  notification controls.
+- The play queue keeps pending and up-next tracks and remembers the
+  playback position across restarts.
+- Added a shuffle button to the desktop player bar.
+- Join the [Songnest WhatsApp community](https://chat.whatsapp.com/COutxvPnS4J3W5vyDSeWxv)
+  from the app's settings, the website, or the README for release news,
+  early builds, and support.
+
+### Improvements
+
+- Android releases now ship single-ABI APKs alongside the universal one.
+  The ~156 MB universal APK (all four ABIs) is rejected as an invalid
+  package by some installers, including Transsion/HiOS on Android 15 Go;
+  the armeabi-v7a build is ~69 MB and installs cleanly. The blanket
+  `abiFilters` in `defaultConfig` was also removed — it forced every ABI
+  into every variant, so `-t armv7` still produced a 156 MB file.
+- The in-app updater now picks the APK matching the phone's CPU family
+  instead of whichever `.apk` sorted first, which handed Android users the
+  156 MB universal build.
+- Pressing Update on Android no longer looks like it did nothing, and no
+  longer sends you into the browser.
+- Deleting a song is now deferred ~6s and the bottom toast gains an Undo
+  button, so an accidental delete is a tap away from being cancelled.
+- Swipe actions on a song card are icon-only and appear on a short drag.
+- The download site picks the right build for your device and explains how
+  to install it, so non-technical users are not left guessing.
+
+### Fixes
+
 - Fixed YouTube matching serving the wrong recording. Search now inspects
   every candidate instead of only each query's top hit and rejects live,
   acoustic, karaoke, remix, slowed, "1 hour loop", lyric-video and
@@ -21,34 +65,18 @@ Releases are cut from tags like `v0.2.0`.
 - Deleting a song now clears its cached Deezer→YouTube match, download
   history and in-memory stream URL, so re-downloading it genuinely
   re-searches YouTube instead of replaying the exact recording you
-  deleted. Deletion is deferred ~6s and the bottom toast gains an Undo
-  button, so an accidental delete is a tap away from being cancelled.
-- Android releases now ship single-ABI APKs alongside the universal one.
-  The ~156 MB universal APK (all four ABIs) is rejected as an invalid
-  package by some installers, including Transsion/HiOS on Android 15 Go;
-  the armeabi-v7a build is ~69 MB and installs cleanly. The blanket
-  `abiFilters` in `defaultConfig` was also removed — it forced every ABI
-  into every variant, so `-t armv7` still produced a 156 MB file.
+  deleted.
 - Fixed the update page on Windows and Linux. The `latest.json` job matched
   Tauri v1 updater artifact names (`.nsis.zip`, `.msi.zip`,
   `.AppImage.tar.gz`) that v2 no longer emits, so both platforms were
   silently omitted and those devices reported "up to date" while a signed
   installer sat in the release. It now matches the v2 artifacts
   (`*-setup.exe`, `*.AppImage`).
-- The in-app updater now picks the APK matching the phone's CPU family
-  instead of whichever `.apk` sorted first, which handed Android users the
-  156 MB universal build.
-- Pressing Update on Android no longer looks like it did nothing, and no
-  longer sends you into the browser. Inside the app the update is now
-  installed in place through Android's session installer: the APK is
-  downloaded, handed to the system, and Android asks you to confirm with one
-  tap — your library and likes stay put. Outside the app (browser) the APK
-  is still downloaded, and the button confirms that it started rather than
-  going quiet.
-- Android builds now ask for `REQUEST_INSTALL_PACKAGES`. Android always
-  shows its own confirmation before installing, so this is the closest thing
-  to a one-tap update that the platform allows for an app that is not on
-  Google Play.
+- Fixed Android release APK signing.
+- Android builds now ask for `REQUEST_INSTALL_PACKAGES`, which Android
+  requires before it will install an update.
+
+**Full Changelog**: https://github.com/Smasduq/songnest/compare/v0.3.1...v0.4.0
 
 ## v0.3.1 — 2026-10-17
 

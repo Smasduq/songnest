@@ -236,3 +236,6 @@ export function formatDate(iso: string | null): string {
 }
 
 export const REPO_URL = `https://github.com/${REPO}`
+
+/** Songnest community invite — release news, early builds, and support. */
+export const WHATSAPP_URL = 'https://chat.whatsapp.com/COutxvPnS4J3W5vyDSeWxv'

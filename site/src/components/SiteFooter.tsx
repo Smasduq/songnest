@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { REPO_URL } from '../lib/releases.ts'
+import { REPO_URL, WHATSAPP_URL } from '../lib/releases.ts'
 
 function SiteFooter() {
   return (
@@ -7,6 +7,9 @@ function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-8 text-[13px] text-[#6a6a6a] md:flex-row md:flex-wrap md:items-center md:justify-between">
         <p>Songnest — desktop-first music library and player. MIT / Apache-2.0.</p>
         <nav className="flex flex-wrap gap-4" aria-label="Footer">
+          <a className="hover:text-white" href={WHATSAPP_URL} target="_blank" rel="noreferrer">
+            WhatsApp community
+          </a>
           <a className="hover:text-white" href={REPO_URL} target="_blank" rel="noreferrer">
             GitHub
           </a>

@@ -5,6 +5,9 @@ desktop-first, built with Tauri, Rust and React.
 
 > **Status: early alpha. Expect breaking changes.**
 
+Join the [Songnest WhatsApp community](https://chat.whatsapp.com/COutxvPnS4J3W5vyDSeWxv)
+for release announcements, early builds, and to report problems.
+
 What works today:
 
 - Metadata search, suggestions, and a local library with likes.
@@ -28,20 +31,11 @@ Planned or experimental:
 
 ## Screenshots
 
-Desktop library, now playing, and profile:
+Desktop library, likes, and lyrics:
 
 ![Songnest desktop library](docs/screenshots/desktop-library.png)
-![Songnest desktop profile](docs/screenshots/desktop-profile.png)
-
-Sign-in (email, Google, GitHub):
-
-![Songnest sign-in](docs/screenshots/signin.png)
-
-Mobile library, now playing, and queue:
-
-![Songnest mobile library](docs/screenshots/mobile-library.png)
-![Songnest mobile now playing](docs/screenshots/mobile-now-playing.png)
-![Songnest mobile queue](docs/screenshots/mobile-queue.png)
+![Songnest desktop likes](docs/screenshots/desktop-likes.png)
+![Songnest desktop lyrics](docs/screenshots/desktop-lyrics.png)
 
 ## Quick start
 
