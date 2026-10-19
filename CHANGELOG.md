@@ -29,6 +29,15 @@ Releases are cut from tags like `v0.2.0`.
   the armeabi-v7a build is ~69 MB and installs cleanly. The blanket
   `abiFilters` in `defaultConfig` was also removed — it forced every ABI
   into every variant, so `-t armv7` still produced a 156 MB file.
+- Fixed the update page on Windows and Linux. The `latest.json` job matched
+  Tauri v1 updater artifact names (`.nsis.zip`, `.msi.zip`,
+  `.AppImage.tar.gz`) that v2 no longer emits, so both platforms were
+  silently omitted and those devices reported "up to date" while a signed
+  installer sat in the release. It now matches the v2 artifacts
+  (`*-setup.exe`, `*.AppImage`).
+- The in-app updater now picks the APK matching the phone's CPU family
+  instead of whichever `.apk` sorted first, which handed Android users the
+  156 MB universal build.
 
 ## v0.3.1 — 2026-10-17
 

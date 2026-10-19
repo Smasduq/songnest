@@ -310,8 +310,22 @@ jobs:
               mac_arm = unmarked.pop(0)
           if mac_x64 is None and unmarked:
               mac_x64 = unmarked.pop(0)
-          linux = pick(lambda b: b.endswith(".AppImage.tar.gz"))
-          windows = pick(lambda b: b.endswith(".nsis.zip")) or pick(lambda b: b.endswith(".msi.zip"))
+          # Linux and Windows updater bundles. Tauri v2 (createUpdaterArtifacts)
+          # signs the FINAL installer, not a v1-style archive: the Linux
+          # updater artifact is the .AppImage itself, and the Windows one is
+          # the NSIS .exe. Matching .AppImage.tar.gz/.nsis.zip/.msi.zip (v1
+          # names) silently skipped both platforms, so those devices saw
+          # "up to date" while a signed installer sat in the release.
+          linux = (
+              pick(lambda b: low(b).endswith(".appimage"))
+              or pick(lambda b: low(b).endswith(".appimage.tar.gz"))
+          )
+          windows = (
+              pick(lambda b: low(b).endswith("-setup.exe") and "x64" in low(b))
+              or pick(lambda b: low(b).endswith(".exe"))
+              or pick(lambda b: low(b).endswith(".nsis.zip"))
+              or pick(lambda b: low(b).endswith(".msi.zip"))
+          )
 
           platforms = {}
           for key, bundle in (

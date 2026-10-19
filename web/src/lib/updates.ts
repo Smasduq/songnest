@@ -146,6 +146,27 @@ export function compareTags(a: string, b: string): number | null {
 
 export type OsKey = "android" | "ios" | "windows" | "macos" | "linux" | "other";
 
+/**
+ * Android CPU family, best-effort from the WebView. Neither the browser nor a
+ * Tauri WebView exposes the ABI, so arm64 (almost every phone since ~2017) is
+ * the default. This only decides which APK to *prefer*; the universal APK
+ * remains a fallback, since a wrong guess still has to install.
+ */
+export type AndroidAbi = "arm64" | "armv7" | "universal";
+
+/** Guess the phone's CPU family from Chromium's bitness hint, else UA. */
+export function detectAndroidAbi(): AndroidAbi {
+  if (typeof navigator === "undefined") return "universal";
+  const nav = navigator as Navigator & { userAgentData?: { bitness?: string; architecture?: string } };
+  const bitness = nav.userAgentData?.bitness;
+  if (bitness === "32") return "armv7";
+  if (bitness === "64") return "arm64";
+  const arch = nav.userAgentData?.architecture?.toLowerCase();
+  if (arch === "arm") return "armv7";
+  if (navigator.userAgent.toLowerCase().includes("android")) return "arm64";
+  return "universal";
+}
+
 /** Current OS via UA sniffing (works in Tauri WebViews too: desktop UAs
  *  carry Windows/Mac/Linux, Android WebViews carry Android). */
 export async function detectOs(): Promise<OsKey> {
@@ -162,11 +183,27 @@ export async function detectOs(): Promise<OsKey> {
   return "other";
 }
 
-function assetScore(name: string, os: OsKey): number {
+function assetScore(name: string, os: OsKey, abi: AndroidAbi = "universal"): number {
   const n = name.toLowerCase();
   switch (os) {
-    case "android":
-      return n.endsWith(".apk") ? 0 : 99;
+    case "android": {
+      if (!n.endsWith(".apk")) return 99;
+      const isUniversal = n.includes("universal");
+      // Rank the single-ABI APK for this phone first. The universal APK packs
+      // all four ABIs (~156 MB) and some installers reject it as an invalid
+      // package, so it is a fallback, never the default.
+      if (abi === "armv7") {
+        if (n.includes("armv7") || n.includes("armeabi")) return 0;
+        if (isUniversal) return 1;
+        return 2;
+      }
+      if (abi === "arm64") {
+        if (n.includes("arm64") || n.includes("aarch64")) return 0;
+        if (isUniversal) return 1;
+        return 2;
+      }
+      return isUniversal ? 0 : 1;
+    }
     case "ios":
       return n.endsWith(".ipa") ? 0 : 99;
     case "windows":
@@ -189,8 +226,9 @@ function assetScore(name: string, os: OsKey): number {
 
 /** Best asset for this OS first, rest after. */
 function sortAssetsForOs(assets: ReleaseAsset[], os: OsKey): ReleaseAsset[] {
+  const abi = os === "android" ? detectAndroidAbi() : "universal";
   return [...assets].sort(
-    (a, b) => assetScore(a.name, os) - assetScore(b.name, os) || a.name.localeCompare(b.name),
+    (a, b) => assetScore(a.name, os, abi) - assetScore(b.name, os, abi) || a.name.localeCompare(b.name),
   );
 }
 
