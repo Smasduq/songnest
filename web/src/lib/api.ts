@@ -233,10 +233,37 @@ export async function setLiked(
   }
 }
 
-/** Queue a Deezer track for download. 409 = already there/queued. */
+/**
+ * 409 from /api/enqueue meaning the track is already on disk: a previous
+ * download finished even though this client gave up (timeout, closed tab).
+ * Not a failure — callers treat it as the success it is.
+ */
+export class AlreadyInLibraryError extends Error {
+  constructor() {
+    super("already in library");
+    this.name = "AlreadyInLibraryError";
+  }
+}
+
+/**
+ * Queue a Deezer track for download.
+ *
+ * 409 handling is deliberate: "already in library" throws
+ * {@link AlreadyInLibraryError} (success), while "already queued/active"
+ * resolves to the id of the job the server is already running, so the
+ * caller waits on it instead of failing with a bogus "download failed".
+ */
 export async function enqueueDownload(dz: number): Promise<number> {
   const r = await fetch(`${apiBase()}/api/enqueue?dz=${dz}`, { method: "POST" });
-  if (r.status === 409) throw new Error("already downloaded or queued");
+  if (r.status === 409) {
+    const body = (await r.text()).trim();
+    if (body === "already in library") throw new AlreadyInLibraryError();
+    const pending = (await fetchDownloadJobs()).find(
+      (j) => j.deezer_id === dz && (j.status === "queued" || j.status === "active")
+    );
+    if (pending !== undefined) return pending.id;
+    throw new Error(body === "" ? "already downloaded or queued" : body);
+  }
   if (!r.ok) throw new Error(`enqueue: ${r.status}`);
   const j = (await r.json()) as { job: number };
   return j.job;
@@ -394,18 +421,37 @@ export async function postDownloaderRuntime(
   return (await r.json()) as DownloaderStatus;
 }
 
-/** Wait until the queued job for dz finishes (or fails). */
+/** Every download job, newest first (server caps the list at 50). */
+async function fetchDownloadJobs(): Promise<DownloadJob[]> {
+  const r = await fetch(`${apiBase()}/api/downloads`);
+  if (!r.ok) throw new Error(`downloads: ${r.status}`);
+  return (await r.json()) as DownloadJob[];
+}
+
+/**
+ * Wait until the given job finishes (or fails).
+ *
+ * Matched by job id first: every retry inserts another row for the same
+ * track and `queued_at` only has second resolution, so a dz-only lookup
+ * could surface a stale `error` row and instantly re-throw the OLD failure
+ * while the new attempt is running fine. The dz lookup remains as a
+ * fallback for rows that fell out of the server's 50-row window — but only
+ * for still-pending jobs, never for old errors.
+ */
 export async function waitForDownload(
+  jobId: number,
   dz: number,
   onProgress: (pct: number) => void,
   timeoutMs = 10 * 60 * 1000
 ): Promise<void> {
   const start = Date.now();
   for (;;) {
-    const r = await fetch(`${apiBase()}/api/downloads`);
-    if (!r.ok) throw new Error(`downloads: ${r.status}`);
-    const jobs = (await r.json()) as DownloadJob[];
-    const job = jobs.find((j) => j.deezer_id === dz);
+    const jobs = await fetchDownloadJobs();
+    const job =
+      jobs.find((j) => j.id === jobId) ??
+      jobs.find(
+        (j) => j.deezer_id === dz && (j.status === "queued" || j.status === "active")
+      );
     if (job === undefined) throw new Error("job vanished");
     onProgress(job.progress);
     if (job.status === "done") return;

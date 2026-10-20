@@ -1613,6 +1613,16 @@ fn ensure_schema(db: &rusqlite::Connection) -> anyhow::Result<()> {
         progress INTEGER NOT NULL DEFAULT 0, error TEXT,
         queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
     )?;
+    // A job left 'active' by a killed server can never be claimed again —
+    // the worker only picks up 'queued' — so every later enqueue for that
+    // track would 409 "already queued" forever and the client would show
+    // "download failed" on every retry. This runs before any worker is
+    // spawned, so every 'active' row is definitionally stale: requeue it.
+    db.execute(
+        "UPDATE downloads SET status='queued', progress=0, error=NULL,
+         updated_at=strftime('%s','now') WHERE status='active'",
+        [],
+    )?;
     // liked songs: key is "dz:<id>" or "db:<id>"
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS liked (

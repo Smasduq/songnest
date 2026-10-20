@@ -45,6 +45,7 @@ import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-ca
 import { useCurrentTrack, usePlayer } from "@/player/store";
 import { initBackgroundPlayer } from "@/native/background-player";
 import {
+  AlreadyInLibraryError,
   deleteTrack,
   dzOf,
   enqueueDownload,
@@ -770,8 +771,8 @@ export default function App() {
     dlActive.current++;
     dlLastStart.current = Date.now();
     try {
-      await enqueueDownload(dz);
-      await waitForDownload(dz, (progress) =>
+      const jobId = await enqueueDownload(dz);
+      await waitForDownload(jobId, dz, (progress) =>
         setDl((prev) => ({ ...prev, [mapKey]: { state: "working", progress } }))
       );
       setDl((prev) => ({ ...prev, [mapKey]: { state: "done", progress: 100 } }));
@@ -779,6 +780,16 @@ export default function App() {
       showToast("Downloaded");
       await refreshLibrary();
     } catch (e: unknown) {
+      if (e instanceof AlreadyInLibraryError) {
+        // The server already has this track: a previous attempt finished
+        // after this client gave up (timeout, closed tab). That is the
+        // success this retry was asking for, not a failure.
+        setDl((prev) => ({ ...prev, [mapKey]: { state: "done", progress: 100 } }));
+        markDownloaded(dz);
+        showToast("Downloaded");
+        await refreshLibrary();
+        return;
+      }
       const msg = e instanceof Error ? e.message : "download failed";
       if (/429|throttl|rate.?limit|sign.?in|bot/i.test(msg)) {
         dlCooldownUntil.current = Date.now() + 5 * 60 * 1000;
@@ -816,14 +827,16 @@ export default function App() {
     [library, pending]
   );
 
-  /** True when the song exists as a file: library row, finished queue job,
-   *  a Deezer id already in the library, or the persistent download
-   *  registry (marks survive list re-renders and restarts). */
-  function isDownloaded(song: Song, mapKey: string): boolean {
+  /** True when the song exists as a file: a library row, or its Deezer id
+   *  is in the on-disk library or the persistent download registry (marks
+   *  survive list re-renders and restarts). Deliberately does NOT read the
+   *  live `dl` map: per-card "done" entries are never cleared on delete,
+   *  so trusting them kept deleted songs looking Downloaded (and blocking
+   *  re-download) until a reload. */
+  function isDownloaded(song: Song): boolean {
     if (song.id.startsWith("db-")) return true;
-    if (dlFor(mapKey).state === "done") return true;
-    const dz = song.deezerId;
-    if (dz === null || dz === undefined) return false;
+    const dz = song.deezerId ?? dzOf(song);
+    if (dz === null) return false;
     return libraryDz.has(dz) || downloadedDz.has(dz);
   }
 
@@ -844,7 +857,11 @@ export default function App() {
     const m = /^db-(\d+)$/.exec(song.id);
     if (m === null) return;
     const dbId = Number(m[1]);
-    const dz = dzOf(song);
+    // Library rows are `db-<id>`, which dzOf never parses (it only reads
+    // `dz-` ids) — dz used to be null here, so unmarkDownloaded/Undo's
+    // markDownloaded silently no-opped and deleted songs stayed marked
+    // Downloaded (localStorage registry) forever.
+    const dz = song.deezerId ?? dzOf(song);
 
     // Re-deleting the same song: drop any earlier countdown first.
     cancelDelete(song.id);
@@ -936,7 +953,7 @@ export default function App() {
   ) {
     const key = likeKeyFor(song);
     const d = dlFor(mapKey);
-    const downloaded = isDownloaded(song, mapKey);
+    const downloaded = isDownloaded(song);
     const onDownloadNow = () => {
       if (downloadableDz !== null) downloadSong(downloadableDz, mapKey);
     };
@@ -1008,7 +1025,6 @@ export default function App() {
   const activeDownloaded =
     activeTrack !== undefined &&
     (activeTrack.id.startsWith("db-") ||
-      activeDlState === "done" ||
       (activeDz !== null && (libraryDz.has(activeDz) || downloadedDz.has(activeDz))));
 
   if (isAuthRoute) {
@@ -1204,7 +1220,7 @@ return (
                             k,
                             () => playHit(h),
                             false,
-                            isDownloaded(s, k) ? "like" : "download"
+                            isDownloaded(s) ? "like" : "download"
                           )}
                         </Anim>
                       );
@@ -1264,7 +1280,7 @@ return (
                             k,
                             () => playHit(h),
                             false,
-                            isDownloaded(s, k) ? "like" : "download"
+                            isDownloaded(s) ? "like" : "download"
                           )}
                         </Anim>
                       );
@@ -1342,7 +1358,7 @@ return (
                             k,
                             () => playSong(t),
                             t.id === activeTrack?.id,
-                            isDownloaded(t, k) ? "like" : "download"
+                            isDownloaded(t) ? "like" : "download"
                           )}
                         </Anim>
                       );
