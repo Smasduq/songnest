@@ -252,25 +252,25 @@ export default function App() {
       const library = await fetchLibrary();
       store.getState().setLibrary(library);
       store.getState().restoreLastPlayback();
-      // Seed the downloaded set from what's on disk (covers installs
-      // from before this registry existed, and other devices' files
-      // are naturally excluded — localStorage is per device).
+      // The registry mirrors what's on disk (covers installs from before
+      // it existed; other devices' files are naturally excluded —
+      // localStorage is per device). Reconcile BOTH ways: seed ids found
+      // in the library, and drop ids no longer backed by a row — deletes
+      // made before dz resolution was fixed left stale ids in localStorage
+      // that kept songs looking Downloaded (and un-downloadable) forever.
       const ids = library
         .map((t) => t.deezerId)
         .filter((d): d is number => typeof d === "number");
-      if (ids.length > 0) {
-        setDownloadedDz((prev) => {
-          if (ids.every((id) => prev.has(id))) return prev;
-          const next = new Set(prev);
-          for (const id of ids) next.add(id);
-          try {
-            window.localStorage.setItem(DOWNLOADED_KEY, JSON.stringify([...next]));
-          } catch {
-            // Best effort.
-          }
-          return next;
-        });
-      }
+      setDownloadedDz((prev) => {
+        const onDisk = new Set(ids);
+        const next = new Set([...prev].filter((id) => onDisk.has(id)));
+        for (const id of ids) next.add(id);
+        if (next.size === prev.size && [...next].every((id) => prev.has(id))) {
+          return prev;
+        }
+        persistDownloaded(next);
+        return next;
+      });
       setLoadError(null);
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "library failed");
@@ -1017,14 +1017,17 @@ export default function App() {
   );
 
   /** Now-playing download state (sheet + desktop sidebar share it): the
-   *  active track has no list row, so derive progress + persistence here. */
+   *  active track has no list row, so derive progress + persistence here.
+   *  Membership is checked against the live library, not the `db-` id
+   *  prefix: a deleted track keeps its id, and the prefix would keep
+   *  claiming "Downloaded" after the row (and file) were removed. */
   const activeDz = activeTrack !== undefined ? dzOf(activeTrack) : null;
   const activeDlKey = activeTrack !== undefined ? `np-${activeTrack.id}` : "";
   const activeDlState = activeTrack !== undefined ? dl[activeDlKey]?.state : undefined;
   const activeDownloading = activeDlState === "working" || activeDlState === "queued";
   const activeDownloaded =
     activeTrack !== undefined &&
-    (activeTrack.id.startsWith("db-") ||
+    (library.some((t) => t.id === activeTrack.id) ||
       (activeDz !== null && (libraryDz.has(activeDz) || downloadedDz.has(activeDz))));
 
   if (isAuthRoute) {
