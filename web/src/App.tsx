@@ -44,6 +44,7 @@ import { Disc3, Heart, Library, SearchX } from "lucide-react";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
 import { initBackgroundPlayer } from "@/native/background-player";
+import { registerAndroidBackHandler } from "@/native/android-back";
 import {
   AlreadyInLibraryError,
   deleteTrack,
@@ -361,6 +362,58 @@ export default function App() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Android hardware back: close whatever is on top (sheet, auth screen)
+  // before popping the in-app page stack, and only then exit. Without this
+  // the activity closes on every press because the SPA has no browser
+  // history to go back through.
+  const backState = useRef({
+    sheetOpen,
+    settingsOpen,
+    isAuthRoute,
+    canGoBack: history.length > 1,
+  });
+  useEffect(() => {
+    backState.current = {
+      sheetOpen,
+      settingsOpen,
+      isAuthRoute,
+      canGoBack: history.length > 1,
+    };
+  });
+  useEffect(() => {
+    let alive = true;
+    let unregister: (() => void) | undefined;
+    void registerAndroidBackHandler(() => {
+      const s = backState.current;
+      if (s.settingsOpen) {
+        setSettingsOpen(false);
+        return "handled";
+      }
+      if (s.sheetOpen) {
+        setSheetOpen(false);
+        return "handled";
+      }
+      if (s.isAuthRoute) {
+        window.location.hash = "";
+        setIsAuthRoute(false);
+        return "handled";
+      }
+      if (s.canGoBack) {
+        back();
+        return "handled";
+      }
+      return "exit";
+    }).then((stop) => {
+      if (alive) unregister = stop;
+      else stop();
+    });
+    return () => {
+      alive = false;
+      unregister?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
