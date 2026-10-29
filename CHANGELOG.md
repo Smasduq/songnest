@@ -5,6 +5,35 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+## v0.4.1 — 2026-10-29
+
+A small bug-fix release for downloads and Android navigation.
+
+### Improvements
+
+- Songnest is no longer described as an early alpha. The README and
+  website now present it as a released app, with Android called out as
+  the newest platform. by @Smasduq
+
+### Fixes
+
+- Android's hardware and gesture back button now goes back through the
+  app instead of closing it. It dismisses an open sheet, leaves the
+  sign-in screen, and pops the in-app page stack; only a press from the
+  home root exits the app. by @Smasduq
+- Deleted songs no longer stay marked Downloaded and block a re-download.
+  Deleting a song clears its Deezer ID from the local registry, the
+  registry reconciles with the on-disk library on every refresh, and Now
+  Playing checks live library membership instead of a row's ID prefix.
+  by @Smasduq
+- Failed download retries no longer report "download failed" when the
+  track is already on disk or already queued. "Already in library" is
+  treated as the success it is, a retry waits on the existing queued job,
+  and the server requeues download jobs left active by a previous
+  shutdown. by @Smasduq
+
+**Full Changelog**: https://github.com/Smasduq/songnest/compare/v0.4.0...v0.4.1
+
 ## v0.4.0 — 2026-10-19
 
 Updates now install in place on Android, and the phone build is much
