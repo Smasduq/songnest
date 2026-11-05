@@ -3,19 +3,19 @@ import { memo } from 'react'
 const FAQ = [
   {
     q: 'Does this site play music?',
-    a: 'No. This site only describes Songnest and links downloads. Listening happens inside the desktop/mobile app after you install it.',
+    a: 'Nope. This site just tells you about Songnest and links the download. You listen inside the app after installing it.',
   },
   {
     q: 'Which download do I need?',
-    a: 'macOS Apple Silicon (arm64) for M1+, macOS Intel (x64) for older Macs, Windows .msi/.exe, Linux .AppImage/.deb, Android .apk (thin client over your local network).',
+    a: 'Mac with M1 or newer → arm64. Older Mac → x64. Windows → .msi or .exe. Linux → .AppImage or .deb. Android → .apk.',
   },
   {
     q: 'Is there an iOS build?',
-    a: 'iOS is best-effort and unsigned — only useful for local sideloading/testing. It is not signed for the App Store.',
+    a: 'Not really. There's an unsigned build for sideloading/testing only — it's not on the App Store.',
   },
   {
     q: 'Is Songnest free?',
-    a: 'Yes, MIT or Apache-2.0. It does not host or distribute music — you are responsible for complying with copyright law and any connected service terms.',
+    a: 'Yes, 100% free and open source. Songnest doesn't host or distribute music — you're responsible for what you play.',
   },
 ]
 
@@ -36,9 +36,8 @@ function Faq() {
       <div className="mt-4 rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5 text-[13px] leading-relaxed text-[#aeaeae]">
         <p className="font-medium text-[#fefefe]">Responsible use</p>
         <p className="mt-1">
-          Songnest does not host, distribute, or provide any music. It is a player and library
-          manager. Prefer sources with licenses that allow saving copies. Not affiliated with or
-          endorsed by any streaming or video service.
+          Songnest doesn't host or distribute any music — it's just a player. Use sources you're
+          actually allowed to use. Not affiliated with any streaming service.
         </p>
       </div>
     </section>

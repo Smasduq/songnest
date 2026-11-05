@@ -4,33 +4,33 @@ import { Activity, Heart, ListMusic, MonitorSmartphone, Play, ShieldCheck } from
 const FEATURES = [
   {
     icon: ListMusic,
-    title: 'Metadata search + suggestions',
-    body: 'Find tracks in the public catalog and grow a local library with likes.',
+    title: 'Search any song',
+    body: 'Find tracks and get suggestions. Like songs to build your own library.',
   },
   {
     icon: Play,
-    title: 'Saved-track playback',
-    body: 'Play tagged audio files stored in your data directory. Unsaved tracks stream via proxy.',
+    title: 'Play your music',
+    body: 'Play songs you've saved. Songs you haven't saved yet stream automatically.',
   },
   {
     icon: Heart,
-    title: 'Save-to-library queue',
-    body: 'Paced queue (max 2 at a time) with progress, retries, and rate-limit handling.',
+    title: 'Download queue',
+    body: 'Saves up to 2 songs at a time, with progress and automatic retries.',
   },
   {
     icon: Activity,
-    title: 'Source health + diagnostics',
-    body: 'Backend versions, update status, and cooldown state on one screen.',
+    title: 'Health check screen',
+    body: 'See if everything is running fine — versions, status, and cooldown timers all in one place.',
   },
   {
     icon: MonitorSmartphone,
-    title: 'Desktop and Android',
-    body: 'Tauri desktop spawns and manages the backend. Android is a thin client over LAN with native playback.',
+    title: 'PC and Android',
+    body: 'Full desktop app on Windows, Mac, and Linux. Android works as a connected client.',
   },
   {
     icon: ShieldCheck,
-    title: 'You own your files',
-    body: 'Local SQLite library. Optional yt-dlp is yours to install — never bundled.',
+    title: 'Your files, your device',
+    body: 'Everything stays on your machine. Nothing is uploaded. You're in control.',
   },
 ]
 
@@ -41,7 +41,7 @@ function Features() {
         What Songnest does
       </h2>
       <p className="mt-2 max-w-2xl text-[15px] text-[#aeaeae]">
-        What works today. Local-file import and loudness normalization are planned.
+        All of this works right now. Local file import and volume normalization are coming soon.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {FEATURES.map((f) => (

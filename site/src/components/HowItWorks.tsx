@@ -2,16 +2,16 @@ import { memo } from 'react'
 
 const STEPS = [
   {
-    title: '1. Catalog metadata',
-    body: 'Track metadata comes from a public catalog API — no hosting of music by Songnest.',
+    title: '1. Find the song',
+    body: 'Song info (title, artist, cover art) comes from a public catalog. Songnest never hosts music itself.',
   },
   {
-    title: '2. Pluggable sources',
-    body: 'A source layer matches catalog entries to playable audio, caching matches and stream URLs.',
+    title: '2. Match it to audio',
+    body: 'A plugin system figures out where to actually play or download each song, and caches the result.',
   },
   {
-    title: '3. Local library',
-    body: 'Saved tracks live as tagged audio files plus a local SQLite library. The UI talks to a local server over HTTP.',
+    title: '3. Save it locally',
+    body: 'Downloaded songs live as audio files on your device. The app talks to a small local server running in the background.',
   },
 ]
 
@@ -43,7 +43,7 @@ function HowItWorks() {
           height={1080}
         />
         <figcaption className="bg-[#232323] px-4 py-2 text-[13px] text-[#6a6a6a]">
-          Current prototype — desktop library view.
+          Current look — desktop library view.
         </figcaption>
       </figure>
     </section>
