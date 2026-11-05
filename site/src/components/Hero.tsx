@@ -37,9 +37,9 @@ function Hero({ latest, loading }: Props) {
         Your music library, on your desktop.
       </h1>
       <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-[#aeaeae] text-pretty">
-        Songnest is a desktop-first music library and player with a pluggable source system, built
-        with Tauri, Rust, and React. Search metadata, keep a local library, and play saved tracks —
-        no web account, no subscription. This site only describes the app and links downloads.
+        Songnest is a music player and library app for your PC and phone. Search songs, save them,
+        and play them — no account needed, no subscription, no nonsense. This site just explains the
+        app and lets you download it.
       </p>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         {loading ? (
