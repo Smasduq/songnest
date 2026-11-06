@@ -9,17 +9,19 @@ import Faq from './components/Faq.tsx'
 import SiteFooter from './components/SiteFooter.tsx'
 import Privacy from './pages/Privacy.tsx'
 import Terms from './pages/Terms.tsx'
+import Analytics from './pages/Analytics.tsx'
 import { fetchReleases, type Release } from './lib/releases.ts'
 
 const ReleaseList = lazy(() => import('./components/ReleaseList.tsx'))
 
-type SitePage = 'home' | 'privacy' | 'terms'
+type SitePage = 'home' | 'privacy' | 'terms' | 'analytics'
 
 function pageFromHash(): SitePage {
   if (typeof window === 'undefined') return 'home' // prerendered HTML has no location
   const hash = window.location.hash.replace(/^#/, '').split('?')[0]
   if (hash === 'privacy') return 'privacy'
   if (hash === 'terms') return 'terms'
+  if (hash === 'analytics') return 'analytics'
   return 'home'
 }
 
@@ -66,7 +68,15 @@ export default function App() {
     return (
       <div id="top" className="min-h-dvh bg-[#171717] text-[#f5f5f4]">
         <SiteHeader />
-        <main>{page === 'privacy' ? <Privacy /> : <Terms />}</main>
+        <main>
+          {page === 'privacy' ? (
+            <Privacy />
+          ) : page === 'terms' ? (
+            <Terms />
+          ) : (
+            <Analytics releases={releases} loading={loading} error={error} />
+          )}
+        </main>
         <SiteFooter />
       </div>
     )
@@ -76,7 +86,7 @@ export default function App() {
     <div id="top" className="min-h-dvh bg-[#171717] text-[#f5f5f4]">
       <SiteHeader />
       <main>
-        <Hero latest={latest} loading={loading} />
+        <Hero latest={latest} loading={loading} error={error} releases={releases} />
         <Features />
         <HowItWorks />
         <DownloadLatest latest={latest} loading={loading} error={error} />

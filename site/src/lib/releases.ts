@@ -112,6 +112,17 @@ export async function fetchReleases(signal?: AbortSignal): Promise<Release[]> {
 
 export function classifyAsset(fileName: string): { os: OsKey; label: string } {
   const n = fileName.toLowerCase()
+  // Tauri updater bundles: "..._aarch64.app.tar.gz". Check before the generic
+  // .tar.gz rule below, which would otherwise file macOS updates under Linux.
+  if (n.includes('.app.tar.gz')) {
+    if (n.includes('aarch64') || n.includes('arm64')) {
+      return { os: 'macos-arm64', label: 'macOS update bundle' }
+    }
+    if (n.includes('x64') || n.includes('x86_64')) {
+      return { os: 'macos-x64', label: 'macOS update bundle' }
+    }
+    return { os: 'macos', label: 'macOS update bundle' }
+  }
   if (n.endsWith('.apk')) return { os: 'android', label: 'Android APK' }
   if (n.endsWith('.ipa')) return { os: 'ios', label: 'iOS IPA' }
   if (n.includes('aarch64') && (n.endsWith('.dmg') || n.includes('mac'))) {
@@ -137,14 +148,33 @@ export function classifyAsset(fileName: string): { os: OsKey; label: string } {
   return { os: 'other', label: 'Download' }
 }
 
+/**
+ * Signatures and updater metadata are release assets, but nobody installs
+ * them. GitHub still counts their fetches, so filter them out of any number
+ * that is meant to represent actual downloads.
+ */
+export function isDownloadableAsset(fileName: string): boolean {
+  const n = fileName.toLowerCase()
+  const metadata = ['.sig', '.sha256', '.sha256sum', '.md5', '.asc', '.json', '.yml', '.yaml', '.txt']
+  return !metadata.some((suffix) => n.endsWith(suffix))
+}
+
+/** Tauri auto-update artifacts, not something a visitor installs by hand. */
+export function isUpdateBundle(fileName: string): boolean {
+  return fileName.toLowerCase().includes('.app.tar.gz')
+}
+
 const OS_PRIORITY: OsKey[] = ['macos-arm64', 'macos-x64', 'macos', 'windows', 'linux', 'android', 'ios', 'other']
 
-/** Stable sort: OS priority first, then name. Avoids re-render churn. */
+/** Stable sort: OS priority, then installers before updater bundles, then name. */
 export function sortAssets(assets: ReleaseAsset[]): ReleaseAsset[] {
   return [...assets].sort((a, b) => {
     const pa = OS_PRIORITY.indexOf(classifyAsset(a.name).os)
     const pb = OS_PRIORITY.indexOf(classifyAsset(b.name).os)
     if (pa !== pb) return pa - pb
+    const ua = isUpdateBundle(a.name) ? 1 : 0
+    const ub = isUpdateBundle(b.name) ? 1 : 0
+    if (ua !== ub) return ua - ub
     return a.name.localeCompare(b.name)
   })
 }

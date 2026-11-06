@@ -19,11 +19,6 @@ const MANAGERS: { title: string; hint: string; commands: string[] }[] = [
     ],
   },
   {
-    title: 'Arch Linux',
-    hint: 'AUR binary package',
-    commands: ['yay -S songnest'],
-  },
-  {
     title: 'Rust',
     hint: 'crates.io backend binary',
     commands: ['cargo install songnest'],
@@ -45,14 +40,17 @@ function PackageManagers() {
       </p>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         {MANAGERS.map((m) => (
-          <article key={m.title} className="rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5">
+          <article
+            key={m.title}
+            className="min-w-0 rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5"
+          >
             <h3 className="text-[15px] font-medium">{m.title}</h3>
             <p className="mt-0.5 text-[13px] text-[#6a6a6a]">{m.hint}</p>
             <div className="mt-3 space-y-2">
               {m.commands.map((c) => (
                 <pre
                   key={c}
-                  className="overflow-x-auto rounded-[10px] bg-[#010002] p-3 text-[13px] leading-relaxed text-[#dcdcdc] tabular-nums"
+                  className="min-w-0 rounded-[10px] bg-[#010002] p-3 text-[13px] leading-relaxed text-[#dcdcdc] tabular-nums whitespace-pre-wrap wrap-anywhere"
                 >
                   <code>{c}</code>
                 </pre>

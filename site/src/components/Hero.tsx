@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { ArrowDownToLine, MessagesSquare, MonitorDown, TriangleAlert } from 'lucide-react'
 import {
   detectPlatform,
@@ -7,15 +7,20 @@ import {
   WHATSAPP_URL,
   type Release,
 } from '../lib/releases.ts'
+import { computeStats, formatCount } from '../lib/stats.ts'
 
 interface Props {
   latest: Release | null
   loading: boolean
+  error: string | null
+  releases: Release[]
 }
 
-function Hero({ latest, loading }: Props) {
+function Hero({ latest, loading, error, releases }: Props) {
   const platform = detectPlatform()
   const asset = latest ? pickAssetForPlatform(latest.assets, platform) : null
+  const stats = useMemo(() => computeStats(releases), [releases])
+  const pending = loading || error !== null
 
   return (
     <section className="mx-auto max-w-6xl px-4 pt-14 pb-10 md:pt-20" aria-labelledby="hero-heading">
@@ -47,11 +52,18 @@ function Hero({ latest, loading }: Props) {
         ) : asset ? (
           <a
             href={asset.browser_download_url}
-            className="inline-flex items-center gap-2 rounded-full bg-[#fefefe] px-5 py-2.5 text-[15px] font-medium text-[#010002] transition-opacity hover:opacity-90"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#fefefe] px-5 py-2.5 text-[15px] font-medium text-[#010002] transition-opacity hover:opacity-90 sm:w-auto"
           >
-            <ArrowDownToLine className="size-4" aria-hidden="true" />
-            Download {latest?.tag_name} for your device
-            {asset.size > 0 ? <span className="font-normal opacity-70">· {formatBytes(asset.size)}</span> : null}
+            <ArrowDownToLine className="size-4 shrink-0" aria-hidden="true" />
+            <span>
+              Download {latest?.tag_name} for your device
+              {asset.size > 0 ? (
+                <span className="font-normal whitespace-nowrap opacity-70">
+                  {' '}
+                  · {formatBytes(asset.size)}
+                </span>
+              ) : null}
+            </span>
           </a>
         ) : (
           <a
@@ -78,10 +90,31 @@ function Hero({ latest, loading }: Props) {
           Join our WhatsApp community
         </a>
       </div>
-      <p className="mt-3 text-[13px] text-[#6a6a6a]">
-        {latest
-          ? `Latest: ${latest.tag_name}${latest.prerelease ? ' (pre-release)' : ''} · Free and open source (MIT / Apache-2.0)`
-          : 'Free and open source (MIT / Apache-2.0)'}
+      <dl className="mt-8 grid max-w-lg grid-cols-3 gap-3 border-t border-[#3a3a3a] pt-5">
+        <div className="min-w-0">
+          <dt className="text-[12px] tracking-wide text-[#6a6a6a] uppercase">Downloads</dt>
+          <dd className="mt-1 text-[20px] leading-none font-medium tabular-nums">
+            {pending ? '—' : formatCount(stats.totalDownloads)}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[12px] tracking-wide text-[#6a6a6a] uppercase">Latest</dt>
+          <dd className="mt-1 truncate text-[20px] leading-none font-medium tabular-nums">
+            {pending ? '—' : (stats.latestTag ?? '—')}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[12px] tracking-wide text-[#6a6a6a] uppercase">Releases</dt>
+          <dd className="mt-1 text-[20px] leading-none font-medium tabular-nums">
+            {pending ? '—' : formatCount(stats.releaseCount)}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-[#6a6a6a]">
+        <span>Free and open source (MIT / Apache-2.0)</span>
+        <a href="#analytics" className="text-[#dcdcdc] underline underline-offset-4 hover:text-white">
+          See download analytics
+        </a>
       </p>
     </section>
   )

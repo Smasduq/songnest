@@ -4,6 +4,7 @@ import {
   classifyAsset,
   formatBytes,
   formatDate,
+  isDownloadableAsset,
   sortAssets,
   type OsKey,
   type Release,
@@ -27,7 +28,7 @@ const FILTERS: { key: OsKey | 'all'; label: string }[] = [
 function ReleaseCard({ release, filter }: { release: Release; filter: OsKey | 'all' }) {
   const [expanded, setExpanded] = useState(false)
   const assets = useMemo(() => {
-    const sorted = sortAssets(release.assets)
+    const sorted = sortAssets(release.assets.filter((a) => isDownloadableAsset(a.name)))
     if (filter === 'all') return sorted
     return sorted.filter((a) => {
       const os = classifyAsset(a.name).os
@@ -37,7 +38,9 @@ function ReleaseCard({ release, filter }: { release: Release; filter: OsKey | 'a
     })
   }, [release.assets, filter])
 
-  const totalDownloads = release.assets.reduce((sum, a) => sum + a.download_count, 0)
+  const totalDownloads = release.assets
+    .filter((a) => isDownloadableAsset(a.name))
+    .reduce((sum, a) => sum + a.download_count, 0)
 
   return (
     <article className="rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5">
@@ -69,7 +72,7 @@ function ReleaseCard({ release, filter }: { release: Release; filter: OsKey | 'a
       {release.body ? (
         <div className="mt-2">
           <p
-            className={`text-[13px] leading-relaxed whitespace-pre-line text-[#aeaeae] ${expanded ? '' : 'line-clamp-3'}`}
+            className={`text-[13px] leading-relaxed whitespace-pre-line wrap-anywhere text-[#aeaeae] ${expanded ? '' : 'line-clamp-3'}`}
           >
             {release.body.slice(0, 1200)}
           </p>
@@ -91,10 +94,10 @@ function ReleaseCard({ release, filter }: { release: Release; filter: OsKey | 'a
           {assets.map((a) => {
             const { label } = classifyAsset(a.name)
             return (
-              <li key={a.id}>
+              <li key={a.id} className="min-w-0">
                 <a
                   href={a.browser_download_url}
-                  className="flex items-center justify-between gap-2 rounded-[10px] border border-[#3a3a3a] px-3 py-2 text-[13px] transition-opacity hover:opacity-80"
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-[10px] border border-[#3a3a3a] px-3 py-2 text-[13px] transition-opacity hover:opacity-80"
                 >
                   <span className="min-w-0">
                     <span className="block truncate font-medium" title={a.name}>

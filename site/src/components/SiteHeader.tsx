@@ -13,7 +13,7 @@ export default function SiteHeader() {
             className="size-8 rounded-[10px] object-cover"
           />
           <span className="text-[17px] font-semibold tracking-tight">Songnest</span>
-          <span className="rounded-full border border-[#3a3a3a] px-2 py-0.5 text-[11px] text-[#aeaeae]">
+          <span className="hidden rounded-full border border-[#3a3a3a] px-2 py-0.5 text-[11px] text-[#aeaeae] sm:inline-block">
             release
           </span>
         </a>
@@ -33,19 +33,25 @@ export default function SiteHeader() {
           <a className="transition-opacity hover:text-white hover:opacity-90" href="#releases">
             All releases
           </a>
+          <a
+            className="hidden transition-opacity hover:text-white hover:opacity-90 lg:inline"
+            href="#analytics"
+          >
+            Analytics
+          </a>
         </nav>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <a
             href={REPO_URL}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-[#3a3a3a] px-3 py-1.5 text-[13px] text-[#dcdcdc] transition-opacity hover:opacity-80"
+            className="hidden rounded-full border border-[#3a3a3a] px-3 py-1.5 text-[13px] whitespace-nowrap text-[#dcdcdc] transition-opacity hover:opacity-80 sm:inline-block"
           >
             GitHub
           </a>
           <a
             href="#download"
-            className="rounded-full bg-[#fefefe] px-4 py-1.5 text-[13px] font-medium text-[#010002] transition-opacity hover:opacity-90"
+            className="rounded-full bg-[#fefefe] px-4 py-1.5 text-[13px] font-medium whitespace-nowrap text-[#010002] transition-opacity hover:opacity-90"
           >
             Get the app
           </a>

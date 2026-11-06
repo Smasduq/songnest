@@ -3,6 +3,8 @@ import { Apple, ArrowDownToLine, Monitor, Smartphone } from 'lucide-react'
 import {
   classifyAsset,
   formatBytes,
+  isDownloadableAsset,
+  isUpdateBundle,
   pickAndroidAsset,
   detectAndroidAbi,
   sortAssets,
@@ -61,7 +63,10 @@ function DownloadLatest({ latest, loading, error }: Props) {
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {GROUP_ORDER.map((group) => {
-            const assets = sortAssets(latest.assets).filter((a) => classifyAsset(a.name).os === group)
+            const assets = sortAssets(latest.assets).filter(
+              (a) =>
+                isDownloadableAsset(a.name) && !isUpdateBundle(a.name) && classifyAsset(a.name).os === group,
+            )
             if (assets.length === 0) return null
             const meta = GROUP_META[group]
             const Icon = meta.icon
@@ -74,7 +79,10 @@ function DownloadLatest({ latest, loading, error }: Props) {
               ? [recommended, ...assets.filter((a) => a.id !== recommended.id)]
               : assets
             return (
-              <article key={group} className="rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5">
+              <article
+                key={group}
+                className="min-w-0 rounded-[15px] border border-[#3a3a3a] bg-[#232323] p-5"
+              >
                 <div className="flex items-center gap-2">
                   <Icon className="size-5" aria-hidden="true" />
                   <h3 className="text-[15px] font-medium">{meta.title}</h3>
@@ -97,11 +105,11 @@ function DownloadLatest({ latest, loading, error }: Props) {
                           href={a.browser_download_url}
                           className={
                             isRec
-                              ? 'flex items-center justify-between gap-2 rounded-[10px] bg-[#fefefe] px-3 py-2 text-[13px] font-medium text-[#010002] transition-opacity hover:opacity-90'
-                              : 'flex items-center justify-between gap-2 rounded-[10px] border border-[#3a3a3a] px-3 py-2 text-[13px] transition-opacity hover:opacity-80'
+                              ? 'flex min-w-0 items-center justify-between gap-2 rounded-[10px] bg-[#fefefe] px-3 py-2 text-[13px] font-medium text-[#010002] transition-opacity hover:opacity-90'
+                              : 'flex min-w-0 items-center justify-between gap-2 rounded-[10px] border border-[#3a3a3a] px-3 py-2 text-[13px] transition-opacity hover:opacity-80'
                           }
                         >
-                          <span className="truncate" title={a.name}>
+                          <span className="min-w-0 truncate" title={a.name}>
                             {isRec ? `Recommended — ${a.name}` : a.name}
                           </span>
                           <span
