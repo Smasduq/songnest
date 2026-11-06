@@ -1965,7 +1965,11 @@ async fn youtube_match(
         let mut best: Option<(String, i32)> = None;
         for q in search_queries(t) {
             // A failed/timed-out query is not fatal: try the next one.
-            let Ok(hits) = ex.search_music(&q).await else {
+            // The embedded interpreter has no outer timeout of its own, so a
+            // stuck yt-dlp search must not hold the whole job hostage.
+            let Ok(Ok(hits)) =
+                tokio::time::timeout(Duration::from_secs(30), ex.search_music(&q)).await
+            else {
                 continue;
             };
             let entries: Vec<YtEntry> = hits
@@ -4317,7 +4321,12 @@ async fn fetch_stream(s: &AppState, id: &str) -> anyhow::Result<FetchedStream> {
         }
         #[cfg(feature = "songnestpy")]
         Backend::SongnestPy(ex) => {
-            let st = ex.resolve(id).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+            // yt-dlp on device can spend minutes trying player clients when
+            // YouTube is unhappy; cap it so a job fails instead of hanging.
+            let st = tokio::time::timeout(Duration::from_secs(90), ex.resolve(id))
+                .await
+                .map_err(|_| anyhow::anyhow!("songnestpy resolve timed out"))?
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             anyhow::ensure!(!st.url.is_empty(), "songnestpy returned empty url");
             Ok(FetchedStream {
                 url: st.url,
