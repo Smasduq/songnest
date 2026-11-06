@@ -12,9 +12,11 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
+    # Run from the repository root, not site/. The Vercel project's Root
+    # Directory is already "site", so running the CLI inside site/ made it
+    # resolve site/site and fail. Keeping the CLI at the root lets Vercel
+    # apply the project's Root Directory itself (verified against the
+    # project settings).
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
