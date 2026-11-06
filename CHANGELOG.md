@@ -5,6 +5,24 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+## v0.4.2 — 2026-11-06
+
+Streaming and downloads work again in the standalone Android app.
+
+### Fixes
+
+- Android search now resolves results as a flat list, the same way the
+  desktop build does. It used to fully extract every result, so a single
+  unavailable or age-restricted video aborted the whole search and both
+  streaming and downloads failed with no match. by @Smasduq
+- A phone search or stream resolve now times out instead of leaving a
+  download stuck at 0% forever. by @Smasduq
+- Diagnostics no longer offers the desktop browser cookie import on
+  Android, which cannot read a desktop browser's cookie store, and
+  explains how to paste or copy `cookies.txt` instead. by @Smasduq
+
+**Full Changelog**: https://github.com/Smasduq/songnest/compare/v0.4.1...v0.4.2
+
 ## v0.4.1 — 2026-10-29
 
 A small bug-fix release for downloads and Android navigation.
