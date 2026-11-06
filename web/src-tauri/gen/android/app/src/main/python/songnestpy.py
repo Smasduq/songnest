@@ -65,6 +65,11 @@ def search_json(query, limit=10):
         from yt_dlp import YoutubeDL
 
         params = _base_params()
+        # Flat search, exactly like the desktop `--flat-playlist`: resolve
+        # metadata only. A full extraction here tries every result and one
+        # unavailable/age-restricted video aborts the whole search, which
+        # looks like "no match" even when the right result is in the list.
+        params["extract_flat"] = "in_playlist"
         with YoutubeDL(params) as ydl:
             info = ydl.extract_info(
                 "ytsearch%d:%s" % (limit, query), download=False
@@ -94,6 +99,8 @@ def resolve_json(video_id):
 
         params = _base_params()
         params["format"] = "ba[ext=m4a]/ba"
+        # A watch URL can carry a &list= parameter; never extract a playlist.
+        params["noplaylist"] = True
         with YoutubeDL(params) as ydl:
             info = ydl.extract_info(
                 "https://youtube.com/watch?v=%s" % video_id, download=False
