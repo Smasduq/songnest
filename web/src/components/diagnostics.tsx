@@ -12,6 +12,7 @@ import {
   postDownloaderUpdate,
   type DownloaderStatus,
 } from "@/lib/api";
+import { isAndroidApp } from "@/lib/updates";
 
 const RUNTIME_OPTIONS = ["auto", "deno", "node", "bun", "quickjs"] as const;
 
@@ -21,6 +22,7 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
+  const isAndroid = isAndroidApp();
   const [status, setStatus] = useState<DownloaderStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,23 +272,24 @@ export function Diagnostics({ onToast }: { onToast: (msg: string) => void }) {
                 : cookiesPresent
                   ? "Installed — downloads and streams run authenticated."
                   : "Not installed — after a few anonymous fetches the source throttles and downloads stall."}{" "}
-              One tap pulls the YouTube login from this device's browser —
-              no copy-pasting needed. Make sure you're logged into YouTube
-              in the browser first.
+              {isAndroid
+                ? "Android can't read a desktop browser's cookie store. Export cookies.txt on a computer (browser extension, youtube.com open) and paste it below, or copy the file onto the phone."
+                : "One tap pulls the YouTube login from this device's browser — no copy-pasting needed. Make sure you're logged into YouTube in the browser first."}
             </p>
-            <Button
-              size="sm"
-              disabled={importBusy}
-              onClick={importCookies}
-              className="h-9 rounded-full px-4"
-            >
-              {importBusy ? "Importing… (may take a minute)" : "Import from this device's browser"}
-            </Button>
+            {!isAndroid && (
+              <Button
+                size="sm"
+                disabled={importBusy}
+                onClick={importCookies}
+                className="h-9 rounded-full px-4"
+              >
+                {importBusy ? "Importing… (may take a minute)" : "Import from this device's browser"}
+              </Button>
+            )}
             <p className="text-sm text-muted-foreground">
-              If the import can't read your browser, paste a Netscape-format
-              cookie export below instead (browser extension, youtube.com
-              open). Same file the desktop reads as cookies.txt; refresh it
-              every few weeks.
+              {isAndroid
+                ? "Paste a Netscape-format cookie export below. Same file the desktop reads as cookies.txt; refresh it every few weeks."
+                : "If the import can't read your browser, paste a Netscape-format cookie export below instead (browser extension, youtube.com open). Same file the desktop reads as cookies.txt; refresh it every few weeks."}
             </p>
             <textarea
               value={cookiesDraft}
