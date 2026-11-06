@@ -10,7 +10,7 @@ const FEATURES = [
   {
     icon: Play,
     title: 'Play your music',
-    body: 'Play songs you've saved. Songs you haven't saved yet stream automatically.',
+    body: 'Play songs you\'ve saved. Songs you haven\'t saved yet stream automatically.',
   },
   {
     icon: Heart,
@@ -30,7 +30,7 @@ const FEATURES = [
   {
     icon: ShieldCheck,
     title: 'Your files, your device',
-    body: 'Everything stays on your machine. Nothing is uploaded. You're in control.',
+    body: 'Everything stays on your machine. Nothing is uploaded. You\'re in control.',
   },
 ]
 

@@ -11,11 +11,11 @@ const FAQ = [
   },
   {
     q: 'Is there an iOS build?',
-    a: 'Not really. There's an unsigned build for sideloading/testing only — it's not on the App Store.',
+    a: 'Not really. There\'s an unsigned build for sideloading/testing only — it\'s not on the App Store.',
   },
   {
     q: 'Is Songnest free?',
-    a: 'Yes, 100% free and open source. Songnest doesn't host or distribute music — you're responsible for what you play.',
+    a: 'Yes, 100% free and open source. Songnest doesn\'t host or distribute music — you\'re responsible for what you play.',
   },
 ]
 
