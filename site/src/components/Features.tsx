@@ -10,7 +10,7 @@ const FEATURES = [
   {
     icon: Play,
     title: 'Play your music',
-    body: 'Play songs you\'ve saved. Songs you haven\'t saved yet stream automatically.',
+    body: "Play songs you've saved. Songs you haven't saved yet stream automatically.",
   },
   {
     icon: Heart,
@@ -25,12 +25,12 @@ const FEATURES = [
   {
     icon: MonitorSmartphone,
     title: 'PC and Android',
-    body: 'Full desktop app on Windows, Mac, and Linux. Android works as a connected client.',
+    body: 'Full desktop app on Windows, Mac, and Linux. Android works fine.',
   },
   {
     icon: ShieldCheck,
     title: 'Your files, your device',
-    body: 'Everything stays on your machine. Nothing is uploaded. You\'re in control.',
+    body: "Everything stays on your machine. Nothing is uploaded. You're in control.",
   },
 ]
 
@@ -41,7 +41,7 @@ function Features() {
         What Songnest does
       </h2>
       <p className="mt-2 max-w-2xl text-[15px] text-[#aeaeae]">
-        All of this works right now. Local file import and volume normalization are coming soon.
+        What works today. Local-file import and loudness normalization are planned.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {FEATURES.map((f) => (
