@@ -5,6 +5,17 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+### Fixes
+
+- The on-device server now reserves its port before the slower startup
+  work and retries briefly if a previous process still holds it, so a
+  slow start or an in-place update no longer leaves the API down.
+  by @Smasduq
+- Android no longer stays on the offline screen when the on-device API
+  starts after the UI has loaded. The first health check and library load
+  are retried with backoff, which mostly affects slower 32-bit phones.
+  by @Smasduq
+
 ## v0.4.2 — 2026-11-06
 
 Streaming and downloads work again in the standalone Android app.

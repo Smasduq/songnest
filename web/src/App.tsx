@@ -295,23 +295,67 @@ export default function App() {
     void initBackgroundPlayer();
   }, []);
 
+  // The on-device API runs in a background thread and can finish binding
+  // after the WebView has painted — noticeably on slower 32-bit phones.
+  // Retry the boot instead of leaving the UI stuck on "offline" until a
+  // manual reload. Once /api/health answers, reload the library so the
+  // first failed attempt is repaired too.
   useEffect(() => {
-    refreshLibrary().finally(() => setLoading(false));
-    fetchSuggestions()
-      .then(setSuggestions)
-      .catch(() => setSuggestions([]));
-    refreshLikes();
-    // self-heal rows stored before full artist credits shipped, then
-    // reload whatever changed so cards + now playing show every artist
-    refreshArtists()
-      .then(({ tracks_updated, likes_updated }) => {
-        if (tracks_updated > 0) refreshLibrary();
-        if (likes_updated > 0) refreshLikes();
-      })
-      .catch(() => {});
-    fetchHealth()
-      .then(setHealth)
-      .catch(() => setHealth(null));
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempts = 0;
+
+    const load = () => {
+      refreshLibrary().finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      fetchSuggestions()
+        .then((next) => {
+          if (!cancelled) setSuggestions(next);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        });
+      refreshLikes();
+      // self-heal rows stored before full artist credits shipped, then
+      // reload whatever changed so cards + now playing show every artist
+      refreshArtists()
+        .then(({ tracks_updated, likes_updated }) => {
+          if (cancelled) return;
+          if (tracks_updated > 0) refreshLibrary();
+          if (likes_updated > 0) refreshLikes();
+        })
+        .catch(() => {});
+    };
+
+    const boot = async () => {
+      try {
+        const next = await fetchHealth();
+        if (cancelled) return;
+        setHealth(next);
+        // Mount already ran `load`; a retry means those calls failed
+        // before the server was listening, so run them again.
+        if (attempts > 0) load();
+      } catch {
+        if (cancelled) return;
+        setHealth(null);
+        setLoading(false);
+        // 1s, 2s, 4s, then every 8s for about a minute. The offline
+        // screen's Retry action stays available after that.
+        if (attempts >= 9) return;
+        const delay = Math.min(1000 * 2 ** attempts, 8000);
+        attempts += 1;
+        timer = window.setTimeout(() => void boot(), delay);
+      }
+    };
+
+    load();
+    void boot();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [refreshLibrary, refreshLikes]);
 
   // downloader status for the health banner (mount + every 60s)
