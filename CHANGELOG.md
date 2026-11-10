@@ -5,16 +5,28 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+## v0.4.3 — 2026-11-10
+
+A small release that makes the phone app recover when its on-device API
+starts late.
+
 ### Fixes
 
-- The on-device server now reserves its port before the slower startup
-  work and retries briefly if a previous process still holds it, so a
-  slow start or an in-place update no longer leaves the API down.
-  by @Smasduq
 - Android no longer stays on the offline screen when the on-device API
-  starts after the UI has loaded. The first health check and library load
-  are retried with backoff, which mostly affects slower 32-bit phones.
-  by @Smasduq
+  starts after the UI has loaded. The server now reserves its port before
+  the slower startup work and retries briefly if a previous process still
+  holds it, and the app retries the first health check and library load
+  with backoff instead of giving up after one attempt. This mostly affects
+  slower 32-bit phones and in-place updates. by @Smasduq in #6
+
+### Improvements
+
+- The download site now fits phones without horizontal panning, and adds
+  an analytics page with cumulative download totals, platform and release
+  breakdowns, and top files. Download counts exclude signatures and
+  updater metadata, and the unused Arch Linux install card is gone. by @Smasduq
+
+**Full Changelog**: https://github.com/Smasduq/songnest/compare/v0.4.2...v0.4.3
 
 ## v0.4.2 — 2026-11-06
 
