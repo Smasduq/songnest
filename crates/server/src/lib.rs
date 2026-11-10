@@ -3845,7 +3845,40 @@ pub async fn run(data_dir: Option<String>, backend: Backend, port: u16) -> anyho
     serve(backend, port).await
 }
 
+/// Bind the API port, retrying briefly while a previous process releases it.
+/// An in-place Android update can overlap the old and new server, and the
+/// old process may take a moment to die on slower phones.
+async fn bind_api(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
+    let addr = format!("0.0.0.0:{port}");
+    let mut wait = std::time::Duration::from_millis(100);
+    let mut attempt = 0;
+    loop {
+        match tokio::net::TcpListener::bind(&addr).await {
+            Ok(listener) => {
+                // LAN binding so phones on the same WiFi can reach the API/QrReader
+                // (localhost-only would refuse them). Loopback still works locally.
+                eprintln!("songnest listening on {addr}");
+                return Ok(listener);
+            }
+            Err(e) if attempt < 9 && e.kind() == std::io::ErrorKind::AddrInUse => {
+                eprintln!(
+                    "songnest: {addr} busy ({e}); retrying in {}ms",
+                    wait.as_millis()
+                );
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(std::time::Duration::from_secs(2));
+                attempt += 1;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
+
 async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
+    // Reserve the port before the slower startup work: the WebView can start
+    // fetching health before the downloader probe and workers are ready, and
+    // a bound listener lets that request wait instead of failing outright.
+    let listener = bind_api(port).await?;
     let conn = rusqlite::Connection::open("library.db")?;
     ensure_schema(&conn)?;
     let db: Db = Arc::new(Mutex::new(conn));
@@ -3918,10 +3951,6 @@ async fn serve(backend: Backend, port: u16) -> anyhow::Result<()> {
         .route("/api/lyrics/offset", post(api_lyrics_offset))
         .layer(CorsLayer::very_permissive())
         .with_state(state);
-    // LAN binding so phones on the same WiFi can reach the API/QrReader
-    // (localhost-only would refuse them). Loopback still works locally.
-    eprintln!("songnest listening on 0.0.0.0:{port}");
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
