@@ -74,7 +74,7 @@ export function EmptyState({
       )}
       {detail !== undefined && (
         <p
-          className="max-w-sm text-pretty tabular-nums text-muted-foreground/80"
+          className="max-w-sm break-words text-pretty tabular-nums text-muted-foreground/80"
           style={{ fontSize: 13, fontWeight: 400 }}
         >
           {detail}
@@ -97,17 +97,22 @@ export function EmptyState({
 export function OfflineState({
   detail,
   onRetry,
+  title,
+  body,
   className,
 }: {
   detail?: string;
   onRetry?: () => void;
+  /** Override the default "offline" copy when the cause is known. */
+  title?: string;
+  body?: string;
   className?: string;
 }) {
   return (
     <EmptyState
       icon={WifiOff}
-      title="Bro, you are offline"
-      body="Check your connection and try again."
+      title={title ?? "Bro, you are offline"}
+      body={body ?? "Check your connection and try again."}
       detail={detail}
       actionLabel={onRetry !== undefined ? "Retry" : undefined}
       onAction={onRetry}

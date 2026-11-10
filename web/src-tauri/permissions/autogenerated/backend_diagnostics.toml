@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-backend-diagnostics"
+description = "Enables the backend_diagnostics command without any pre-configured scope."
+commands.allow = ["backend_diagnostics"]
+
+[[permission]]
+identifier = "deny-backend-diagnostics"
+description = "Denies the backend_diagnostics command without any pre-configured scope."
+commands.deny = ["backend_diagnostics"]

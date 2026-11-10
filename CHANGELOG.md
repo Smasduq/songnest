@@ -5,6 +5,20 @@ Releases are cut from tags like `v0.2.0`.
 
 ## Unreleased
 
+### Fixes
+
+- Windows (and every desktop platform) now looks for the bundled backend
+  next to the running app as well as in the resource directory, and never
+  falls back to the build machine's `target/` path. Release builds no
+  longer embed that path, and a missing backend can no longer make the app
+  spawn itself. The backend is restarted if it exits, and a launch failure
+  now shows the searched paths on the offline screen instead of a silent
+  "offline", with diagnostics in `songnest.log`/`backend.log` in the app
+  data folder.
+- `npm run desktop:build` works on Windows: the sidecar is built and copied
+  by a small Node script instead of a Unix-only `cp`. The release workflow
+  also fails if the Windows installer is missing `bin/songnest.exe`.
+
 ## v0.4.3 — 2026-11-10
 
 A small release that makes the phone app recover when its on-device API
