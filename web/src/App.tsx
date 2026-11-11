@@ -40,11 +40,13 @@ import { MobileNav } from "@/components/mobile-nav";
 import { PlayerBar } from "@/components/player-bar";
 import { CustomScroller } from "@/components/custom-scroller";
 import { EmptyState, OfflineState } from "@/components/empty-state";
+import Loader from "@/components/ui/loader-15";
 import { Disc3, Heart, Library, SearchX } from "lucide-react";
 import { SongCard, type DlState, type SwipeLeftKind } from "@/components/song-card";
 import { useCurrentTrack, usePlayer } from "@/player/store";
 import { initBackgroundPlayer } from "@/native/background-player";
 import { registerAndroidBackHandler } from "@/native/android-back";
+import { isAndroidApp } from "@/lib/updates";
 import {
   AlreadyInLibraryError,
   deleteTrack,
@@ -1127,6 +1129,21 @@ export default function App() {
     (library.some((t) => t.id === activeTrack.id) ||
       (activeDz !== null && (libraryDz.has(activeDz) || downloadedDz.has(activeDz))));
 
+  if (loading) {
+    return (
+      <main className="relative grid h-dvh w-full place-items-center overflow-hidden bg-background">
+        <Loader />
+        {isAndroidApp() && (
+          <div className="absolute inset-x-0 bottom-6 pb-[env(safe-area-inset-bottom)] text-center">
+            <span className="text-sm font-semibold tracking-[0.12em] text-muted-foreground">
+              Songnest
+            </span>
+          </div>
+        )}
+      </main>
+    );
+  }
+
   if (isAuthRoute) {
     return (
       <MotionConfig reducedMotion="user">
@@ -1342,12 +1359,7 @@ return (
             >
           {page === "home" && (
             <section className="space-y-3 md:mx-4">
-              {loading ? (
-                <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
-                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
-                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
-                </div>
-              ) : suggestions.length === 0 ? (
+              {suggestions.length === 0 ? (
                 loadError !== null || health === null ? (
                   <OfflineState
                     detail={loadError ?? undefined}
@@ -1393,12 +1405,7 @@ return (
 
           {page === "library" && (
             <section className="space-y-3 md:mx-4">
-              {loading ? (
-                <div className="space-y-2 motion-reduce:animate-none" aria-hidden>
-                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
-                  <div className="h-16 animate-pulse rounded-[15px] bg-muted" />
-                </div>
-              ) : loadError !== null ? (
+              {loadError !== null ? (
                 <OfflineState
                   detail={loadError}
                   onRetry={() => {
