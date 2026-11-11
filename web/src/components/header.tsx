@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
 import { Search, Settings, X } from "lucide-react";
@@ -25,7 +25,7 @@ export function loadTheme(): Theme {
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     function apply() {
       const dark = theme === "dark" || (theme === "system" && mq.matches);
