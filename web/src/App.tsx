@@ -46,6 +46,11 @@ import { useCurrentTrack, usePlayer } from "@/player/store";
 import { initBackgroundPlayer } from "@/native/background-player";
 import { registerAndroidBackHandler } from "@/native/android-back";
 import {
+  fetchBackendIssue,
+  subscribeBackendIssue,
+  type BackendIssue,
+} from "@/lib/backend";
+import {
   AlreadyInLibraryError,
   deleteTrack,
   dzOf,
@@ -156,6 +161,7 @@ export default function App() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
+  const [backendIssue, setBackendIssue] = useState<BackendIssue | null>(null);
   const { theme, setTheme } = useTheme();
   const mainRef = useRef<HTMLElement>(null);
   const edgeRef = useRef<{
@@ -295,6 +301,27 @@ export default function App() {
     void initBackgroundPlayer();
   }, []);
 
+  // Desktop: explain a failed sidecar launch instead of a bare "offline".
+  // The failure usually happens before the WebView mounts, so read the
+  // recorded error first and then listen for later restarts.
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    void fetchBackendIssue().then((issue) => {
+      if (alive && issue !== null) setBackendIssue(issue);
+    });
+    void subscribeBackendIssue((issue) => {
+      if (alive) setBackendIssue(issue);
+    }).then((stop) => {
+      if (alive) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
+
   // The on-device API runs in a background thread and can finish binding
   // after the WebView has painted — noticeably on slower 32-bit phones.
   // Retry the boot instead of leaving the UI stuck on "offline" until a
@@ -333,6 +360,8 @@ export default function App() {
         const next = await fetchHealth();
         if (cancelled) return;
         setHealth(next);
+        // The backend answered, so any earlier launch failure is stale.
+        setBackendIssue(null);
         // Mount already ran `load`; a retry means those calls failed
         // before the server was listening, so run them again.
         if (attempts > 0) load();
@@ -1127,6 +1156,17 @@ export default function App() {
     (library.some((t) => t.id === activeTrack.id) ||
       (activeDz !== null && (libraryDz.has(activeDz) || downloadedDz.has(activeDz))));
 
+  // A failed desktop sidecar launch is a different problem from being
+  // offline, and the fix is different (reinstall/update vs. reconnect).
+  const backendOffline =
+    backendIssue === null
+      ? null
+      : {
+          title: "The music service didn't start",
+          body: "Songnest's local backend isn't running. Reinstall the latest version, then retry.",
+          detail: `${backendIssue.message} ${backendIssue.detail}`,
+        };
+
   if (isAuthRoute) {
     return (
       <MotionConfig reducedMotion="user">
@@ -1284,10 +1324,13 @@ return (
               ) : hits.length === 0 ? (
                 searchFailed || health === null ? (
                   <OfflineState
+                    title={backendOffline?.title}
+                    body={backendOffline?.body}
                     detail={
-                      query.trim() === ""
+                      backendOffline?.detail ??
+                      (query.trim() === ""
                         ? undefined
-                        : `No reply for “${query.trim()}”.`
+                        : `No reply for “${query.trim()}”.`)
                     }
                     onRetry={() => runSearch()}
                   />
@@ -1350,7 +1393,9 @@ return (
               ) : suggestions.length === 0 ? (
                 loadError !== null || health === null ? (
                   <OfflineState
-                    detail={loadError ?? undefined}
+                    title={backendOffline?.title}
+                    body={backendOffline?.body}
+                    detail={backendOffline?.detail ?? loadError ?? undefined}
                     onRetry={() => {
                       refreshLibrary();
                       fetchHealth()
@@ -1400,7 +1445,9 @@ return (
                 </div>
               ) : loadError !== null ? (
                 <OfflineState
-                  detail={loadError}
+                  title={backendOffline?.title}
+                  body={backendOffline?.body}
+                  detail={backendOffline?.detail ?? loadError}
                   onRetry={() => {
                     refreshLibrary();
                     fetchHealth()

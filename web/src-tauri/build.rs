@@ -9,6 +9,7 @@ fn main() {
             "secret_set",
             "secret_get",
             "secret_delete",
+            "backend_diagnostics",
             "get_lyrics",
             "set_lyric_offset",
             "oauth_loopback_begin",

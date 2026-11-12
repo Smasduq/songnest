@@ -62,17 +62,8 @@ jobs:
         run: npm ci
 
       - name: build sidecar (songnest)
-        shell: bash
-        run: |
-          cargo build --release -p songnest
-          mkdir -p web/src-tauri/bin
-          if [ -f target/release/songnest.exe ]; then
-            cp target/release/songnest.exe web/src-tauri/bin/songnest.exe
-            cp target/release/songnest.exe web/src-tauri/bin/songnest
-          else
-            cp target/release/songnest web/src-tauri/bin/songnest
-          fi
-          ls -la web/src-tauri/bin
+        working-directory: web
+        run: npm run desktop:sidecar
 
       - uses: tauri-apps/tauri-action@v1
         env:
@@ -90,6 +81,27 @@ jobs:
           prerelease: false
           retryAttempts: 2
           args: ${{ matrix.args }}
+
+      # The app spawns bin/songnest.exe; an installer without it opens to a
+      # permanent "offline" screen. Fail the release instead of shipping that.
+      - name: verify the Windows installer ships the backend
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $root = "web/src-tauri/target/release/bundle"
+          if (-not (Test-Path $root)) { $root = "target/release/bundle" }
+          $installer = Get-ChildItem $root -Recurse -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "no NSIS installer found under $root" }
+          $seven = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $seven)) {
+            Write-Warning "7-Zip not found; cannot inspect $($installer.FullName)"
+            exit 0
+          }
+          $listing = & $seven l $installer.FullName
+          if ($listing -notmatch 'bin[\\/]songnest\.exe') {
+            throw "$($installer.Name) is missing bin/songnest.exe"
+          }
+          Write-Host "verified: $($installer.Name) ships bin/songnest.exe"
 
   publish-android:
     permissions:
